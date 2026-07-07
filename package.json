@@ -1,0 +1,44 @@
+{
+  "name": "markov-stock-scanner",
+  "version": "1.0.0",
+  "description": "Electron desktop scanner using discrete-time Markov chains for daily stock analysis (PSI, IBEX35, S&P500)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "electron-builder install-app-deps && node scripts/fix-electron-path.js",
+    "dist": "electron-builder"
+  },
+  "keywords": [
+    "electron",
+    "markov",
+    "quant",
+    "stocks",
+    "scanner"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.4.0",
+    "p-limit": "^3.1.0",
+    "yahoo-finance2": "^2.13.3"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.markov.scanner",
+    "productName": "Markov Stock Scanner",
+    "mac": {
+      "category": "public.app-category.finance"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}

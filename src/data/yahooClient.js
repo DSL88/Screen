@@ -1,0 +1,111 @@
+let yahooFinancePromise = null;
+
+function loadYahoo() {
+  if (!yahooFinancePromise) {
+    yahooFinancePromise = import('yahoo-finance2').then(mod => {
+      const yf = mod.default || mod;
+      try {
+        if (typeof yf.suppressNotices === 'function') {
+          yf.suppressNotices(['yahooSurvey', 'ripHistorical']);
+        }
+      } catch (_) { }
+      return yf;
+    });
+  }
+  return yahooFinancePromise;
+}
+
+function sleep(ms) {
+  return new Promise(res => setTimeout(res, ms));
+}
+
+function isValidCandle(c) {
+  return c && Number.isFinite(c.open) && Number.isFinite(c.high)
+    && Number.isFinite(c.low) && Number.isFinite(c.close)
+    && Number.isFinite(c.volume);
+}
+
+async function fetchWithRetry(ticker, attempts = 3) {
+  const yahooFinance = await loadYahoo();
+  const period1 = new Date();
+  period1.setDate(period1.getDate() - 365);
+  const period2 = new Date();
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const result = await yahooFinance.historical(ticker, {
+        period1,
+        period2,
+        interval: '1d',
+        includeAdjustedClose: true
+      });
+      if (!Array.isArray(result) || result.length < 200) {
+        throw new Error(`Insufficient candles for ${ticker}: ${result?.length || 0}`);
+      }
+      const candles = result
+        .filter(isValidCandle)
+        .map(r => ({
+          ticker,
+          date: r.date instanceof Date ? r.date.toISOString().slice(0, 10) : String(r.date).slice(0, 10),
+          open: r.open,
+          high: r.high,
+          low: r.low,
+          close: r.adjustedClose ?? r.close,
+          volume: r.volume
+        }));
+      if (candles.length < 200) {
+        throw new Error(`Not enough valid candles for ${ticker}: ${candles.length}`);
+      }
+      return candles;
+    } catch (err) {
+      const code = err && err.code;
+      const isRateLimit = code === 429 || /rate|429|too many/i.test(String(err.message || ''));
+      if (i === attempts - 1) {
+        if (isRateLimit) {
+          throw new Error('Yahoo Finance Rate Limit (429): Demasiados pedidos. Por favor, aguarde alguns minutos.');
+        }
+        throw err;
+      }
+      const backoff = isRateLimit ? (2000 * Math.pow(2, i)) : (500 * Math.pow(2, i));
+      const jitter = Math.floor(Math.random() * 250);
+      await sleep(backoff + jitter);
+    }
+  }
+}
+
+async function searchTickers(query, limit = 8) {
+  if (!query || typeof query !== 'string' || query.trim().length < 1) return [];
+  const yahooFinance = await loadYahoo();
+  const q = query.trim();
+  try {
+    const result = await yahooFinance.search(q, {
+      quotesCount: limit,
+      newsCount: 0,
+      listsCount: 0,
+      quotesQueryId: undefined
+    });
+    const quotes = (result && result.quotes) || [];
+    const out = [];
+    const seen = new Set();
+    for (const q of quotes) {
+      const symbol = q.symbol;
+      if (!symbol) continue;
+      if (!/^[A-Z0-9.\-^=]{1,20}$/.test(symbol)) continue;
+      const type = q.quoteType || '';
+      if (type && !['EQUITY', 'ETF', 'INDEX', 'MUTUALFUND'].includes(type)) continue;
+      if (seen.has(symbol)) continue;
+      seen.add(symbol);
+      out.push({
+        ticker: symbol,
+        name: q.shortname || q.longname || symbol,
+        exchange: q.exchange || q.exchDisp || '',
+        type
+      });
+      if (out.length >= limit) break;
+    }
+    return out;
+  } catch (_err) {
+    return [];
+  }
+}
+
+module.exports = { fetchWithRetry, searchTickers };

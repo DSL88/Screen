@@ -1,0 +1,198 @@
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const path = require('path');
+const Database = require('./src/db/database');
+const Scanner = require('./src/engine/scanner');
+const yahooClient = require('./src/data/yahooClient');
+const tickerLists = require('./src/data/tickerLists');
+
+let mainWindow = null;
+let db = null;
+let scanner = null;
+
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) {
+  app.quit();
+}
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 1100,
+    minHeight: 700,
+    backgroundColor: '#0d0f12',
+    title: 'Markov Stock Scanner',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      devTools: true
+    }
+  });
+
+  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+
+  const template = [
+    ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
+    {
+      label: 'File',
+      submenu: [
+        process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    }
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+app.whenReady().then(async () => {
+  try {
+    db = new Database(app.getPath('userData'));
+    await db.init();
+    scanner = new Scanner(db);
+
+    ipcMain.handle('scan:start', async (_event, payload) => {
+      if (!mainWindow) return { ok: false, error: 'window-unavailable' };
+      const runId = `run_${Date.now()}`;
+      const tickers = Array.isArray(payload?.tickers) ? payload.tickers : [];
+      scanner.run({ tickers }, runId, {
+        onProgress: (p) => mainWindow.webContents.send('scan:progress', p),
+        onRow: (r) => mainWindow.webContents.send('scan:row', r),
+        onError: (e) => mainWindow.webContents.send('scan:error', e),
+        onDone: (d) => mainWindow.webContents.send('scan:done', d)
+      });
+      return { ok: true, runId };
+    });
+
+    ipcMain.handle('scan:cancel', async (_event, payload) => {
+      if (scanner) scanner.cancel(payload?.runId);
+      return { ok: true };
+    });
+
+    ipcMain.handle('ticker:search', async (_event, payload) => {
+      const query = (payload && payload.query) || '';
+      const q = String(query || '').trim();
+
+      let indexMatches = [];
+      if (q.length > 0) {
+        const found = tickerLists.searchWorldIndices(q);
+        for (const idx of found) {
+          const localList = tickerLists.INDICES[idx.id] || null;
+          indexMatches.push({
+            id: idx.id,
+            name: idx.name,
+            flag: idx.flag,
+            country: idx.country,
+            count: localList ? localList.length : null,
+            hasComponents: localList != null && localList.length > 0,
+            isIndex: true
+          });
+        }
+      }
+
+      const tickerResults = await yahooClient.searchTickers(query, 8);
+      return { ok: true, indices: indexMatches, tickers: tickerResults };
+    });
+
+    ipcMain.handle('ticker:add', async (_event, payload) => {
+      if (!payload || !payload.ticker) return { ok: false, error: 'missing-ticker' };
+      db.addCustomTicker({
+        ticker: payload.ticker,
+        name: payload.name || '',
+        exchange: payload.exchange || '',
+        type: payload.type || ''
+      });
+      return { ok: true };
+    });
+
+    ipcMain.handle('ticker:remove', async (_event, payload) => {
+      if (!payload || !payload.ticker) return { ok: false, error: 'missing-ticker' };
+      db.removeCustomTicker(payload.ticker);
+      return { ok: true };
+    });
+
+    ipcMain.handle('ticker:list', async () => {
+      const custom = db.getCustomTickers();
+      return {
+        ok: true,
+        custom,
+        seeds: tickerLists.INDICES
+      };
+    });
+
+    ipcMain.handle('ticker:clear', async () => {
+      db.clearCustomTickers();
+      return { ok: true };
+    });
+
+    ipcMain.handle('params:get', async () => {
+      const params = db.getAdaptiveParams();
+      return { ok: true, params };
+    });
+
+    ipcMain.handle('params:set', async (_event, payload) => {
+      if (!payload || !payload.key) return { ok: false, error: 'missing-key' };
+      db.setAdaptiveParam(payload.key, payload.value);
+      return { ok: true };
+    });
+
+    ipcMain.handle('scan:backtest', async (_event, payload) => {
+      const tickers = (payload && payload.tickers) || [];
+      const startDate = (payload && payload.startDate) || '';
+      const endDate = (payload && payload.endDate) || '';
+      if (!scanner) return { ok: false, error: 'scanner-not-initialized' };
+      try {
+        const runId = Math.random().toString(36).substring(7);
+        const results = await scanner.runBacktest({ tickers, startDate, endDate }, runId);
+        return { ok: true, results };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    createWindow();
+  } catch (err) {
+    console.error('Fatal init error:', err);
+    app.quit();
+  }
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
+
+app.on('before-quit', () => {
+  if (db) db.close();
+});
