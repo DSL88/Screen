@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+  <title>Markov Stock Scanner</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <div>
+          <div class="brand-title">Markov Scanner</div>
+          <div class="brand-sub">Discrete-Time Markov Model</div>
+        </div>
+      </div>
+
+      <div class="panel search-panel">
+        <button class="search-trigger" id="btn-open-search">
+          <span class="search-trigger-icon"></span>
+          <span class="search-trigger-text">Pesquisar ticker ou índice...</span>
+          <span class="search-trigger-kbd">⌘K</span>
+        </button>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Atalhos de Mercado</div>
+        <div class="seed-grid">
+          <button class="seed-btn" data-seed="PSI">
+            <span class="flag">PT</span>
+            <span class="seed-name">PSI</span>
+            <span class="seed-count" id="seed-count-PSI">10</span>
+          </button>
+          <button class="seed-btn" data-seed="IBEX35">
+            <span class="flag">ES</span>
+            <span class="seed-name">IBEX35</span>
+            <span class="seed-count" id="seed-count-IBEX35">25</span>
+          </button>
+          <button class="seed-btn" data-seed="SP500">
+            <span class="flag">US</span>
+            <span class="seed-name">S&amp;P 500</span>
+            <span class="seed-count" id="seed-count-SP500">50</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="panel watchlist-panel">
+        <div class="panel-title">
+          <span>Watchlist</span>
+          <span class="watchlist-count" id="watchlist-count">0</span>
+          <button class="link-btn" id="btn-clear-all">Limpar tudo</button>
+        </div>
+        <div class="watchlist" id="watchlist">
+          <div class="watchlist-empty" id="watchlist-empty">
+            Procura um ticker acima ou usa os atalhos de mercado.
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Parâmetros</div>
+        <div class="param">
+          <span>Edge mínimo (%)</span>
+          <input type="number" id="input-edge" class="param-input" min="5" max="50" step="0.5" value="15.0" />
+        </div>
+        <div class="param">
+          <span>Janela Markov (d)</span>
+          <input type="number" id="input-window" class="param-input" min="50" max="252" step="1" value="150" />
+        </div>
+        <div class="param">
+          <span>Horizonte (d)</span>
+          <input type="number" id="input-horizon" class="param-input" min="1" max="20" step="1" value="5" />
+        </div>
+        <div class="param">
+          <span>Volume Mult (x)</span>
+          <input type="number" id="input-volume" class="param-input" min="0.5" max="5" step="0.1" value="1.2" />
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="stat">
+          <div class="stat-num" id="stat-open">0</div>
+          <div class="stat-lbl">Trades abertos</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num" id="stat-closed">0</div>
+          <div class="stat-lbl">Trades fechados</div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-info">
+          <h1>Daily Scanner</h1>
+          <p id="status-line">Pronto. Adiciona tickers à watchlist e clica em iniciar.</p>
+        </div>
+        <div class="topbar-actions">
+          <div class="progress" id="progress-wrap" hidden>
+            <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+            <div class="progress-text" id="progress-text">0 / 0</div>
+          </div>
+          <button class="btn-secondary" id="btn-open-backtest">
+            <span>Simulação Histórica</span>
+          </button>
+          <button class="btn-primary" id="btn-scan">
+            <span class="btn-label">Iniciar Análise Diária</span>
+            <span class="spinner" id="spinner" hidden></span>
+          </button>
+        </div>
+      </header>
+
+      <section class="results">
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th class="col-idx">#</th>
+              <th class="col-ticker">Ticker</th>
+              <th class="col-name">Nome</th>
+              <th class="col-dir">Direção</th>
+              <th class="col-num">Edge</th>
+              <th class="col-num">P(Stay)</th>
+              <th class="col-vol">Volume Válido</th>
+              <th class="col-num">Preço</th>
+              <th class="col-num">Stop (1.5×ATR)</th>
+              <th class="col-num">TP (+2.5%)</th>
+            </tr>
+          </thead>
+          <tbody id="results-body">
+            <tr class="empty">
+              <td colspan="10">Aguardando execução do scanner...</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <footer class="footer">
+        <span id="footer-summary">0 sinais emitidos · 0 tickers processados</span>
+        <span class="footer-meta">Markov 9×9 · BB(30,2) · RSI(21) · ADX(14) · 252 d</span>
+      </footer>
+    </main>
+  </div>
+
+  <div class="modal-backdrop modal-backdrop-search" id="modal-search" hidden>
+    <div class="modal modal-search" role="dialog" aria-modal="true" aria-labelledby="modal-search-title">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-search-title">Pesquisar</div>
+        <button class="modal-close" id="modal-search-close" aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-search-input-wrap">
+        <span class="search-trigger-icon search-trigger-icon-lg"></span>
+        <input
+          type="text"
+          id="modal-search-input"
+          class="modal-search-input"
+          placeholder="Ticker (AAPL, GALP.LS) ou país/índice (Portugal, DAX, FTSE)..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <span class="modal-search-hint" id="modal-search-hint"></span>
+      </div>
+      <div class="modal-body modal-body-search">
+        <div class="modal-search-results" id="modal-search-results">
+          <div class="modal-search-empty">
+            <div class="modal-search-empty-icon">🔍</div>
+            <div class="modal-search-empty-title">Começa a escrever para pesquisar</div>
+            <div class="modal-search-empty-text">
+              Procura por <strong>tickers</strong> (AAPL, NVDA, GALP.LS) ou por <strong>índices/países</strong> (Portugal, Alemanha, FTSE, DAX, Nikkei).
+            </div>
+            <div class="modal-search-empty-actions">
+              <button class="link-btn" id="btn-open-add-from-search">+ Adicionar manualmente</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-add" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-title">Adicionar Ticker</div>
+        <button class="modal-close" id="modal-close" aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="modal-ticker">Símbolo</label>
+          <div class="form-input-wrap">
+            <input
+              type="text"
+              id="modal-ticker"
+              class="form-input"
+              placeholder="AAPL, EDP.LIS, ^GSPC..."
+              autocomplete="off"
+              spellcheck="false"
+              maxlength="15"
+            />
+            <span class="form-hint" id="modal-ticker-hint"></span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="modal-name">Nome (opcional)</label>
+          <input
+            type="text"
+            id="modal-name"
+            class="form-input"
+            placeholder="Apple Inc."
+          />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Sugestões Yahoo</label>
+          <div class="modal-results" id="modal-results">
+            <div class="modal-result-empty">Escreve um símbolo para ver sugestões.</div>
+          </div>
+        </div>
+        <div class="form-error" id="modal-error" hidden></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="modal-cancel">Cancelar</button>
+        <button class="btn-primary" id="modal-submit">Adicionar à watchlist</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-backtest" hidden>
+    <div class="modal modal-backtest-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-backtest-title">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-backtest-title">Simulação Histórica (Backtest)</div>
+        <button class="modal-close" id="modal-backtest-close" aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-intro-text">Simula a estratégia Markov Walk-Forward nos ativos da Watchlist.</p>
+        <div class="form-row-group">
+          <div class="form-group">
+            <label class="form-label" for="backtest-start-date">Data de Início</label>
+            <input type="date" id="backtest-start-date" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="backtest-end-date">Data de Fim</label>
+            <input type="date" id="backtest-end-date" class="form-input" />
+          </div>
+        </div>
+        <div class="backtest-run-wrap">
+          <button class="btn-primary" id="btn-run-backtest">Executar Backtest</button>
+          <span class="backtest-loading-indicator" id="backtest-loading" hidden>A simular... isto pode demorar alguns segundos.</span>
+        </div>
+        
+        <div class="backtest-results-panel" id="backtest-results-panel" hidden>
+          <div class="backtest-metrics-grid">
+            <div class="metric-card">
+              <span class="metric-val" id="metric-trades">—</span>
+              <span class="metric-lbl">Total Trades</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-val" id="metric-winrate">—</span>
+              <span class="metric-lbl">Win Rate</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-val" id="metric-netreturn">—</span>
+              <span class="metric-lbl">Retorno Líq</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-val" id="metric-sharpe">—</span>
+              <span class="metric-lbl">Rácio Sharpe</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-val" id="metric-drawdown">—</span>
+              <span class="metric-lbl">Max DD</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-val" id="metric-expectancy">—</span>
+              <span class="metric-lbl">Esperança</span>
+            </div>
+          </div>
+          
+          <div class="backtest-trades-list-wrap">
+            <div class="panel-title" style="margin-top: 12px; margin-bottom: 6px;">Lista de Trades Simulados</div>
+            <div class="backtest-table-container">
+              <table class="backtest-table">
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Direção</th>
+                    <th>Entrada</th>
+                    <th>Saída</th>
+                    <th>Preço In</th>
+                    <th>Preço Out</th>
+                    <th>Rend %</th>
+                    <th>Motivo</th>
+                  </tr>
+                </thead>
+                <tbody id="backtest-trades-body">
+                  <tr>
+                    <td colspan="8" class="text-center">Nenhum sinal gerado no período.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        
+        <div class="form-error" id="backtest-error" hidden></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
