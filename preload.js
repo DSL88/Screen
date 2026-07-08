@@ -10,7 +10,7 @@ const ALLOWED_EVENTS = new Set([
 contextBridge.exposeInMainWorld('api', {
   startScan: (tickers, params) => ipcRenderer.invoke('scan:start', { tickers, params }),
   cancelScan: (runId) => ipcRenderer.invoke('scan:cancel', { runId }),
-  searchTicker: (query) => ipcRenderer.invoke('ticker:search', { query }),
+  searchTicker: (query, limit) => ipcRenderer.invoke('ticker:search', { query, limit }),
   addTicker: (t) => ipcRenderer.invoke('ticker:add', t),
   removeTicker: (ticker) => ipcRenderer.invoke('ticker:remove', { ticker }),
   listTickers: () => ipcRenderer.invoke('ticker:list'),
@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('api', {
   addTrade: (trade) => ipcRenderer.invoke('trade:add', trade),
   listTrades: () => ipcRenderer.invoke('trade:list'),
   updateTrades: () => ipcRenderer.invoke('trade:update'),
+  addShortcut: (s) => ipcRenderer.invoke('shortcut:add', s),
+  listShortcuts: () => ipcRenderer.invoke('shortcut:list'),
+  removeShortcut: (ticker) => ipcRenderer.invoke('shortcut:remove', { ticker }),
   on: (channel, callback) => {
     if (!ALLOWED_EVENTS.has(channel)) {
       throw new Error(`Channel "${channel}" is not allowed`);

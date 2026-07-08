@@ -32,22 +32,26 @@
 
       <div class="panel">
         <div class="panel-title">Atalhos de Mercado</div>
-        <div class="seed-grid">
-          <button class="seed-btn" data-seed="PSI">
-            <span class="flag">PT</span>
-            <span class="seed-name">PSI</span>
-            <span class="seed-count" id="seed-count-PSI">10</span>
-          </button>
-          <button class="seed-btn" data-seed="IBEX35">
-            <span class="flag">ES</span>
-            <span class="seed-name">IBEX35</span>
-            <span class="seed-count" id="seed-count-IBEX35">25</span>
-          </button>
-          <button class="seed-btn" data-seed="SP500">
-            <span class="flag">US</span>
-            <span class="seed-name">S&amp;P 500</span>
-            <span class="seed-count" id="seed-count-SP500">50</span>
-          </button>
+        <div class="shortcuts-search-wrap">
+          <div class="shortcuts-search-row">
+            <input
+              type="text"
+              id="ticker-search-input"
+              class="shortcuts-search-input"
+              placeholder="Pesquisar ticker (AAPL, NVDA, GALP.LS)..."
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button class="shortcuts-search-btn" id="btn-shortcuts-search">
+              <span>🔍 Pesquisar</span>
+            </button>
+          </div>
+          <div class="shortcuts-results" id="shortcuts-results" hidden></div>
+        </div>
+        <div class="shortcuts-grid" id="shortcuts-grid">
+          <div class="shortcuts-empty" id="shortcuts-empty">
+            Nenhum atalho. Pesquisa acima para começar.
+          </div>
         </div>
       </div>
 
