@@ -808,7 +808,17 @@
     status.textContent = 'A iniciar análise...';
 
     try {
-      const res = await window.api.startScan(watchlist);
+      const edgeVal = parseFloat(inputEdge?.value) / 100;
+      const windowVal = parseInt(inputWindow?.value, 10);
+      const horizonVal = parseInt(inputHorizon?.value, 10);
+      const volumeVal = parseFloat(inputVolume?.value);
+      const params = {};
+      if (!isNaN(edgeVal)) params.edge_threshold = edgeVal;
+      if (!isNaN(windowVal)) params.markov_window = windowVal;
+      if (!isNaN(horizonVal)) params.horizon_days = horizonVal;
+      if (!isNaN(volumeVal)) params.volume_mult = volumeVal;
+
+      const res = await window.api.startScan(watchlist, params);
       if (!res || !res.ok) {
         status.textContent = 'Erro ao iniciar scanner.';
         setRunning(false);

@@ -79,7 +79,7 @@ app.whenReady().then(async () => {
       if (!mainWindow) return { ok: false, error: 'window-unavailable' };
       const runId = `run_${Date.now()}`;
       const tickers = Array.isArray(payload?.tickers) ? payload.tickers : [];
-      scanner.run({ tickers }, runId, {
+      scanner.run({ tickers, ...payload?.params }, runId, {
         onProgress: (p) => mainWindow.webContents.send('scan:progress', p),
         onRow: (r) => mainWindow.webContents.send('scan:row', r),
         onError: (e) => mainWindow.webContents.send('scan:error', e),

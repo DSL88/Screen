@@ -90,6 +90,32 @@ function atrWilder(highs, lows, closes, period = 14) {
   return out;
 }
 
+function rma(values, period) {
+  const out = new Array(values.length).fill(null);
+  let sum = 0;
+  let count = 0;
+  let lastRma = null;
+
+  for (let i = 0; i < values.length; i++) {
+    const val = values[i];
+    if (val === null || val === undefined || isNaN(val)) {
+      continue;
+    }
+    count++;
+    if (count < period) {
+      sum += val;
+    } else if (count === period) {
+      sum += val;
+      lastRma = sum / period;
+      out[i] = lastRma;
+    } else {
+      lastRma = (val + (period - 1) * lastRma) / period;
+      out[i] = lastRma;
+    }
+  }
+  return out;
+}
+
 function adxWilder(highs, lows, closes, period = 14) {
   const len = closes.length;
   const out = new Array(len).fill(null);
@@ -100,55 +126,28 @@ function adxWilder(highs, lows, closes, period = 14) {
   for (let i = 1; i < len; i++) {
     const up = highs[i] - highs[i - 1];
     const down = lows[i - 1] - lows[i];
-    if (up > down && up > 0) plusDM[i] = up;
-    if (down > up && down > 0) minusDM[i] = down;
+    plusDM[i] = (up > down && up > 0) ? up : 0;
+    minusDM[i] = (down > up && down > 0) ? down : 0;
   }
 
   const tr = trueRange(highs, lows, closes);
-  const atrArr = new Array(len).fill(0);
-  let trSum = 0;
-  for (let i = 0; i < period; i++) trSum += tr[i];
-  atrArr[period - 1] = trSum;
-  for (let i = period; i < len; i++) {
-    atrArr[i] = atrArr[i - 1] - atrArr[i - 1] / period + tr[i];
+  const trur = rma(tr, period);
+  const plusDMRma = rma(plusDM, period);
+  const minusDMRma = rma(minusDM, period);
+
+  const dx = new Array(len).fill(null);
+  for (let i = 0; i < len; i++) {
+    if (trur[i] === null || plusDMRma[i] === null || minusDMRma[i] === null) {
+      continue;
+    }
+    const trurVal = trur[i];
+    const plusDI = trurVal === 0 ? 0 : 100 * plusDMRma[i] / trurVal;
+    const minusDI = trurVal === 0 ? 0 : 100 * minusDMRma[i] / trurVal;
+    const sum = plusDI + minusDI;
+    dx[i] = sum === 0 ? 0 : (100 * Math.abs(plusDI - minusDI)) / sum;
   }
 
-  let plusDMSum = 0;
-  let minusDMSum = 0;
-  for (let i = 0; i < period; i++) {
-    plusDMSum += plusDM[i];
-    minusDMSum += minusDM[i];
-  }
-
-  const plusDI = new Array(len).fill(0);
-  const minusDI = new Array(len).fill(0);
-  plusDI[period - 1] = 100 * (plusDMSum / atrArr[period - 1]);
-  minusDI[period - 1] = 100 * (minusDMSum / atrArr[period - 1]);
-
-  for (let i = period; i < len; i++) {
-    const pdm = (plusDMSum * (period - 1) / period + plusDM[i]);
-    const mdm = (minusDMSum * (period - 1) / period + minusDM[i]);
-    const atrI = (atrArr[i - 1] - atrArr[i - 1] / period + tr[i]);
-    plusDMSum = pdm;
-    minusDMSum = mdm;
-    atrArr[i] = atrI;
-    plusDI[i] = atrI === 0 ? 0 : 100 * (pdm / atrI);
-    minusDI[i] = atrI === 0 ? 0 : 100 * (mdm / atrI);
-  }
-
-  const dx = new Array(len).fill(0);
-  for (let i = period - 1; i < len; i++) {
-    const sum = plusDI[i] + minusDI[i];
-    dx[i] = sum === 0 ? 0 : (100 * Math.abs(plusDI[i] - minusDI[i])) / sum;
-  }
-
-  let dxSum = 0;
-  for (let i = period - 1; i < 2 * period - 1; i++) dxSum += dx[i];
-  out[2 * period - 2] = dxSum / period;
-  for (let i = 2 * period - 1; i < len; i++) {
-    out[i] = (out[i - 1] * (period - 1) + dx[i]) / period;
-  }
-  return out;
+  return rma(dx, period);
 }
 
 function bollingerBands(closes, period = 30, mult = 2.0) {

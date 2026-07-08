@@ -123,15 +123,25 @@ function analyzeSeries(candles, params = {}) {
   if (lastState === 5 || lastState === 7) {
     if (lastRsi != null && lastRsi > 53) {
       direction = 'COMPRA';
+    } else {
+      direction = 'NEUTRO';
+      edge = 0;
     }
   } else if (lastState === 3 || lastState === 6) {
     if (lastRsi != null && lastRsi < 47) {
       direction = 'VENDA';
+    } else {
+      direction = 'NEUTRO';
+      edge = 0;
     }
+  } else {
+    direction = 'NEUTRO';
+    edge = 0;
   }
 
   if (onlyLongs && direction === 'VENDA') {
     direction = 'NEUTRO';
+    edge = 0;
   }
 
   const lastVol = volumes[lastIdx];
