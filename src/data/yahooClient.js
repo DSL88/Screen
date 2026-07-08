@@ -1,14 +1,20 @@
 const yahooFinance = require('yahoo-finance2').default;
 
+yahooFinance.setGlobalConfig({
+  requestArgs: {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+  }
+});
+
 try {
   if (typeof yahooFinance.suppressNotices === 'function') {
     yahooFinance.suppressNotices(['yahooSurvey', 'ripHistorical']);
   }
 } catch (_) { }
 
-function sleep(ms) {
-  return new Promise(res => setTimeout(res, ms));
-}
+const sleep = ms => new Promise(res => setTimeout(res, ms));
 
 function isValidCandle(c) {
   return c && Number.isFinite(c.open) && Number.isFinite(c.high)
@@ -22,6 +28,7 @@ async function fetchWithRetry(ticker, attempts = 3) {
   const period2 = new Date();
   for (let i = 0; i < attempts; i++) {
     try {
+      await sleep(1500 + Math.random() * 1000);
       const result = await yahooFinance.historical(ticker, {
         period1,
         period2,
@@ -55,9 +62,13 @@ async function fetchWithRetry(ticker, attempts = 3) {
         }
         throw err;
       }
-      const backoff = isRateLimit ? (2000 * Math.pow(2, i)) : (500 * Math.pow(2, i));
-      const jitter = Math.floor(Math.random() * 250);
-      await sleep(backoff + jitter);
+      if (isRateLimit) {
+        await sleep(5000);
+      } else {
+        const backoff = 500 * Math.pow(2, i);
+        const jitter = Math.floor(Math.random() * 250);
+        await sleep(backoff + jitter);
+      }
     }
   }
 }
