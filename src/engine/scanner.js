@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────
+//  scanner.js  –  Motor de varrimento com prioridade total
+//  aos parâmetros da UI e logging detalhado por ticker
+// ─────────────────────────────────────────────────────────────
+
+'use strict';
+
 const pLimit = require('p-limit');
 const { fetchWithRetry } = require('../data/yahooClient');
 const { analyzeSeries, shouldEmit } = require('../quant/markovEngine');
@@ -21,10 +28,34 @@ class Scanner {
     if (runId) this.cancelled.add(runId);
   }
 
+  // ── Resolução de parâmetros ─────────────────────────────
+  // PRIORIDADE TOTAL aos valores enviados pela UI.
+  // Só recorre ao SQLite (dbParams) se a UI NÃO enviou o valor.
+  _resolveParams(uiParams) {
+    const dbParams = this.db.getAdaptiveParams();
+
+    // Normalizar nomes: a UI pode enviar camelCase ou snake_case
+    const uiEdge = uiParams?.edge_threshold ?? uiParams?.edgeThreshold;
+    const uiWindow = uiParams?.markov_window ?? uiParams?.markovWindow;
+    const uiVolume = uiParams?.volume_mult ?? uiParams?.volumeMult;
+    const uiHorizon = uiParams?.horizon_days ?? uiParams?.horizonDays;
+    const uiUseVolFilter = uiParams?.useVolFilter;
+
+    return {
+      edge_threshold: uiEdge != null ? uiEdge : dbParams.edge_threshold,
+      markov_window: uiWindow != null ? uiWindow : dbParams.markov_window,
+      volume_mult: uiVolume != null ? uiVolume : dbParams.volume_mult,
+      horizon_days: uiHorizon != null ? uiHorizon : dbParams.horizon_days,
+      useVolFilter: uiUseVolFilter != null ? uiUseVolFilter : true
+    };
+  }
+
+  // ── Run principal ─────────────────────────────────────────
   async run(options, runId, hooks) {
     const startedAt = Date.now();
     const list = Array.isArray(options?.tickers) ? options.tickers : [];
 
+    // Avaliar trades abertos antes de começar o scan
     if (list.length > 0 && !this.cancelled.has(runId)) {
       try {
         await this._evaluateTrades(runId, hooks);
@@ -33,13 +64,15 @@ class Scanner {
       }
     }
 
-    const dbParams = this.db.getAdaptiveParams();
-    const params = {
-      edge_threshold: options?.edge_threshold ?? options?.edgeThreshold ?? dbParams.edge_threshold,
-      markov_window: options?.markov_window ?? options?.markovWindow ?? dbParams.markov_window,
-      volume_mult: options?.volume_mult ?? options?.volumeMult ?? dbParams.volume_mult,
-      horizon_days: options?.horizon_days ?? options?.horizonDays ?? dbParams.horizon_days
-    };
+    // PRIORIDADE TOTAL: parâmetros da UI sobrepõem os do SQLite
+    const params = this._resolveParams(options);
+
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('  SCANNER INICIADO');
+    console.log(`  Parâmetros: Edge ≥ ${params.edge_threshold} | VolMult ≥ ${params.volume_mult} | Window ${params.markov_window} | Horizon ${params.horizon_days} | VolFilter ${params.useVolFilter}`);
+    console.log(`  Tickers: ${list.length}`);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
     const total = list.length;
     const limit = pLimit(CONCURRENCY);
 
@@ -53,19 +86,39 @@ class Scanner {
       if (this.cancelled.has(runId)) return;
       processed++;
       hooks.onProgress({ processed, total, currentTicker: t.ticker, runId });
+
       try {
         let candles = this.db.getCachedOHLCV(t.ticker);
         if (!candles) {
           candles = await fetchWithRetry(t.ticker, 3);
           this.db.cacheOHLCV(t.ticker, candles);
         }
+
         const result = analyzeSeries(candles, {
           markovWindow: params.markov_window,
           volumeMult: params.volume_mult,
           horizonDays: params.horizon_days,
-          edgeThreshold: params.edge_threshold
+          edgeThreshold: params.edge_threshold,
+          useVolFilter: params.useVolFilter
         });
-        if (shouldEmit(result, params.edge_threshold)) {
+
+        // ── LOG DETALHADO POR TICKER (auditoria no terminal) ─
+        const emit = shouldEmit(result, params.edge_threshold);
+        console.log(
+          `  [${String(processed).padStart(4)}/${total}] ` +
+          `${(t.ticker || '???').padEnd(10)} ` +
+          `Preço: ${result.close != null ? result.close.toFixed(2) : 'N/A'}  ` +
+          `BB%: ${result.bbPct != null ? result.bbPct.toFixed(3) : 'N/A'}  ` +
+          `ADX: ${result.adx != null ? result.adx.toFixed(1) : 'N/A'}  ` +
+          `RSI: ${result.rsi != null ? result.rsi.toFixed(1) : 'N/A'}  ` +
+          `Estado: ${result.currentState}  ` +
+          `Edge: ${result.edge.toFixed(4)}  ` +
+          `VolOK: ${result.volumeValid ? '✓' : '✗'}  ` +
+          `Dir: ${result.direction}  ` +
+          `Emit: ${emit ? '✓ SINAL' : '—'}`
+        );
+
+        if (emit) {
           const id = this.db.insertSignal({
             ticker: t.ticker,
             date: result.date,
@@ -86,13 +139,19 @@ class Scanner {
             index: t.index,
             direction: result.direction,
             edge: result.edge,
+            pBull: result.pBull,
+            pBear: result.pBear,
             pStay: result.pStay,
+            rsi: result.rsi,
+            adx: result.adx,
+            bbPct: result.bbPct,
             volumeValid: result.volumeValid,
             date: result.date,
             close: result.close,
             atr: result.atr,
             stopLoss: result.stopLoss,
-            takeProfit: result.takeProfit
+            takeProfit: result.takeProfit,
+            currentState: result.currentState
           });
         }
       } catch (err) {
@@ -101,6 +160,10 @@ class Scanner {
     }));
 
     await Promise.all(tasks);
+
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`  SCAN CONCLUÍDO: ${processed} processados, ${emitted} sinais emitidos (${(Date.now() - startedAt)}ms)`);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     if (newSignalIds.length > 0 && !this.cancelled.has(runId)) {
       this._tuneAdaptiveParams();
@@ -114,6 +177,7 @@ class Scanner {
     });
   }
 
+  // ── Obter candles ─────────────────────────────────────────
   async _getCandlesSince(ticker, sinceDate) {
     let candles = this.db.getCachedOHLCV(ticker);
     if (!candles) {
@@ -128,6 +192,7 @@ class Scanner {
     return candles.filter(c => c.date > sinceDate);
   }
 
+  // ── Avaliação de trades abertos ───────────────────────────
   _evaluateTradeHit(trade, candle) {
     if (trade.stop_loss == null || trade.take_profit == null) return null;
     if (trade.direcao === 'COMPRA') {
@@ -198,6 +263,7 @@ class Scanner {
     }
   }
 
+  // ── Auto-tuning adaptativo ────────────────────────────────
   _tuneAdaptiveParams() {
     const closed = this.db.getClosedTrades(ADAPTIVE_WINDOW);
     if (closed.length < ADAPTIVE_WINDOW) return;
@@ -242,19 +308,17 @@ class Scanner {
     }
   }
 
+  // ── Backtest ──────────────────────────────────────────────
   async runBacktest(options, runId) {
     const { tickers, startDate, endDate } = options;
-    const dbParams = this.db.getAdaptiveParams();
-    const params = {
-      edge_threshold: options.edge_threshold ?? options.edgeThreshold ?? dbParams.edge_threshold,
-      markov_window: options.markov_window ?? options.markovWindow ?? dbParams.markov_window,
-      volume_mult: options.volume_mult ?? options.volumeMult ?? dbParams.volume_mult,
-      horizon_days: options.horizon_days ?? options.horizonDays ?? dbParams.horizon_days
-    };
+
+    // Prioridade total à UI, depois SQLite
+    const params = this._resolveParams(options);
     const markovWindow = params.markov_window;
     const edgeThreshold = params.edge_threshold;
     const volumeMult = params.volume_mult;
     const horizonDays = params.horizon_days;
+    const useVolFilter = params.useVolFilter;
 
     const list = Array.isArray(tickers) ? tickers : [];
     const simulatedTrades = [];
@@ -284,7 +348,8 @@ class Scanner {
           markovWindow,
           volumeMult,
           horizonDays,
-          edgeThreshold
+          edgeThreshold,
+          useVolFilter
         });
 
         if (shouldEmit(result, edgeThreshold)) {
