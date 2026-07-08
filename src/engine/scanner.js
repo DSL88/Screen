@@ -71,8 +71,6 @@ class Scanner {
     // ── PRIORIDADE ABSOLUTA: UI > SQLite ────────────────────
     const params = this._resolveParams(options);
     const timeframe = options?.timeframe || params.timeframe || '1d';
-    const isIntraday = timeframe === '1h' || timeframe === '4h';
-    const periodMonths = isIntraday ? 2 : 12;
 
     // Avaliar trades abertos antes do scan
     if (list.length > 0 && !this.cancelled.has(runId)) {
@@ -107,7 +105,7 @@ class Scanner {
         // ── Obter candles frescas da API ──────────────────────
         let candles;
         try {
-          candles = await fetchWithRetry(t.ticker, 3, timeframe, periodMonths);
+          candles = await fetchWithRetry(t.ticker, timeframe, 3);
           this.db.cacheOHLCV(`${t.ticker}_${timeframe}`, candles);
         } catch (e) {
           candles = null;
@@ -266,11 +264,9 @@ class Scanner {
 
   async _getCandlesSince(ticker, sinceDate, timeframe = '1d') {
     const cacheKey = `${ticker}_${timeframe}`;
-    const isIntraday = timeframe === '1h' || timeframe === '4h';
-    const periodMonths = isIntraday ? 2 : 12;
     let candles;
     try {
-      candles = await fetchWithRetry(ticker, 3, timeframe, periodMonths);
+      candles = await fetchWithRetry(ticker, timeframe, 3);
       this.db.cacheOHLCV(cacheKey, candles);
     } catch (_) {
       candles = this.db.getCachedOHLCV(cacheKey);
@@ -407,8 +403,6 @@ class Scanner {
     const horizonDays = params.horizon_days;
     const useVolFilter = params.useVolFilter;
     const timeframe = options?.timeframe || params.timeframe || '1d';
-    const isIntraday = timeframe === '1h' || timeframe === '4h';
-    const periodMonths = isIntraday ? 2 : 12;
 
     const list = Array.isArray(tickers) ? tickers : [];
     const simulatedTrades = [];
@@ -420,7 +414,7 @@ class Scanner {
       let candles = this.db.getCachedOHLCV(cacheKey);
       if (!candles) {
         try {
-          candles = await fetchWithRetry(t.ticker, 3, timeframe, periodMonths);
+          candles = await fetchWithRetry(t.ticker, timeframe, 3);
           this.db.cacheOHLCV(cacheKey, candles);
         } catch (_) {
           continue;
