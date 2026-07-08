@@ -711,7 +711,7 @@
   }
 
   function clearTable() {
-    body.innerHTML = '<tr class="empty"><td colspan="10">A processar...</td></tr>';
+    body.innerHTML = '<tr class="empty"><td colspan="11">A processar...</td></tr>';
   }
 
   function appendRow(r) {
@@ -730,8 +730,20 @@
       <td class="col-num price-val">${r.close != null ? r.close.toFixed(2) : '—'}</td>
       <td class="col-num sl-val">${r.stopLoss != null ? r.stopLoss.toFixed(2) : '—'}</td>
       <td class="col-num tp-val">${r.takeProfit != null ? r.takeProfit.toFixed(2) : '—'}</td>
+      <td class="col-action"><button class="btn-investir" data-ticker="${escapeHtml(r.ticker)}" data-nome="${escapeHtml(r.name || '')}" data-direcao="${escapeHtml(r.direction)}" data-preco="${r.close}" data-stop="${r.stopLoss}" data-tp="${r.takeProfit}">Investir</button></td>
     `;
     body.appendChild(tr);
+    tr.querySelector('.btn-investir').addEventListener('click', (e) => {
+      const btn = e.currentTarget;
+      openInvestModal({
+        ticker: btn.dataset.ticker,
+        nome: btn.dataset.nome,
+        direcao: btn.dataset.direcao,
+        preco_entrada: parseFloat(btn.dataset.preco),
+        stop_loss: parseFloat(btn.dataset.stop),
+        take_profit: parseFloat(btn.dataset.tp)
+      });
+    });
   }
 
   if (searchInput) {
@@ -858,7 +870,7 @@
     status.textContent = `Concluído em ${(d.elapsedMs / 1000).toFixed(1)}s — ${d.totalSignals} sinais.`;
     footerSummary.textContent = `${d.totalSignals} sinais emitidos · ${d.totalProcessed} tickers processados`;
     if (d.totalSignals === 0) {
-      body.innerHTML = '<tr class="empty"><td colspan="10">Nenhum ativo cumpriu os critérios (Edge ≥ 15%, Volume ≥ 1.2× SMA20, direção válida).</td></tr>';
+      body.innerHTML = '<tr class="empty"><td colspan="11">Nenhum ativo cumpriu os critérios (Edge ≥ 15%, Volume ≥ 1.2× SMA20, direção válida).</td></tr>';
     }
   });
 
@@ -1042,4 +1054,233 @@
 
   registerParamChangeListeners();
   loadInitial();
+
+  // ═══════════════════════════════════════════════════════════
+  //  TABS
+  // ═══════════════════════════════════════════════════════════
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const tabContents = document.querySelectorAll('.tab-content');
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      tabContents.forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      const target = document.getElementById('tab-' + btn.dataset.tab);
+      if (target) target.classList.add('active');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  //  MODAL INVESTIR
+  // ═══════════════════════════════════════════════════════════
+  const modalInvestir = document.getElementById('modal-investir');
+  const modalInvestirClose = document.getElementById('modal-investir-close');
+  const modalInvestirCancel = document.getElementById('modal-investir-cancel');
+  const modalInvestirConfirm = document.getElementById('modal-investir-confirm');
+  const investError = document.getElementById('invest-error');
+  let currentInvestTrade = null;
+
+  function openInvestModal(trade) {
+    if (!modalInvestir) return;
+    currentInvestTrade = trade;
+    document.getElementById('inv-ticker').textContent = trade.ticker;
+    document.getElementById('inv-nome').textContent = trade.nome || trade.ticker;
+    document.getElementById('inv-direcao').textContent = trade.direcao;
+    document.getElementById('inv-direcao').className = 'invest-value ' + (trade.direcao === 'COMPRA' ? 'invest-bull' : 'invest-bear');
+    document.getElementById('inv-preco').textContent = trade.preco_entrada != null ? trade.preco_entrada.toFixed(2) : '—';
+    document.getElementById('inv-stop').textContent = trade.stop_loss != null ? trade.stop_loss.toFixed(2) : '—';
+    document.getElementById('inv-tp').textContent = trade.take_profit != null ? trade.take_profit.toFixed(2) : '—';
+    investError.hidden = true;
+    modalInvestir.hidden = false;
+    modalInvestirConfirm.disabled = false;
+    modalInvestirConfirm.querySelector('.btn-label') && (modalInvestirConfirm.querySelector('.btn-label').textContent = 'Confirmar Investimento');
+  }
+
+  function closeInvestModal() {
+    if (!modalInvestir) return;
+    modalInvestir.hidden = true;
+    currentInvestTrade = null;
+    investError.hidden = true;
+  }
+
+  async function confirmInvest() {
+    if (!currentInvestTrade) return;
+    investError.hidden = true;
+    modalInvestirConfirm.disabled = true;
+
+    try {
+      const res = await window.api.addTrade({
+        ticker: currentInvestTrade.ticker,
+        nome: currentInvestTrade.nome || currentInvestTrade.ticker,
+        direcao: currentInvestTrade.direcao,
+        preco_entrada: currentInvestTrade.preco_entrada,
+        stop_loss: currentInvestTrade.stop_loss,
+        take_profit: currentInvestTrade.take_profit
+      });
+
+      if (!res || !res.ok) {
+        investError.textContent = 'Erro ao registar investimento: ' + (res ? res.error : 'desconhecido');
+        investError.hidden = false;
+        modalInvestirConfirm.disabled = false;
+        return;
+      }
+
+      status.textContent = `Investimento em ${currentInvestTrade.ticker} registado com sucesso.`;
+      closeInvestModal();
+    } catch (err) {
+      investError.textContent = 'Erro: ' + (err.message || String(err));
+      investError.hidden = false;
+      modalInvestirConfirm.disabled = false;
+    }
+  }
+
+  if (modalInvestirClose) modalInvestirClose.addEventListener('click', closeInvestModal);
+  if (modalInvestirCancel) modalInvestirCancel.addEventListener('click', closeInvestModal);
+  if (modalInvestirConfirm) modalInvestirConfirm.addEventListener('click', confirmInvest);
+  if (modalInvestir) {
+    modalInvestir.addEventListener('click', (e) => {
+      if (e.target === modalInvestir) closeInvestModal();
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  PORTFOLIO / MONITORIZAÇÃO
+  // ═══════════════════════════════════════════════════════════
+  const portfolioBody = document.getElementById('portfolio-body');
+  const portfolioClosedBody = document.getElementById('portfolio-closed-body');
+  const portfolioClosedSection = document.getElementById('portfolio-closed-section');
+  const portfolioStatus = document.getElementById('portfolio-status');
+  const btnSyncTrades = document.getElementById('btn-sync-trades');
+
+  function renderProgresso(trade) {
+    if (!trade.stop_loss || !trade.take_profit || !trade.preco_entrada) return '<span style="color: var(--text-mute);">—</span>';
+
+    const range = Math.abs(trade.take_profit - trade.stop_loss);
+    if (range === 0) return '<span style="color: var(--text-mute);">—</span>';
+
+    let pct;
+    if (trade.direcao === 'COMPRA') {
+      pct = ((trade.preco_entrada - trade.stop_loss) / range) * 100;
+    } else {
+      pct = ((trade.stop_loss - trade.preco_entrada) / range) * 100;
+    }
+    pct = Math.max(0, Math.min(100, pct));
+
+    return `
+      <div class="portfolio-progress-wrap">
+        <div class="portfolio-progress-bar">
+          <div class="portfolio-progress-fill" style="width:${pct.toFixed(0)}%"></div>
+        </div>
+        <span class="portfolio-progress-text">${pct.toFixed(0)}%</span>
+      </div>
+    `;
+  }
+
+  function renderPortfolioRow(trade) {
+    const tr = document.createElement('tr');
+    const dirClass = trade.direcao === 'COMPRA' ? 'dir-COMPRA' : 'dir-VENDA';
+    tr.innerHTML = `
+      <td class="col-ticker ticker">${escapeHtml(trade.ticker)}</td>
+      <td class="col-name name">${escapeHtml(trade.nome || '')}</td>
+      <td class="col-dir"><span class="dir-badge ${dirClass}">${escapeHtml(trade.direcao)}</span></td>
+      <td class="col-num">${trade.preco_entrada != null ? trade.preco_entrada.toFixed(2) : '—'}</td>
+      <td class="col-num sl-val">${trade.stop_loss != null ? trade.stop_loss.toFixed(2) : '—'}</td>
+      <td class="col-num tp-val">${trade.take_profit != null ? trade.take_profit.toFixed(2) : '—'}</td>
+      <td class="col-num price-val">${trade.preco_atual != null ? trade.preco_atual.toFixed(2) : '—'}</td>
+      <td class="col-progresso">${renderProgresso(trade)}</td>
+      <td class="col-status"><span class="portfolio-status-badge portfolio-status-aberto">ABERTO</span></td>
+      <td class="col-num" style="color: var(--text-mute);">—</td>
+    `;
+    return tr;
+  }
+
+  function renderClosedPortfolioRow(trade) {
+    const tr = document.createElement('tr');
+    const dirClass = trade.direcao === 'COMPRA' ? 'dir-COMPRA' : 'dir-VENDA';
+    const resultColor = (trade.resultado_pct || 0) >= 0 ? 'var(--bull)' : 'var(--bear)';
+    const resultText = trade.resultado_pct != null ? (trade.resultado_pct * 100).toFixed(2) + '%' : '—';
+    const motivoLabel = trade.motivo_fecho === 'stop_loss' ? 'Stop Loss' : trade.motivo_fecho === 'take_profit' ? 'Take Profit' : (trade.motivo_fecho || 'manual');
+    tr.innerHTML = `
+      <td class="col-ticker ticker">${escapeHtml(trade.ticker)}</td>
+      <td class="col-name name">${escapeHtml(trade.nome || '')}</td>
+      <td class="col-dir"><span class="dir-badge ${dirClass}">${escapeHtml(trade.direcao)}</span></td>
+      <td class="col-num">${trade.preco_entrada != null ? trade.preco_entrada.toFixed(2) : '—'}</td>
+      <td class="col-num">${trade.preco_fecho != null ? trade.preco_fecho.toFixed(2) : '—'}</td>
+      <td class="col-num" style="color: ${resultColor}; font-weight: 600;">${resultText}</td>
+      <td class="col-motivo"><span class="dir-badge" style="background: var(--surface-2); border-color: var(--border-strong); color: var(--text-dim); padding: 2px 8px; font-size: 10px;">${escapeHtml(motivoLabel)}</span></td>
+      <td class="col-data" style="font-family: var(--mono); font-size: 11px; color: var(--text-dim);">${escapeHtml(trade.fechado_em || trade.data_entrada || '')}</td>
+    `;
+    return tr;
+  }
+
+  async function loadPortfolio() {
+    try {
+      const res = await window.api.listTrades();
+      if (!res || !res.ok) {
+        portfolioBody.innerHTML = '<tr class="empty"><td colspan="10">Erro ao carregar posições.</td></tr>';
+        return;
+      }
+
+      const active = res.active || [];
+      const closed = res.closed || [];
+
+      portfolioBody.innerHTML = '';
+      if (active.length === 0) {
+        portfolioBody.innerHTML = '<tr class="empty"><td colspan="10">Nenhuma posição ativa. Clique em "Investir" num sinal do scanner para começar.</td></tr>';
+      } else {
+        active.forEach(t => portfolioBody.appendChild(renderPortfolioRow(t)));
+      }
+
+      portfolioClosedBody.innerHTML = '';
+      if (closed.length > 0) {
+        portfolioClosedSection.hidden = false;
+        closed.forEach(t => portfolioClosedBody.appendChild(renderClosedPortfolioRow(t)));
+      } else {
+        portfolioClosedSection.hidden = true;
+      }
+
+      portfolioStatus.textContent = active.length > 0
+        ? `${active.length} posição(ões) ativa(s) em monitorização.`
+        : 'Posições ativas abertas a partir dos sinais do scanner.';
+    } catch (err) {
+      portfolioStatus.textContent = 'Erro: ' + (err.message || String(err));
+    }
+  }
+
+  async function syncTrades() {
+    if (!btnSyncTrades) return;
+    btnSyncTrades.disabled = true;
+    btnSyncTrades.querySelector('span').textContent = 'A sincronizar...';
+
+    try {
+      const res = await window.api.updateTrades();
+      if (!res || !res.ok) {
+        portfolioStatus.textContent = 'Erro na sincronização: ' + (res ? res.error : 'desconhecido');
+        return;
+      }
+
+      if (res.closed && res.closed.length > 0) {
+        portfolioStatus.textContent = `Sincronização concluída: ${res.closed.length} trade(s) fechado(s).`;
+      } else {
+        portfolioStatus.textContent = res.message || 'Sincronização concluída. Nenhum trade fechado.';
+      }
+
+      await loadPortfolio();
+    } catch (err) {
+      portfolioStatus.textContent = 'Erro: ' + (err.message || String(err));
+    } finally {
+      btnSyncTrades.disabled = false;
+      btnSyncTrades.querySelector('span').textContent = 'Sincronizar Posições';
+    }
+  }
+
+  if (btnSyncTrades) {
+    btnSyncTrades.addEventListener('click', syncTrades);
+  }
+
+  const portfolioTab = document.querySelector('.tab-btn[data-tab="portfolio"]');
+  if (portfolioTab) {
+    portfolioTab.addEventListener('click', loadPortfolio);
+  }
 })();

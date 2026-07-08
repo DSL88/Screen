@@ -106,7 +106,12 @@
     </aside>
 
     <main class="main">
-      <header class="topbar">
+      <nav class="tab-nav">
+        <button class="tab-btn active" data-tab="scanner">Scanner de Mercado</button>
+        <button class="tab-btn" data-tab="portfolio">Monitorização de Investimentos</button>
+      </nav>
+
+      <div class="tab-content active" id="tab-scanner">
         <div class="topbar-info">
           <h1>Daily Scanner</h1>
           <p id="status-line">Pronto. Adiciona tickers à watchlist e clica em iniciar.</p>
@@ -140,11 +145,12 @@
               <th class="col-num">Preço</th>
               <th class="col-num">Stop (1.5×ATR)</th>
               <th class="col-num">TP (+2.5%)</th>
+              <th class="col-action">Ação</th>
             </tr>
           </thead>
           <tbody id="results-body">
             <tr class="empty">
-              <td colspan="10">Aguardando execução do scanner...</td>
+              <td colspan="11">Aguardando execução do scanner...</td>
             </tr>
           </tbody>
         </table>
@@ -154,6 +160,64 @@
         <span id="footer-summary">0 sinais emitidos · 0 tickers processados</span>
         <span class="footer-meta">Markov 9×9 · BB(30,2) · RSI(21) · ADX(14) · 252 d</span>
       </footer>
+      </div>
+
+      <div class="tab-content" id="tab-portfolio">
+        <header class="topbar portfolio-topbar">
+          <div class="topbar-info">
+            <h1>Monitorização de Investimentos</h1>
+            <p id="portfolio-status">Posições ativas abertas a partir dos sinais do scanner.</p>
+          </div>
+          <div class="topbar-actions">
+            <button class="btn-secondary" id="btn-sync-trades">
+              <span>Sincronizar Posições</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="results">
+          <table class="results-table portfolio-table">
+            <thead>
+              <tr>
+                <th class="col-ticker">Ticker</th>
+                <th class="col-name">Nome</th>
+                <th class="col-dir">Direção</th>
+                <th class="col-num">Preço Entrada</th>
+                <th class="col-num">Stop Loss</th>
+                <th class="col-num">Take Profit</th>
+                <th class="col-num">Preço Atual</th>
+                <th class="col-progresso">Progresso</th>
+                <th class="col-status">Status</th>
+                <th class="col-num">Resultado</th>
+              </tr>
+            </thead>
+            <tbody id="portfolio-body">
+              <tr class="empty">
+                <td colspan="10">Nenhuma posição ativa. Clique em "Investir" num sinal do scanner para começar.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="portfolio-closed-section" id="portfolio-closed-section" hidden>
+            <div class="panel-title" style="margin: 24px 0 12px;">Histórico de Trades Fechados</div>
+            <table class="results-table portfolio-table">
+              <thead>
+                <tr>
+                  <th class="col-ticker">Ticker</th>
+                  <th class="col-name">Nome</th>
+                  <th class="col-dir">Direção</th>
+                  <th class="col-num">Entrada</th>
+                  <th class="col-num">Fecho</th>
+                  <th class="col-num">Resultado</th>
+                  <th class="col-motivo">Motivo</th>
+                  <th class="col-data">Data Fecho</th>
+                </tr>
+              </thead>
+              <tbody id="portfolio-closed-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </main>
     </div>
   </div>
@@ -317,6 +381,30 @@
         </div>
         
         <div class="form-error" id="backtest-error" hidden></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-investir" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-investir-title">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-investir-title">Confirmar Investimento</div>
+        <button class="modal-close" id="modal-investir-close" aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="invest-summary">
+          <div class="invest-row"><span class="invest-label">Ticker</span><span class="invest-value" id="inv-ticker">—</span></div>
+          <div class="invest-row"><span class="invest-label">Nome</span><span class="invest-value" id="inv-nome">—</span></div>
+          <div class="invest-row"><span class="invest-label">Direção</span><span class="invest-value" id="inv-direcao">—</span></div>
+          <div class="invest-row"><span class="invest-label">Preço Entrada</span><span class="invest-value" id="inv-preco">—</span></div>
+          <div class="invest-row"><span class="invest-label">Stop Loss</span><span class="invest-value invest-bear" id="inv-stop">—</span></div>
+          <div class="invest-row"><span class="invest-label">Take Profit</span><span class="invest-value invest-bull" id="inv-tp">—</span></div>
+        </div>
+        <div class="form-error" id="invest-error" hidden></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="modal-investir-cancel">Cancelar</button>
+        <button class="btn-primary" id="modal-investir-confirm">Confirmar Investimento</button>
       </div>
     </div>
   </div>

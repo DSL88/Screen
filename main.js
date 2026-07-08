@@ -175,6 +175,36 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('trade:add', async (_event, payload) => {
+      if (!payload) return { ok: false, error: 'missing-payload' };
+      try {
+        db.addActiveTrade(payload);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('trade:list', async () => {
+      try {
+        const active = db.getActiveTrades();
+        const closed = db.getClosedActiveTrades(50);
+        return { ok: true, active, closed };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('trade:update', async () => {
+      if (!scanner) return { ok: false, error: 'scanner-not-initialized' };
+      try {
+        const result = await scanner.updateActiveTrades();
+        return { ok: true, ...result };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     createWindow();
   } catch (err) {
     console.error('Fatal init error:', err);

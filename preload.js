@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('api', {
   getParams: () => ipcRenderer.invoke('params:get'),
   setParam: (key, value) => ipcRenderer.invoke('params:set', { key, value }),
   backtestScan: (payload) => ipcRenderer.invoke('scan:backtest', payload),
+  addTrade: (trade) => ipcRenderer.invoke('trade:add', trade),
+  listTrades: () => ipcRenderer.invoke('trade:list'),
+  updateTrades: () => ipcRenderer.invoke('trade:update'),
   on: (channel, callback) => {
     if (!ALLOWED_EVENTS.has(channel)) {
       throw new Error(`Channel "${channel}" is not allowed`);
