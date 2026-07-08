@@ -1,23 +1,6 @@
-const yahooFinance = require('yahoo-finance2').default;
+const yahooFinance = require('yahoo-finance2').default || require('yahoo-finance2');
 
-try {
-  yahooFinance._opts.queue.concurrency = 1;
-  yahooFinance._opts.queue.timeout = 60;
-} catch (_) { }
-
-try {
-  yahooFinance._opts.fetchOptions = {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-  };
-} catch (_) { }
-
-try {
-  if (typeof yahooFinance.suppressNotices === 'function') {
-    yahooFinance.suppressNotices(['yahooSurvey', 'ripHistorical']);
-  }
-} catch (_) { }
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 const sleep = ms => new Promise(res => setTimeout(res, ms));
 
@@ -34,12 +17,22 @@ async function fetchWithRetry(ticker, attempts = 3) {
   for (let i = 0; i < attempts; i++) {
     try {
       await sleep(1500 + Math.random() * 1000);
-      const result = await yahooFinance.historical(ticker, {
-        period1,
-        period2,
-        interval: '1d',
-        includeAdjustedClose: true
-      });
+      const result = await yahooFinance.historical(
+        ticker,
+        {
+          period1,
+          period2,
+          interval: '1d',
+          includeAdjustedClose: true
+        },
+        {
+          fetchOptions: {
+            headers: {
+              'User-Agent': USER_AGENT
+            }
+          }
+        }
+      );
       if (!Array.isArray(result) || result.length < 200) {
         throw new Error(`Insufficient candles for ${ticker}: ${result?.length || 0}`);
       }
@@ -82,12 +75,22 @@ async function searchTickers(query, limit = 8) {
   if (!query || typeof query !== 'string' || query.trim().length < 1) return [];
   const q = query.trim();
   try {
-    const result = await yahooFinance.search(q, {
-      quotesCount: limit,
-      newsCount: 0,
-      listsCount: 0,
-      quotesQueryId: undefined
-    });
+    const result = await yahooFinance.search(
+      q,
+      {
+        quotesCount: limit,
+        newsCount: 0,
+        listsCount: 0,
+        quotesQueryId: undefined
+      },
+      {
+        fetchOptions: {
+          headers: {
+            'User-Agent': USER_AGENT
+          }
+        }
+      }
+    );
     const quotes = (result && result.quotes) || [];
     const out = [];
     const seen = new Set();
