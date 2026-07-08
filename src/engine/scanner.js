@@ -392,6 +392,68 @@ class Scanner {
   }
 
   // ═══════════════════════════════════════════════════════════
+  //  MONITORIZAÇÃO DE INVESTIMENTOS
+  // ═══════════════════════════════════════════════════════════
+  async updateActiveTrades() {
+    const active = this.db.getActiveTrades();
+    if (!Array.isArray(active) || active.length === 0) {
+      return { updated: 0, closed: [], message: 'Nenhum trade ativo para monitorizar.' };
+    }
+
+    const closed = [];
+    for (const trade of active) {
+      try {
+        const candles = await fetchWithRetry(trade.ticker, '1d', 2);
+        if (!candles || candles.length === 0) continue;
+
+        const last = candles[candles.length - 1];
+        let hit = null;
+
+        if (trade.direcao === 'COMPRA') {
+          if (last.low <= trade.stop_loss) {
+            hit = { price: trade.stop_loss, reason: 'stop_loss' };
+          } else if (last.high >= trade.take_profit) {
+            hit = { price: trade.take_profit, reason: 'take_profit' };
+          }
+        } else if (trade.direcao === 'VENDA') {
+          if (last.high >= trade.stop_loss) {
+            hit = { price: trade.stop_loss, reason: 'stop_loss' };
+          } else if (last.low <= trade.take_profit) {
+            hit = { price: trade.take_profit, reason: 'take_profit' };
+          }
+        }
+
+        if (hit) {
+          const sign = trade.direcao === 'COMPRA' ? 1 : -1;
+          const resultado = ((hit.price - trade.preco_entrada) / trade.preco_entrada) * sign;
+          this.db.closeActiveTrade(trade.id, hit.price, resultado);
+          closed.push({
+            id: trade.id,
+            ticker: trade.ticker,
+            nome: trade.nome,
+            direcao: trade.direcao,
+            preco_entrada: trade.preco_entrada,
+            preco_fecho: hit.price,
+            resultado_pct: resultado,
+            motivo_fecho: hit.reason,
+            data_lancamento: last.date
+          });
+        }
+      } catch (err) {
+        console.warn(`[scanner] updateActiveTrades: erro ao processar ${trade.ticker}: ${err.message || err}`);
+      }
+    }
+
+    return {
+      updated: closed.length,
+      closed,
+      message: closed.length > 0
+        ? `${closed.length} trade(s) fechado(s).`
+        : 'Nenhum trade atingiu TP ou SL.'
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════
   //  BACKTEST
   // ═══════════════════════════════════════════════════════════
   async runBacktest(options, runId) {

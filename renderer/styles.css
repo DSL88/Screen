@@ -906,6 +906,181 @@ html, body {
 }
 .footer-meta { color: var(--text-dim); }
 
+/* ============== TABS ============== */
+.tab-nav {
+  display: flex;
+  gap: 0;
+  background: var(--bg-elev);
+  padding: 0 32px;
+}
+.tab-btn {
+  padding: 12px 20px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.tab-content {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+.tab-content.active {
+  display: flex;
+}
+
+/* ============== ACTION BUTTONS ============== */
+.col-action {
+  text-align: center !important;
+}
+.btn-investir {
+  padding: 5px 14px;
+  background: var(--bull);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn-investir:hover {
+  background: #059669;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+}
+.btn-investir:disabled {
+  background: var(--surface-2);
+  color: var(--text-mute);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.btn-investir.is-added {
+  background: var(--surface-2);
+  color: var(--text-dim);
+  cursor: default;
+}
+
+/* ============== PORTFOLIO TABLE ============== */
+.portfolio-table th.col-progresso,
+.portfolio-table td.col-progresso {
+  text-align: left;
+  width: 140px;
+}
+.portfolio-table th.col-status,
+.portfolio-table td.col-status {
+  text-align: center;
+}
+.portfolio-table th.col-motivo,
+.portfolio-table td.col-motivo {
+  text-align: center;
+}
+.portfolio-table th.col-data,
+.portfolio-table td.col-data {
+  text-align: center;
+}
+
+.portfolio-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.portfolio-progress-bar {
+  flex: 1;
+  height: 5px;
+  background: var(--surface-2);
+  border-radius: 2.5px;
+  overflow: hidden;
+}
+.portfolio-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--bear), var(--bull));
+  transition: width 0.3s ease;
+}
+.portfolio-progress-text {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  min-width: 32px;
+  text-align: right;
+}
+
+.portfolio-status-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.portfolio-status-aberto {
+  background: var(--bull-soft);
+  color: var(--bull);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.portfolio-status-fechado {
+  background: rgba(107, 114, 128, 0.12);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.portfolio-closed-section {
+  padding-bottom: 24px;
+}
+
+/* ============== INVEST MODAL ============== */
+.modal-investir-dialog {
+  width: 460px !important;
+  max-width: 94vw !important;
+}
+.invest-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.invest-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.invest-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.invest-value {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.invest-bull { color: var(--bull); }
+.invest-bear { color: var(--bear); }
+
+.portfolio-topbar .topbar-info h1 {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
 /* ============== MODAL ============== */
 .modal-backdrop {
   position: fixed;

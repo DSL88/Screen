@@ -73,6 +73,24 @@ class DB {
         type       TEXT,
         added_at   TEXT DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS active_trades (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker         TEXT NOT NULL,
+        nome           TEXT,
+        direcao        TEXT CHECK(direcao IN ('COMPRA','VENDA')),
+        preco_entrada  REAL NOT NULL,
+        stop_loss      REAL NOT NULL,
+        take_profit    REAL NOT NULL,
+        data_entrada   TEXT NOT NULL,
+        status         TEXT DEFAULT 'aberto' CHECK(status IN ('aberto','fechado')),
+        resultado_pct  REAL,
+        preco_fecho    REAL,
+        motivo_fecho   TEXT,
+        fechado_em     TEXT,
+        created_at     TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_active_trades_status ON active_trades(status);
     `);
 
     const cols = this.db.prepare("PRAGMA table_info(historical_signals)").all();
@@ -197,6 +215,41 @@ class DB {
 
   clearCustomTickers() {
     this.db.prepare('DELETE FROM custom_tickers').run();
+  }
+
+  addActiveTrade(trade) {
+    const stmt = this.db.prepare(`
+      INSERT INTO active_trades
+        (ticker, nome, direcao, preco_entrada, stop_loss, take_profit, data_entrada, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'aberto')
+    `);
+    return stmt.run(
+      trade.ticker, trade.nome || '',
+      trade.direcao, trade.preco_entrada,
+      trade.stop_loss, trade.take_profit,
+      trade.data_entrada || new Date().toISOString().slice(0, 10)
+    );
+  }
+
+  getActiveTrades() {
+    return this.db.prepare(
+      "SELECT * FROM active_trades WHERE status = 'aberto' ORDER BY data_entrada DESC"
+    ).all();
+  }
+
+  getClosedActiveTrades(limit = 50) {
+    return this.db.prepare(
+      "SELECT * FROM active_trades WHERE status = 'fechado' ORDER BY fechado_em DESC LIMIT ?"
+    ).all(limit);
+  }
+
+  closeActiveTrade(id, precoFecho, resultadoPct) {
+    this.db.prepare(`
+      UPDATE active_trades
+      SET status = 'fechado', resultado_pct = ?, preco_fecho = ?,
+          motivo_fecho = ?, fechado_em = ?
+      WHERE id = ?
+    `).run(resultadoPct, precoFecho, 'auto', new Date().toISOString().slice(0, 10), id);
   }
 
   close() {
