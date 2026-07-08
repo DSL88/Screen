@@ -247,14 +247,17 @@ function analyzeSeries(candles, params = {}) {
 //    - Se useVolFilter foi desligado → volumeValid já será true
 //    - edgeThreshold é comparado com o edge calculado
 // ═══════════════════════════════════════════════════════════
-function shouldEmit(result, edgeThreshold) {
+function shouldEmit(result, edgeThreshold, useVolFilter) {
   // Precisa de direção não-neutra
   if (result.direction !== 'COMPRA' && result.direction !== 'VENDA') return false;
 
   // Edge tem de superar o threshold
   if (result.edge < edgeThreshold) return false;
 
-  // Volume (já incorpora o override de useVolFilter)
+  // Se o utilizador desligou o filtro de volume, ignora volumeValid
+  if (useVolFilter === false) return true;
+
+  // Caso contrário, exige volume válido
   if (!result.volumeValid) return false;
 
   return true;

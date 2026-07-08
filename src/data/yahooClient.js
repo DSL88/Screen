@@ -1,11 +1,9 @@
 const yahooFinance = require('yahoo-finance2').default;
 
-yahooFinance.setGlobalConfig({
-  queue: {
-    concurrency: 1,
-    timeout: 60
-  }
-});
+try {
+  yahooFinance._opts.queue.concurrency = 1;
+  yahooFinance._opts.queue.timeout = 60;
+} catch (_) { }
 
 try {
   yahooFinance._opts.fetchOptions = {

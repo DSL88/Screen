@@ -45,6 +45,7 @@ class Scanner {
     const uiVolume = uiParams?.volume_mult ?? uiParams?.volumeMult;
     const uiHorizon = uiParams?.horizon_days ?? uiParams?.horizonDays;
     const uiUseVolFilter = uiParams?.useVolFilter;
+    const uiUseLatestClosed = uiParams?.useLatestClosed ?? uiParams?.use_latest_closed;
 
     return {
       edge_threshold: uiEdge != null ? Number(uiEdge) : Number(dbParams.edge_threshold),
@@ -52,7 +53,9 @@ class Scanner {
       volume_mult: uiVolume != null ? Number(uiVolume) : Number(dbParams.volume_mult),
       horizon_days: uiHorizon != null ? Number(uiHorizon) : Number(dbParams.horizon_days),
       // Se a UI enviar useVolFilter=false, respeitar. Se não enviar, default=true.
-      useVolFilter: uiUseVolFilter !== undefined ? Boolean(uiUseVolFilter) : true
+      useVolFilter: uiUseVolFilter !== undefined ? Boolean(uiUseVolFilter) : true,
+      // Forçar análise com base na última vela fechada (ignora vela de hoje em aberto)
+      useLatestClosed: uiUseLatestClosed === true
     };
   }
 
@@ -108,8 +111,16 @@ class Scanner {
           return;
         }
 
-        // ── Análise ───────────────────────────────────────────
-        const result = analyzeSeries(candles, {
+        // ── Descartar última vela se ainda incompleta ────────
+        const analysisCandles = this._pickAnalysisCandles(candles, params);
+        if (!analysisCandles || analysisCandles.length < 60) {
+          console.log(`  [${String(processed).padStart(4)}/${total}] ${(t.ticker || '???').padEnd(10)} SKIP: velas fechadas insuficientes (${analysisCandles?.length || 0})`);
+          return;
+        }
+        const dropped = candles.length - analysisCandles.length;
+
+        // ── Análise (baseada na última vela fechada) ─────────
+        const result = analyzeSeries(analysisCandles, {
           markovWindow: params.markov_window,
           volumeMult: params.volume_mult,
           horizonDays: params.horizon_days,
@@ -118,7 +129,7 @@ class Scanner {
 
         // ── LOG DETALHADO POR TICKER ──────────────────────────
         // Ticker | Preço | BB% | ADX | RSI | Estado | Edge | Vol Válido | Direção Final
-        const emit = shouldEmit(result, params.edge_threshold);
+        const emit = shouldEmit(result, params.edge_threshold, params.useVolFilter);
         console.log(
           `  [${String(processed).padStart(4)}/${total}] ` +
           `${(t.ticker || '???').padEnd(10)} ` +
@@ -130,6 +141,7 @@ class Scanner {
           `Edge: ${result.edge.toFixed(4)}  ` +
           `Vol: ${result.volumeValid ? '✓' : '✗'}  ` +
           `Dir: ${result.direction.padEnd(6)}  ` +
+          `${dropped > 0 ? `[última vela descartada] ` : ''}` +
           `${emit ? '→ SINAL ✓' : ''}`
         );
 
@@ -197,6 +209,54 @@ class Scanner {
   // ═══════════════════════════════════════════════════════════
   //  Helpers internos
   // ═══════════════════════════════════════════════════════════
+
+  // ── Última vela fechada completa ────────────────────────────
+  //  O Yahoo Finance devolve sempre a vela do dia corrente (mesmo
+  //  com o mercado aberto), com volume e preço ainda incompletos.
+  //  Esta função decide se a última vela deve ser descartada, de
+  //  modo a que o motor analise apenas a ÚLTIMA VELA FECHADA
+  //  consolidate (candles.length - 2 no original).
+  //
+  //  Critérios para descartar a última vela:
+  //    1. useLatestClosed=true (override manual da UI)
+  //    2. Dia da semana e a vela é a de hoje (mercado aberto)
+  //    3. Volume da última vela abaixo da média móvel recente
+  // ──────────────────────────────────────────────────────────
+  _pickAnalysisCandles(candles, params) {
+    if (!candles || candles.length < 2) return candles;
+
+    const last = candles[candles.length - 1];
+    const force = params && params.useLatestClosed === true;
+
+    // (2) Hoje em dia útil → vela em formação
+    const now = new Date();
+    const dow = now.getDay();
+    const isWeekday = dow >= 1 && dow <= 5;
+    const today = now.toISOString().slice(0, 10);
+    const lastIsToday = last && last.date === today;
+    const marketOpen = isWeekday && lastIsToday;
+
+    // (3) Volume da última vela abaixo da média móvel recente
+    let lowVolume = false;
+    if (last && Number.isFinite(last.volume)) {
+      const n = Math.min(20, candles.length - 1);
+      let sum = 0, count = 0;
+      for (let i = candles.length - 1 - n; i < candles.length - 1; i++) {
+        const v = candles[i] && candles[i].volume;
+        if (Number.isFinite(v)) { sum += v; count++; }
+      }
+      if (count > 0) {
+        const avg = sum / count;
+        const thr = avg * ((params && params.volume_mult) || 1.0);
+        if (avg > 0 && last.volume < thr) lowVolume = true;
+      }
+    }
+
+    if (force || marketOpen || lowVolume) {
+      return candles.slice(0, candles.length - 1);
+    }
+    return candles;
+  }
 
   async _getCandlesSince(ticker, sinceDate) {
     let candles = this.db.getCachedOHLCV(ticker);
@@ -370,7 +430,7 @@ class Scanner {
           useVolFilter
         });
 
-        if (shouldEmit(result, edgeThreshold)) {
+        if (shouldEmit(result, edgeThreshold, useVolFilter)) {
           const entryPrice = result.close;
           const stopLoss = result.stopLoss;
           const takeProfit = result.takeProfit;
