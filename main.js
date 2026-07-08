@@ -29,6 +29,7 @@ function createWindow() {
     minHeight: 700,
     backgroundColor: '#0d0f12',
     title: 'Markov Stock Scanner',
+    titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
