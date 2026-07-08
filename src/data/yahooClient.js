@@ -80,6 +80,18 @@ function processQuotes(quotes, ticker) {
 
   deduped.sort((a, b) => a.date.localeCompare(b.date));
 
+  // ── FILTRO DE INTEGRIDADE ──────────────────────────────────
+  // Remove velas diárias incompletas (close nulo) ou com volume
+  // nulo (corrompidas / em formação) ANTES de qualquer gravação
+  // na cache SQLite. Isto garante que o ohlcv_cache nunca é
+  // poluído com dados inválidos.
+  if (deduped.length > 0) {
+    const last = deduped[deduped.length - 1];
+    if (last.close == null || last.volume <= 0) {
+      deduped.pop();
+    }
+  }
+
   return deduped;
 }
 
