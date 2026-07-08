@@ -99,11 +99,13 @@ class Scanner {
       hooks.onProgress({ processed, total, currentTicker: t.ticker, runId });
 
       try {
-        // ── Obter candles ─────────────────────────────────────
-        let candles = this.db.getCachedOHLCV(t.ticker);
-        if (!candles) {
+        // ── Obter candles frescas da API ──────────────────────
+        let candles;
+        try {
           candles = await fetchWithRetry(t.ticker, 3);
           this.db.cacheOHLCV(t.ticker, candles);
+        } catch (e) {
+          candles = null;
         }
 
         if (!candles || candles.length < 60) {
@@ -211,32 +213,23 @@ class Scanner {
   // ═══════════════════════════════════════════════════════════
 
   // ── Última vela fechada completa ────────────────────────────
-  //  O endpoint chart devolve a vela do dia corrente com
-  //  close=null quando o mercado ainda está aberto. Esta função
-  //  garante que o motor quantitativo processa exclusivamente
-  //  velas inteiramente FECHADAS e CONSOLIDADAS, alinhando os
-  //  resultados a 100% com o TradingView.
+  //  O filtro de close==null / volume nulo está agora dentro de
+  //  processQuotes() (yahooClient), garantindo que a cache SQLite
+  //  nunca é poluída com velas em formação. Aqui apenas se aplicam
+  //  regras de contexto do scanner.
   //
   //  Critérios para descartar a última vela:
-  //    1. close==null → vela em formação (remoção DEFINITIVA)
-  //    2. useLatestClosed=true (override manual da UI)
-  //    3. Dia da semana e a vela é a de hoje (mercado aberto)
-  //    4. Volume da última vela abaixo da média móvel recente
+  //    1. useLatestClosed=true (override manual da UI)
+  //    2. Dia da semana e a vela é a de hoje (mercado aberto)
+  //    3. Volume da última vela abaixo da média móvel recente
   // ──────────────────────────────────────────────────────────
   _pickAnalysisCandles(candles, params) {
     if (!candles || candles.length < 2) return candles;
 
-    // (1) REMOÇÃO DEFINITIVA: close null → vela ainda em formação
-    const lastIdx = candles.length - 1;
-    if (candles[lastIdx] && candles[lastIdx].close == null) {
-      candles.pop();
-    }
-    if (candles.length < 2) return candles;
-
     const last = candles[candles.length - 1];
     const force = params && params.useLatestClosed === true;
 
-    // (2) Hoje em dia útil → vela em formação
+    // (1) Hoje em dia útil → vela em formação
     const now = new Date();
     const dow = now.getDay();
     const isWeekday = dow >= 1 && dow <= 5;
@@ -244,7 +237,7 @@ class Scanner {
     const lastIsToday = last && last.date === today;
     const marketOpen = isWeekday && lastIsToday;
 
-    // (3) Volume da última vela abaixo da média móvel recente
+    // (2) Volume da última vela abaixo da média móvel recente
     let lowVolume = false;
     if (last && Number.isFinite(last.volume)) {
       const n = Math.min(20, candles.length - 1);
@@ -267,14 +260,13 @@ class Scanner {
   }
 
   async _getCandlesSince(ticker, sinceDate) {
-    let candles = this.db.getCachedOHLCV(ticker);
-    if (!candles) {
-      try {
-        candles = await fetchWithRetry(ticker, 3);
-        this.db.cacheOHLCV(ticker, candles);
-      } catch (_) {
-        return null;
-      }
+    let candles;
+    try {
+      candles = await fetchWithRetry(ticker, 3);
+      this.db.cacheOHLCV(ticker, candles);
+    } catch (_) {
+      candles = this.db.getCachedOHLCV(ticker);
+      if (!candles) return null;
     }
     if (!sinceDate) return candles;
     return candles.filter(c => c.date > sinceDate);
