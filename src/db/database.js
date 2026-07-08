@@ -91,6 +91,16 @@ class DB {
         created_at     TEXT DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_active_trades_status ON active_trades(status);
+
+      CREATE TABLE IF NOT EXISTS market_shortcuts (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker    TEXT NOT NULL UNIQUE,
+        nome      TEXT,
+        mercado   TEXT,
+        tipo      TEXT,
+        added_at  TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_market_shortcuts_ticker ON market_shortcuts(ticker);
     `);
 
     const cols = this.db.prepare("PRAGMA table_info(historical_signals)").all();
@@ -250,6 +260,28 @@ class DB {
           motivo_fecho = ?, fechado_em = ?
       WHERE id = ?
     `).run(resultadoPct, precoFecho, 'auto', new Date().toISOString().slice(0, 10), id);
+  }
+
+  addShortcut(ticker, nome, mercado, tipo = '') {
+    return this.db.prepare(`
+      INSERT INTO market_shortcuts (ticker, nome, mercado, tipo)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(ticker) DO UPDATE SET
+        nome = excluded.nome,
+        mercado = excluded.mercado,
+        tipo = excluded.tipo
+    `).run(String(ticker).toUpperCase().trim(), nome || ticker, mercado || '', tipo || '');
+  }
+
+  getShortcuts() {
+    return this.db.prepare(
+      'SELECT id, ticker, nome, mercado, tipo, added_at FROM market_shortcuts ORDER BY added_at ASC, ticker ASC'
+    ).all();
+  }
+
+  removeShortcut(ticker) {
+    return this.db.prepare('DELETE FROM market_shortcuts WHERE ticker = ?')
+      .run(String(ticker).toUpperCase().trim());
   }
 
   close() {

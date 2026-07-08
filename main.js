@@ -3,7 +3,6 @@ const path = require('path');
 const Database = require('./src/db/database');
 const Scanner = require('./src/engine/scanner');
 const yahooClient = require('./src/data/yahooClient');
-const tickerLists = require('./src/data/tickerLists');
 
 let mainWindow = null;
 let db = null;
@@ -96,27 +95,13 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('ticker:search', async (_event, payload) => {
       const query = (payload && payload.query) || '';
-      const q = String(query || '').trim();
-
-      let indexMatches = [];
-      if (q.length > 0) {
-        const found = tickerLists.searchWorldIndices(q);
-        for (const idx of found) {
-          const localList = tickerLists.INDICES[idx.id] || null;
-          indexMatches.push({
-            id: idx.id,
-            name: idx.name,
-            flag: idx.flag,
-            country: idx.country,
-            count: localList ? localList.length : null,
-            hasComponents: localList != null && localList.length > 0,
-            isIndex: true
-          });
-        }
+      const limit = (payload && payload.limit) || 5;
+      try {
+        const tickerResults = await yahooClient.searchTickers(query, limit);
+        return { ok: true, tickers: tickerResults };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err), tickers: [] };
       }
-
-      const tickerResults = await yahooClient.searchTickers(query, 8);
-      return { ok: true, indices: indexMatches, tickers: tickerResults };
     });
 
     ipcMain.handle('ticker:add', async (_event, payload) => {
@@ -140,8 +125,7 @@ app.whenReady().then(async () => {
       const custom = db.getCustomTickers();
       return {
         ok: true,
-        custom,
-        seeds: tickerLists.INDICES
+        custom
       };
     });
 
@@ -200,6 +184,40 @@ app.whenReady().then(async () => {
       try {
         const result = await scanner.updateActiveTrades();
         return { ok: true, ...result };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('shortcut:add', async (_event, payload) => {
+      if (!payload || !payload.ticker) return { ok: false, error: 'missing-ticker' };
+      try {
+        db.addShortcut(
+          payload.ticker,
+          payload.nome || payload.ticker,
+          payload.mercado || '',
+          payload.tipo || ''
+        );
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('shortcut:list', async () => {
+      try {
+        const shortcuts = db.getShortcuts();
+        return { ok: true, shortcuts };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('shortcut:remove', async (_event, payload) => {
+      if (!payload || !payload.ticker) return { ok: false, error: 'missing-ticker' };
+      try {
+        db.removeShortcut(payload.ticker);
+        return { ok: true };
       } catch (err) {
         return { ok: false, error: err.message || String(err) };
       }

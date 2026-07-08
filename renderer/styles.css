@@ -413,55 +413,241 @@ html, body {
   cursor: wait;
 }
 
-/* ============== SEEDS ============== */
-.seed-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 6px;
+/* ============== SHORTCUTS (Atalhos de Mercado) ============== */
+.shortcuts-search-wrap {
+  position: relative;
+  margin-bottom: 10px;
 }
-.seed-btn {
+.shortcuts-search-row {
   display: flex;
-  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+.shortcuts-search-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 7px 10px;
+  outline: none;
+  transition: border 0.15s, box-shadow 0.15s;
+}
+.shortcuts-search-input::placeholder { color: var(--text-mute); }
+.shortcuts-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.shortcuts-search-btn {
+  flex: 0 0 auto;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 10px 4px;
+}
+.shortcuts-search-btn:hover { background: #2563eb; }
+.shortcuts-search-btn:disabled {
+  background: var(--surface-2);
+  color: var(--text-mute);
+  cursor: wait;
+}
+
+.shortcuts-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
+  max-height: 360px;
+  overflow-y: auto;
+  animation: fadeIn 0.12s ease-out;
+}
+.shortcuts-results[hidden] { display: none; }
+
+.shortcut-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+.shortcut-result:last-child { border-bottom: none; }
+.shortcut-result:hover { background: var(--surface-2); }
+.shortcut-result-symbol {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+  min-width: 70px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.shortcut-result-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.shortcut-result-name {
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shortcut-result-meta {
+  font-size: 10px;
+  color: var(--text-mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shortcut-result-add {
+  flex-shrink: 0;
+  border: none;
+  background: var(--bull);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.shortcut-result-add:hover { background: #059669; }
+.shortcut-result-add:disabled {
+  background: var(--surface-2);
+  color: var(--text-mute);
+  cursor: default;
+}
+.shortcut-result.is-added .shortcut-result-add {
+  background: var(--surface-2);
+  color: var(--text-dim);
+}
+.shortcut-result.is-added {
+  opacity: 0.6;
+}
+
+.shortcuts-loading,
+.shortcuts-empty-results,
+.shortcuts-error {
+  padding: 14px 12px;
+  text-align: center;
+  color: var(--text-mute);
+  font-size: 12px;
+}
+.shortcuts-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.shortcuts-loading::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.shortcuts-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.shortcuts-empty {
+  padding: 14px 8px;
+  text-align: center;
+  color: var(--text-mute);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.shortcut-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  color: var(--text);
-  font-family: var(--font);
+  border-radius: 5px;
   transition: all 0.15s;
-  position: relative;
+  cursor: pointer;
 }
-.seed-btn:hover {
+.shortcut-chip:hover {
   border-color: var(--accent);
   background: var(--surface-2);
 }
-.seed-btn:active { transform: scale(0.97); }
-.seed-btn .flag {
-  font-size: 9px;
-  padding: 1px 5px;
-}
-.seed-btn .seed-name {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-.seed-btn .seed-count {
+.shortcut-chip-symbol {
   font-family: var(--mono);
-  font-size: 10px;
-  color: var(--text-mute);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 0 0 auto;
 }
-.seed-btn.is-added { border-color: var(--bull); }
-.seed-btn.is-added::after {
-  content: "✓";
-  position: absolute;
-  top: 3px;
-  right: 5px;
-  color: var(--bull);
-  font-size: 10px;
-  font-weight: 700;
+.shortcut-chip-name {
+  font-size: 11px;
+  color: var(--text-dim);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shortcut-chip-market {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-mute);
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+.shortcut-chip-remove {
+  background: none;
+  border: none;
+  color: var(--text-mute);
+  cursor: pointer;
+  font-size: 14px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.shortcut-chip-remove:hover {
+  color: var(--bear);
+  background: var(--bear-soft);
 }
 
 /* ============== WATCHLIST ============== */

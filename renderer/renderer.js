@@ -18,7 +18,6 @@
   const btnClearAll = document.getElementById('btn-clear-all');
 
   let watchlist = [];
-  let seeds = {};
   let searchDebounceId = null;
   let searchSeq = 0;
   let running = false;
@@ -124,83 +123,33 @@
     }
   }
 
-  function isIndexFullyAdded(indexId) {
-    const localList = (seeds && seeds[indexId]) || [];
-    if (localList.length > 0) {
-      return localList.every(t => isInWatchlist(t.ticker));
-    }
-    return false;
-  }
-
   function renderSuggestions(res, query) {
-    const indices = (res && res.indices) || [];
     const tickers = (res && res.tickers) || [];
-    if (indices.length === 0 && tickers.length === 0) {
+    if (tickers.length === 0) {
       suggestionsEl.innerHTML = `<div class="suggestion-empty">Sem resultados para "${escapeHtml(query)}"</div>`;
       suggestionsEl.hidden = false;
       return;
     }
     suggestionsEl.innerHTML = '';
 
-    if (indices.length > 0) {
-      const header = document.createElement('div');
-      header.className = 'suggestion-section-header';
-      header.innerHTML = '<span class="section-icon">📊</span> Índices';
-      suggestionsEl.appendChild(header);
-
-      for (const idx of indices) {
-        const div = document.createElement('div');
-        div.className = 'suggestion suggestion-index';
-        div.dataset.id = idx.id;
-        const isAdded = isIndexFullyAdded(idx.id);
-        if (isAdded) div.classList.add('is-added');
-        const countLabel = idx.count != null
-          ? `${idx.count} ações`
-          : 'não disponível';
-        div.innerHTML = `
-          <span class="suggestion-index-flag flag">${escapeHtml(idx.flag)}</span>
-          <span class="suggestion-index-name">
-            <span class="suggestion-index-title">${escapeHtml(idx.name)}</span>
-            <span class="suggestion-index-country">${escapeHtml(idx.country || '')}</span>
-          </span>
-          <span class="suggestion-count">${countLabel}</span>
-          <button class="suggestion-add">${isAdded ? 'Adicionado' : 'Adicionar todos'}</button>
-        `;
-        if (!isAdded) {
-          const add = () => addIndexToWatchlist(idx);
-          div.querySelector('.suggestion-add').addEventListener('click', (e) => { e.stopPropagation(); add(); });
-          div.addEventListener('click', add);
-        }
-        suggestionsEl.appendChild(div);
+    for (const r of tickers) {
+      const div = document.createElement('div');
+      div.className = 'suggestion';
+      if (isInWatchlist(r.ticker)) div.classList.add('is-added');
+      div.innerHTML = `
+        <span class="suggestion-symbol">${escapeHtml(r.ticker)}</span>
+        <span class="suggestion-name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
+        ${r.exchange ? `<span class="suggestion-exchange">${escapeHtml(r.exchange)}</span>` : ''}
+        <button class="suggestion-add">${isInWatchlist(r.ticker) ? 'Adicionado' : 'Adicionar'}</button>
+      `;
+      if (!isInWatchlist(r.ticker)) {
+        div.querySelector('.suggestion-add').addEventListener('click', (e) => {
+          e.stopPropagation();
+          addTicker(r);
+        });
+        div.addEventListener('click', () => addTicker(r));
       }
-    }
-
-    if (tickers.length > 0) {
-      if (indices.length > 0) {
-        const header = document.createElement('div');
-        header.className = 'suggestion-section-header';
-        header.innerHTML = '<span class="section-icon">📈</span> Ações';
-        suggestionsEl.appendChild(header);
-      }
-      for (const r of tickers) {
-        const div = document.createElement('div');
-        div.className = 'suggestion';
-        if (isInWatchlist(r.ticker)) div.classList.add('is-added');
-        div.innerHTML = `
-          <span class="suggestion-symbol">${escapeHtml(r.ticker)}</span>
-          <span class="suggestion-name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
-          ${r.exchange ? `<span class="suggestion-exchange">${escapeHtml(r.exchange)}</span>` : ''}
-          <button class="suggestion-add">${isInWatchlist(r.ticker) ? 'Adicionado' : 'Adicionar'}</button>
-        `;
-        if (!isInWatchlist(r.ticker)) {
-          div.querySelector('.suggestion-add').addEventListener('click', (e) => {
-            e.stopPropagation();
-            addTicker(r);
-          });
-          div.addEventListener('click', () => addTicker(r));
-        }
-        suggestionsEl.appendChild(div);
-      }
+      suggestionsEl.appendChild(div);
     }
     suggestionsEl.hidden = false;
   }
@@ -219,10 +168,10 @@
     const seq = ++searchSeq;
     renderLoading();
     try {
-      const res = await window.api.searchTicker(query);
+      const res = await window.api.searchTicker(query, 8);
       if (seq !== searchSeq) return;
       if (!res || !res.ok) {
-        renderSuggestions({ indices: [], tickers: [] }, query);
+        renderSuggestions({ tickers: [] }, query);
       } else {
         renderSuggestions(res, query);
       }
@@ -231,44 +180,6 @@
       suggestionsEl.innerHTML = `<div class="suggestion-empty">Erro: ${escapeHtml(err.message || String(err))}</div>`;
       suggestionsEl.hidden = false;
     }
-  }
-
-  async function addIndexToWatchlist(idx) {
-    const indexId = idx.id;
-    const indexName = idx.name || indexId;
-    const localList = (seeds && seeds[indexId]) || [];
-
-    if (localList.length === 0) {
-      status.textContent = `Lista de ${indexName} não disponível. Adiciona tickers individuais pela pesquisa.`;
-      return;
-    }
-
-    let added = 0;
-    let lastAdded = null;
-    for (const t of localList) {
-      if (!isInWatchlist(t.ticker)) {
-        await addTicker({ ticker: t.ticker, name: t.name || '', index: indexId });
-        added++;
-        lastAdded = t.ticker;
-      }
-    }
-    if (lastAdded) {
-      renderWatchlist(lastAdded);
-    }
-    status.textContent = added > 0
-      ? `Adicionados ${added} tickers de ${indexName} (Yahoo).`
-      : `Todos os ${localList.length} tickers de ${indexName} já estavam na watchlist.`;
-    hideSuggestions();
-  }
-
-  function updateSeedBadges() {
-    document.querySelectorAll('.seed-btn').forEach(btn => {
-      const idx = btn.dataset.seed;
-      const seedList = seeds[idx] || [];
-      const countEl = btn.querySelector('.seed-count');
-      if (countEl) countEl.textContent = seedList.length;
-      btn.classList.toggle('is-added', watchlist.some(t => t.index === idx));
-    });
   }
 
   function openAddModal() {
@@ -462,10 +373,9 @@
   }
 
   function renderSearchModalResults(res, query) {
-    const indices = (res && res.indices) || [];
     const tickers = (res && res.tickers) || [];
 
-    if (indices.length === 0 && tickers.length === 0) {
+    if (tickers.length === 0) {
       modalSearchResults.innerHTML = `
         <div class="modal-search-no-results">
           Sem resultados para <strong>"${escapeHtml(query)}"</strong>
@@ -487,81 +397,46 @@
 
     modalSearchResults.innerHTML = '';
 
-    if (indices.length > 0) {
-      const section = document.createElement('div');
-      section.className = 'modal-search-section';
-      section.innerHTML = `
-        <div class="modal-search-section-header">
-          <div class="modal-search-section-title">📊 Índices</div>
-          <div class="modal-search-section-count">${indices.length}</div>
+    const section = document.createElement('div');
+    section.className = 'modal-search-section';
+    section.innerHTML = `
+      <div class="modal-search-section-header">
+        <div class="modal-search-section-title">📈 Resultados</div>
+        <div class="modal-search-section-count">${tickers.length}</div>
+      </div>
+    `;
+    for (const r of tickers) {
+      const div = document.createElement('div');
+      div.className = 'modal-search-result';
+      const isAdded = isInWatchlist(r.ticker);
+      if (isAdded) div.classList.add('is-added');
+      div.innerHTML = `
+        <span class="modal-search-symbol">${escapeHtml(r.ticker)}</span>
+        <div class="modal-search-info">
+          <div class="modal-search-name">${escapeHtml(r.name)}</div>
+          <div class="modal-search-meta">${escapeHtml(r.type || '')}</div>
         </div>
+        ${r.exchange ? `<span class="modal-search-exchange">${escapeHtml(r.exchange)}</span>` : ''}
+        <button class="modal-search-add-btn">${isAdded ? 'Adicionado' : 'Adicionar'}</button>
       `;
-      for (const idx of indices) {
-        const div = document.createElement('div');
-        div.className = 'modal-search-result modal-search-result-index';
-        const isAdded = isIndexFullyAdded(idx.id);
-        if (isAdded) div.classList.add('is-added');
-        const countLabel = idx.count != null ? `${idx.count} ações` : 'não disponível';
-        div.innerHTML = `
-          <span class="modal-search-flag">${escapeHtml(idx.flag)}</span>
-          <div class="modal-search-info">
-            <div class="modal-search-name">${escapeHtml(idx.name)}</div>
-            <div class="modal-search-meta">${escapeHtml(idx.country || '')} · ${countLabel}</div>
-          </div>
-          <button class="modal-search-add-btn">${isAdded ? 'Adicionado' : 'Adicionar todos'}</button>
-        `;
-        if (!isAdded) {
-          const add = () => addIndexToWatchlist(idx);
-          div.querySelector('.modal-search-add-btn').addEventListener('click', (e) => { e.stopPropagation(); add(); });
-          div.addEventListener('click', add);
-        }
-        section.appendChild(div);
+      if (!isAdded) {
+        const add = () => addTicker(r);
+        div.querySelector('.modal-search-add-btn').addEventListener('click', (e) => { e.stopPropagation(); add(); });
+        div.addEventListener('click', add);
       }
-      modalSearchResults.appendChild(section);
+      section.appendChild(div);
     }
-
-    if (tickers.length > 0) {
-      const section = document.createElement('div');
-      section.className = 'modal-search-section';
-      section.innerHTML = `
-        <div class="modal-search-section-header">
-          <div class="modal-search-section-title">📈 Ações</div>
-          <div class="modal-search-section-count">${tickers.length}</div>
-        </div>
-      `;
-      for (const r of tickers) {
-        const div = document.createElement('div');
-        div.className = 'modal-search-result';
-        const isAdded = isInWatchlist(r.ticker);
-        if (isAdded) div.classList.add('is-added');
-        div.innerHTML = `
-          <span class="modal-search-symbol">${escapeHtml(r.ticker)}</span>
-          <div class="modal-search-info">
-            <div class="modal-search-name">${escapeHtml(r.name)}</div>
-            <div class="modal-search-meta">${escapeHtml(r.type || '')}</div>
-          </div>
-          ${r.exchange ? `<span class="modal-search-exchange">${escapeHtml(r.exchange)}</span>` : ''}
-          <button class="modal-search-add-btn">${isAdded ? 'Adicionado' : 'Adicionar'}</button>
-        `;
-        if (!isAdded) {
-          const add = () => addTicker(r);
-          div.querySelector('.modal-search-add-btn').addEventListener('click', (e) => { e.stopPropagation(); add(); });
-          div.addEventListener('click', add);
-        }
-        section.appendChild(div);
-      }
-      modalSearchResults.appendChild(section);
-    }
+    modalSearchResults.appendChild(section);
   }
 
   async function doModalSearch(query) {
     const seq = ++modalSearchSeq;
     renderSearchModalLoading();
     try {
-      const res = await window.api.searchTicker(query);
+      const res = await window.api.searchTicker(query, 8);
       if (seq !== modalSearchSeq) return;
       if (!res || !res.ok) {
-        renderSearchModalResults({ indices: [], tickers: [] }, query);
+        renderSearchModalResults({ tickers: [] }, query);
       } else {
         renderSearchModalResults(res, query);
       }
@@ -619,15 +494,11 @@
     try {
       const res = await window.api.listTickers();
       if (res && res.ok) {
-        seeds = res.seeds || {};
         watchlist = (res.custom || []).map(t => ({ ...t, index: 'CUSTOM' }));
         renderWatchlist();
-        Object.keys(seeds).forEach(idx => {
-          const countEl = document.getElementById('seed-count-' + idx);
-          if (countEl) countEl.textContent = (seeds[idx] || []).length;
-        });
-        updateSeedBadges();
       }
+
+      await loadShortcuts();
 
       const paramsRes = await window.api.getParams();
       if (paramsRes && paramsRes.ok) {
@@ -652,7 +523,6 @@
     const entry = { ticker: t.ticker, name: t.name || '', index: t.index || 'CUSTOM' };
     watchlist.push(entry);
     renderWatchlist(t.ticker);
-    updateSeedBadges();
     status.textContent = `${t.ticker} adicionado à watchlist.`;
     try {
       await window.api.addTicker({ ticker: t.ticker, name: t.name, exchange: t.exchange, type: t.type });
@@ -668,12 +538,10 @@
       setTimeout(() => {
         watchlist = watchlist.filter(t => t.ticker !== ticker);
         renderWatchlist();
-        updateSeedBadges();
       }, 180);
     } else {
       watchlist = watchlist.filter(t => t.ticker !== ticker);
       renderWatchlist();
-      updateSeedBadges();
     }
     try {
       await window.api.removeTicker(ticker);
@@ -682,27 +550,11 @@
     }
   }
 
-  async function addSeed(idx) {
-    const seedList = seeds[idx] || [];
-    if (seedList.length === 0) return;
-    let added = 0;
-    for (const t of seedList) {
-      if (!isInWatchlist(t.ticker)) {
-        await addTicker({ ...t, index: idx });
-        added++;
-      }
-    }
-    status.textContent = added > 0
-      ? `Adicionados ${added} tickers de ${idx}.`
-      : `Todos os tickers de ${idx} já estavam na watchlist.`;
-  }
-
   async function clearAll() {
     if (watchlist.length === 0) return;
     if (!confirm(`Remover todos os ${watchlist.length} tickers da watchlist?`)) return;
     watchlist = [];
     renderWatchlist();
-    updateSeedBadges();
     try {
       await window.api.clearTickers();
     } catch (err) {
@@ -797,10 +649,6 @@
       hideSuggestions();
     });
   }
-
-  document.querySelectorAll('.seed-btn').forEach(b => {
-    b.addEventListener('click', () => addSeed(b.dataset.seed));
-  });
 
   btnClearAll.addEventListener('click', clearAll);
 
@@ -1051,6 +899,207 @@
       if (e.target === modalBacktest) closeBacktestModal();
     });
   }
+
+  // ═══════════════════════════════════════════════════════════
+  //  ATALHOS DE MERCADO (pesquisa livre via Yahoo)
+  // ═══════════════════════════════════════════════════════════
+  const shortcutSearchInput = document.getElementById('ticker-search-input');
+  const shortcutSearchBtn = document.getElementById('btn-shortcuts-search');
+  const shortcutResultsEl = document.getElementById('shortcuts-results');
+  const shortcutGridEl = document.getElementById('shortcuts-grid');
+  const shortcutEmptyEl = document.getElementById('shortcuts-empty');
+
+  let shortcuts = [];
+  let shortcutSearchSeq = 0;
+  let lastShortcutTickers = [];
+
+  function renderShortcuts() {
+    if (!shortcutGridEl) return;
+    const existing = shortcutGridEl.querySelectorAll('.shortcut-chip');
+    existing.forEach(el => el.remove());
+
+    if (shortcuts.length === 0) {
+      if (shortcutEmptyEl) shortcutEmptyEl.style.display = 'block';
+      return;
+    }
+    if (shortcutEmptyEl) shortcutEmptyEl.style.display = 'none';
+
+    for (const s of shortcuts) {
+      const chip = document.createElement('div');
+      chip.className = 'shortcut-chip';
+      chip.dataset.ticker = s.ticker;
+      chip.title = `Clica para adicionar ${s.ticker} à watchlist. Botão × remove o atalho.`;
+      chip.innerHTML = `
+        <span class="shortcut-chip-symbol">${escapeHtml(s.ticker)}</span>
+        <span class="shortcut-chip-name">${escapeHtml(s.nome || '')}</span>
+        ${s.mercado ? `<span class="shortcut-chip-market">${escapeHtml(s.mercado)}</span>` : ''}
+        <button class="shortcut-chip-remove" title="Remover atalho">×</button>
+      `;
+      chip.addEventListener('click', (e) => {
+        if (e.target.classList.contains('shortcut-chip-remove')) return;
+        addTicker({
+          ticker: s.ticker,
+          name: s.nome || s.ticker,
+          exchange: s.mercado || '',
+          type: s.tipo || ''
+        });
+      });
+      chip.querySelector('.shortcut-chip-remove').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await removeShortcut(s.ticker);
+      });
+      shortcutGridEl.appendChild(chip);
+    }
+  }
+
+  async function loadShortcuts() {
+    try {
+      const res = await window.api.listShortcuts();
+      if (res && res.ok) {
+        shortcuts = res.shortcuts || [];
+        renderShortcuts();
+      }
+    } catch (err) {
+      console.warn('loadShortcuts failed:', err);
+    }
+  }
+
+  async function addShortcut(trade) {
+    try {
+      const res = await window.api.addShortcut({
+        ticker: trade.ticker,
+        nome: trade.nome || trade.ticker,
+        mercado: trade.mercado || trade.exchange || '',
+        tipo: trade.tipo || trade.type || ''
+      });
+      if (!res || !res.ok) {
+        status.textContent = 'Erro ao guardar atalho: ' + (res ? res.error : 'desconhecido');
+        return;
+      }
+      status.textContent = `Atalho ${trade.ticker} guardado.`;
+      await loadShortcuts();
+    } catch (err) {
+      status.textContent = 'Erro: ' + (err.message || String(err));
+    }
+  }
+
+  async function removeShortcut(ticker) {
+    try {
+      const res = await window.api.removeShortcut(ticker);
+      if (res && res.ok) {
+        await loadShortcuts();
+      }
+    } catch (err) {
+      console.warn('removeShortcut failed:', err);
+    }
+  }
+
+  function renderShortcutResults(tickers) {
+    if (!shortcutResultsEl) return;
+    if (!tickers || tickers.length === 0) {
+      shortcutResultsEl.innerHTML = '<div class="shortcuts-empty-results">Sem resultados para esta pesquisa.</div>';
+      shortcutResultsEl.hidden = false;
+      return;
+    }
+
+    shortcutResultsEl.innerHTML = '';
+    const addedTickers = new Set(shortcuts.map(s => s.ticker));
+
+    for (const t of tickers) {
+      const isAdded = addedTickers.has(t.ticker);
+      const div = document.createElement('div');
+      div.className = 'shortcut-result' + (isAdded ? ' is-added' : '');
+      div.innerHTML = `
+        <span class="shortcut-result-symbol">${escapeHtml(t.ticker)}</span>
+        <div class="shortcut-result-info">
+          <div class="shortcut-result-name">${escapeHtml(t.name || '')}</div>
+          <div class="shortcut-result-meta">${escapeHtml(t.exchange || t.type || '')}</div>
+        </div>
+        <button class="shortcut-result-add">${isAdded ? 'Adicionado' : '➕ Adicionar'}</button>
+      `;
+      if (!isAdded) {
+        const btn = div.querySelector('.shortcut-result-add');
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          btn.disabled = true;
+          btn.textContent = 'A guardar...';
+          await addShortcut({
+            ticker: t.ticker,
+            nome: t.name || t.ticker,
+            mercado: t.exchange || '',
+            tipo: t.type || ''
+          });
+          renderShortcutResults(lastShortcutTickers);
+        });
+      }
+      shortcutResultsEl.appendChild(div);
+    }
+    shortcutResultsEl.hidden = false;
+  }
+
+  function renderShortcutLoading() {
+    if (!shortcutResultsEl) return;
+    shortcutResultsEl.innerHTML = '<div class="shortcuts-loading">A pesquisar no Yahoo...</div>';
+    shortcutResultsEl.hidden = false;
+  }
+
+  function renderShortcutError(msg) {
+    if (!shortcutResultsEl) return;
+    shortcutResultsEl.innerHTML = `<div class="shortcuts-error">${escapeHtml(msg)}</div>`;
+    shortcutResultsEl.hidden = false;
+  }
+
+  async function doShortcutSearch() {
+    if (!shortcutSearchInput || !shortcutResultsEl) return;
+    const query = shortcutSearchInput.value.trim();
+    if (query.length === 0) {
+      shortcutResultsEl.hidden = true;
+      shortcutResultsEl.innerHTML = '';
+      return;
+    }
+    const seq = ++shortcutSearchSeq;
+    renderShortcutLoading();
+    try {
+      const res = await window.api.searchTicker(query, 5);
+      if (seq !== shortcutSearchSeq) return;
+      if (!res || !res.ok) {
+        renderShortcutError(res && res.error ? res.error : 'Erro desconhecido');
+        return;
+      }
+      lastShortcutTickers = res.tickers || [];
+      renderShortcutResults(lastShortcutTickers);
+    } catch (err) {
+      if (seq !== shortcutSearchSeq) return;
+      renderShortcutError(err.message || String(err));
+    }
+  }
+
+  if (shortcutSearchBtn) {
+    shortcutSearchBtn.addEventListener('click', doShortcutSearch);
+  }
+  if (shortcutSearchInput) {
+    shortcutSearchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doShortcutSearch();
+      } else if (e.key === 'Escape') {
+        shortcutResultsEl.hidden = true;
+      }
+    });
+    shortcutSearchInput.addEventListener('input', () => {
+      if (shortcutSearchInput.value.trim().length === 0) {
+        shortcutResultsEl.hidden = true;
+      }
+    });
+  }
+  document.addEventListener('click', (e) => {
+    if (!shortcutResultsEl) return;
+    if (shortcutResultsEl.hidden) return;
+    if (e.target === shortcutSearchInput) return;
+    if (e.target === shortcutSearchBtn) return;
+    if (shortcutResultsEl.contains(e.target)) return;
+    shortcutResultsEl.hidden = true;
+  });
 
   registerParamChangeListeners();
   loadInitial();
