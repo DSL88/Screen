@@ -92,6 +92,7 @@ html, body {
   padding: 20px 16px;
   gap: 20px;
   overflow-y: auto;
+  -webkit-app-region: no-drag;
 }
 
 .brand {
@@ -683,6 +684,7 @@ html, body {
   flex-direction: column;
   overflow: hidden;
   background: var(--bg);
+  -webkit-app-region: no-drag;
 }
 
 .topbar {
@@ -707,6 +709,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 16px;
+  -webkit-app-region: no-drag;
 }
 
 .progress {
@@ -924,6 +927,7 @@ html, body {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
+  -webkit-app-region: no-drag;
 }
 .tab-btn:hover { color: var(--text); }
 .tab-btn.active {
@@ -935,6 +939,7 @@ html, body {
   flex: 1;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
 }
 .tab-content.active {
   display: flex;
