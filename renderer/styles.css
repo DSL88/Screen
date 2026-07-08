@@ -1047,6 +1047,93 @@ html, body {
   padding-bottom: 24px;
 }
 
+/* ============== PORTFOLIO ALERTS ============== */
+.portfolio-table th.col-alerta,
+.portfolio-table td.col-alerta {
+  text-align: left;
+  min-width: 180px;
+}
+
+.row-alerta-stop {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.08) 0%, rgba(245, 158, 11, 0.02) 100%) !important;
+  border-left: 3px solid var(--warn) !important;
+}
+.row-alerta-stop:hover {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.05) 100%) !important;
+}
+
+.row-alerta-tp {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.08) 0%, rgba(16, 185, 129, 0.02) 100%) !important;
+  border-left: 3px solid var(--bull) !important;
+}
+.row-alerta-tp:hover {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%) !important;
+}
+
+.row-alerta-inversao {
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.10) 0%, rgba(239, 68, 68, 0.03) 100%) !important;
+  border-left: 3px solid var(--bear) !important;
+  animation: alertPulse 2s ease-in-out infinite;
+}
+.row-alerta-inversao:hover {
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.18) 0%, rgba(239, 68, 68, 0.06) 100%) !important;
+}
+
+@keyframes alertPulse {
+  0%, 100% { box-shadow: inset 3px 0 0 0 var(--bear); }
+  50%      { box-shadow: inset 3px 0 8px 1px rgba(239, 68, 68, 0.35); }
+}
+
+.alerta-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.alerta-badge-stop {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warn);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+.alerta-badge-tp {
+  background: var(--bull-soft);
+  color: var(--bull);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+.alerta-badge-inversao {
+  background: var(--bear-soft);
+  color: var(--bear);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+.alerta-badge-manter {
+  background: transparent;
+  color: var(--text-mute);
+  border: 1px solid var(--border);
+  font-weight: 500;
+}
+
+.alerta-dist {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-left: 6px;
+}
+
+.btn-reanalisar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3), 0 0 20px rgba(59, 130, 246, 0.08);
+}
+.btn-reanalisar:hover {
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.45), 0 0 32px rgba(59, 130, 246, 0.15);
+}
+
 /* ============== INVEST MODAL ============== */
 .modal-investir-dialog {
   width: 460px !important;

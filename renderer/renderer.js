@@ -1152,18 +1152,24 @@
   const portfolioClosedSection = document.getElementById('portfolio-closed-section');
   const portfolioStatus = document.getElementById('portfolio-status');
   const btnSyncTrades = document.getElementById('btn-sync-trades');
+  const btnReanalisar = document.getElementById('btn-reanalisar');
 
-  function renderProgresso(trade) {
+  // Cache local de estados calculados na última reanálise (ticker -> state)
+  let lastStatesByTicker = {};
+  let lastActiveTrades = [];
+
+  function renderProgresso(trade, state) {
     if (!trade.stop_loss || !trade.take_profit || !trade.preco_entrada) return '<span style="color: var(--text-mute);">—</span>';
 
+    const refPrice = (state && state.preco_atual != null) ? state.preco_atual : trade.preco_entrada;
     const range = Math.abs(trade.take_profit - trade.stop_loss);
     if (range === 0) return '<span style="color: var(--text-mute);">—</span>';
 
     let pct;
     if (trade.direcao === 'COMPRA') {
-      pct = ((trade.preco_entrada - trade.stop_loss) / range) * 100;
+      pct = ((refPrice - trade.stop_loss) / range) * 100;
     } else {
-      pct = ((trade.stop_loss - trade.preco_entrada) / range) * 100;
+      pct = ((trade.stop_loss - refPrice) / range) * 100;
     }
     pct = Math.max(0, Math.min(100, pct));
 
@@ -1177,9 +1183,51 @@
     `;
   }
 
-  function renderPortfolioRow(trade) {
+  function renderAlerta(state) {
+    if (!state) {
+      return '<span class="alerta-badge alerta-badge-manter">— Sem reanálise —</span>';
+    }
+
+    const distStop = state.distancia_stop_pct;
+    const distTp = state.distancia_tp_pct;
+    const fmt = (n) => (n != null ? n.toFixed(2) + '%' : '—');
+
+    switch (state.status) {
+      case 'alerta_stop':
+        return `<span class="alerta-badge alerta-badge-stop">⚠️ Próximo do Stop!</span><span class="alerta-dist">dist: ${fmt(distStop)}</span>`;
+      case 'alerta_tp':
+        return `<span class="alerta-badge alerta-badge-tp">🚀 Quase no Alvo!</span><span class="alerta-dist">dist: ${fmt(distTp)}</span>`;
+      case 'alerta_inversao':
+        return `<span class="alerta-badge alerta-badge-inversao">🚨 Inversão de Tendência!</span><span class="alerta-dist">Markov → ${escapeHtml(state.current_direction || '?')}</span>`;
+      case 'fechado':
+        return '<span class="alerta-badge alerta-badge-manter">FECHADO</span>';
+      case 'manter':
+      default:
+        return `<span class="alerta-badge alerta-badge-manter">✓ A manter</span><span class="alerta-dist">SL: ${fmt(distStop)} · TP: ${fmt(distTp)}</span>`;
+    }
+  }
+
+  function renderPortfolioRow(trade, state) {
     const tr = document.createElement('tr');
     const dirClass = trade.direcao === 'COMPRA' ? 'dir-COMPRA' : 'dir-VENDA';
+
+    // Mapear status para classe de linha
+    let rowClass = '';
+    if (state) {
+      if (state.status === 'alerta_stop') rowClass = 'row-alerta-stop';
+      else if (state.status === 'alerta_tp') rowClass = 'row-alerta-tp';
+      else if (state.status === 'alerta_inversao') rowClass = 'row-alerta-inversao';
+    }
+    if (rowClass) tr.classList.add(rowClass);
+
+    const precoAtual = (state && state.preco_atual != null) ? state.preco_atual : trade.preco_atual;
+    const resultadoAtual = state && state.resultado_pct_atual != null ? state.resultado_pct_atual : null;
+    const resultadoColor = resultadoAtual == null ? 'var(--text-mute)'
+      : resultadoAtual >= 0 ? 'var(--bull)' : 'var(--bear)';
+    const resultadoText = resultadoAtual != null
+      ? (resultadoAtual >= 0 ? '+' : '') + resultadoAtual.toFixed(2) + '%'
+      : '—';
+
     tr.innerHTML = `
       <td class="col-ticker ticker">${escapeHtml(trade.ticker)}</td>
       <td class="col-name name">${escapeHtml(trade.nome || '')}</td>
@@ -1187,10 +1235,11 @@
       <td class="col-num">${trade.preco_entrada != null ? trade.preco_entrada.toFixed(2) : '—'}</td>
       <td class="col-num sl-val">${trade.stop_loss != null ? trade.stop_loss.toFixed(2) : '—'}</td>
       <td class="col-num tp-val">${trade.take_profit != null ? trade.take_profit.toFixed(2) : '—'}</td>
-      <td class="col-num price-val">${trade.preco_atual != null ? trade.preco_atual.toFixed(2) : '—'}</td>
-      <td class="col-progresso">${renderProgresso(trade)}</td>
+      <td class="col-num price-val">${precoAtual != null ? precoAtual.toFixed(2) : '—'}</td>
+      <td class="col-progresso">${renderProgresso(trade, state)}</td>
       <td class="col-status"><span class="portfolio-status-badge portfolio-status-aberto">ABERTO</span></td>
-      <td class="col-num" style="color: var(--text-mute);">—</td>
+      <td class="col-alerta">${renderAlerta(state)}</td>
+      <td class="col-num" style="color: ${resultadoColor}; font-weight: 600;">${resultadoText}</td>
     `;
     return tr;
   }
@@ -1214,23 +1263,30 @@
     return tr;
   }
 
+  function renderPortfolioTable() {
+    portfolioBody.innerHTML = '';
+    if (lastActiveTrades.length === 0) {
+      portfolioBody.innerHTML = '<tr class="empty"><td colspan="11">Nenhuma posição ativa. Clique em "Investir" num sinal do scanner para começar.</td></tr>';
+      return;
+    }
+    for (const t of lastActiveTrades) {
+      const state = lastStatesByTicker[t.ticker] || null;
+      portfolioBody.appendChild(renderPortfolioRow(t, state));
+    }
+  }
+
   async function loadPortfolio() {
     try {
       const res = await window.api.listTrades();
       if (!res || !res.ok) {
-        portfolioBody.innerHTML = '<tr class="empty"><td colspan="10">Erro ao carregar posições.</td></tr>';
+        portfolioBody.innerHTML = '<tr class="empty"><td colspan="11">Erro ao carregar posições.</td></tr>';
         return;
       }
 
-      const active = res.active || [];
+      lastActiveTrades = res.active || [];
       const closed = res.closed || [];
 
-      portfolioBody.innerHTML = '';
-      if (active.length === 0) {
-        portfolioBody.innerHTML = '<tr class="empty"><td colspan="10">Nenhuma posição ativa. Clique em "Investir" num sinal do scanner para começar.</td></tr>';
-      } else {
-        active.forEach(t => portfolioBody.appendChild(renderPortfolioRow(t)));
-      }
+      renderPortfolioTable();
 
       portfolioClosedBody.innerHTML = '';
       if (closed.length > 0) {
@@ -1240,8 +1296,9 @@
         portfolioClosedSection.hidden = true;
       }
 
-      portfolioStatus.textContent = active.length > 0
-        ? `${active.length} posição(ões) ativa(s) em monitorização.`
+      const hasStates = Object.keys(lastStatesByTicker).length > 0;
+      portfolioStatus.textContent = lastActiveTrades.length > 0
+        ? `${lastActiveTrades.length} posição(ões) ativa(s) em monitorização.${hasStates ? ' (última reanálise aplicada)' : ''}`
         : 'Posições ativas abertas a partir dos sinais do scanner.';
     } catch (err) {
       portfolioStatus.textContent = 'Erro: ' + (err.message || String(err));
@@ -1260,11 +1317,20 @@
         return;
       }
 
-      if (res.closed && res.closed.length > 0) {
-        portfolioStatus.textContent = `Sincronização concluída: ${res.closed.length} trade(s) fechado(s).`;
-      } else {
-        portfolioStatus.textContent = res.message || 'Sincronização concluída. Nenhum trade fechado.';
+      // Atualizar cache de estados com o resultado da reanálise
+      if (Array.isArray(res.states)) {
+        lastStatesByTicker = {};
+        for (const s of res.states) lastStatesByTicker[s.ticker] = s;
       }
+
+      const closedCount = (res.closed && res.closed.length) || 0;
+      const alertCount = res.states ? res.states.filter(s => s.status !== 'manter').length : 0;
+      const parts = [];
+      if (closedCount > 0) parts.push(`${closedCount} trade(s) fechado(s)`);
+      if (alertCount > 0) parts.push(`${alertCount} alerta(s) ativo(s)`);
+      portfolioStatus.textContent = parts.length > 0
+        ? `Sincronização concluída: ${parts.join(', ')}.`
+        : (res.message || 'Sincronização concluída. Sem alertas.');
 
       await loadPortfolio();
     } catch (err) {
@@ -1275,8 +1341,53 @@
     }
   }
 
+  async function reanalisarTrades() {
+    if (!btnReanalisar) return;
+    if (lastActiveTrades.length === 0) {
+      portfolioStatus.textContent = 'Sem posições ativas para analisar.';
+      return;
+    }
+    btnReanalisar.disabled = true;
+    const originalLabel = btnReanalisar.querySelector('span').textContent;
+    btnReanalisar.querySelector('span').textContent = '🔍 A analisar...';
+
+    try {
+      // Reutiliza o mesmo endpoint trade:update para não duplicar IPC
+      const res = await window.api.updateTrades();
+      if (!res || !res.ok) {
+        portfolioStatus.textContent = 'Erro na reanálise: ' + (res ? res.error : 'desconhecido');
+        return;
+      }
+
+      if (Array.isArray(res.states)) {
+        lastStatesByTicker = {};
+        for (const s of res.states) lastStatesByTicker[s.ticker] = s;
+      }
+
+      const alertCount = res.states ? res.states.filter(s => s.status !== 'manter').length : 0;
+      const closedCount = (res.closed && res.closed.length) || 0;
+
+      const parts = [];
+      parts.push(`Reanálise concluída em ${res.states ? res.states.length : 0} posição(ões).`);
+      if (closedCount > 0) parts.push(`${closedCount} trade(s) fechado(s).`);
+      if (alertCount > 0) parts.push(`${alertCount} alerta(s) ativo(s).`);
+      portfolioStatus.textContent = parts.join(' ');
+
+      // Re-renderizar para aplicar alertas visuais
+      renderPortfolioTable();
+    } catch (err) {
+      portfolioStatus.textContent = 'Erro: ' + (err.message || String(err));
+    } finally {
+      btnReanalisar.disabled = false;
+      btnReanalisar.querySelector('span').textContent = originalLabel;
+    }
+  }
+
   if (btnSyncTrades) {
     btnSyncTrades.addEventListener('click', syncTrades);
+  }
+  if (btnReanalisar) {
+    btnReanalisar.addEventListener('click', reanalisarTrades);
   }
 
   const portfolioTab = document.querySelector('.tab-btn[data-tab="portfolio"]');
