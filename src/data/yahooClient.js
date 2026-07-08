@@ -1,19 +1,10 @@
-let yahooFinancePromise = null;
+const yahooFinance = require('yahoo-finance2').default;
 
-function loadYahoo() {
-  if (!yahooFinancePromise) {
-    yahooFinancePromise = import('yahoo-finance2').then(mod => {
-      const yf = mod.default || mod;
-      try {
-        if (typeof yf.suppressNotices === 'function') {
-          yf.suppressNotices(['yahooSurvey', 'ripHistorical']);
-        }
-      } catch (_) { }
-      return yf;
-    });
+try {
+  if (typeof yahooFinance.suppressNotices === 'function') {
+    yahooFinance.suppressNotices(['yahooSurvey', 'ripHistorical']);
   }
-  return yahooFinancePromise;
-}
+} catch (_) { }
 
 function sleep(ms) {
   return new Promise(res => setTimeout(res, ms));
@@ -26,7 +17,6 @@ function isValidCandle(c) {
 }
 
 async function fetchWithRetry(ticker, attempts = 3) {
-  const yahooFinance = await loadYahoo();
   const period1 = new Date();
   period1.setDate(period1.getDate() - 365);
   const period2 = new Date();
@@ -74,7 +64,6 @@ async function fetchWithRetry(ticker, attempts = 3) {
 
 async function searchTickers(query, limit = 8) {
   if (!query || typeof query !== 'string' || query.trim().length < 1) return [];
-  const yahooFinance = await loadYahoo();
   const q = query.trim();
   try {
     const result = await yahooFinance.search(q, {
@@ -86,18 +75,18 @@ async function searchTickers(query, limit = 8) {
     const quotes = (result && result.quotes) || [];
     const out = [];
     const seen = new Set();
-    for (const q of quotes) {
-      const symbol = q.symbol;
+    for (const item of quotes) {
+      const symbol = item.symbol;
       if (!symbol) continue;
       if (!/^[A-Z0-9.\-^=]{1,20}$/.test(symbol)) continue;
-      const type = q.quoteType || '';
+      const type = item.quoteType || '';
       if (type && !['EQUITY', 'ETF', 'INDEX', 'MUTUALFUND'].includes(type)) continue;
       if (seen.has(symbol)) continue;
       seen.add(symbol);
       out.push({
         ticker: symbol,
-        name: q.shortname || q.longname || symbol,
-        exchange: q.exchange || q.exchDisp || '',
+        name: item.shortname || item.longname || symbol,
+        exchange: item.exchange || item.exchDisp || '',
         type
       });
       if (out.length >= limit) break;
