@@ -95,9 +95,16 @@ function processQuotes(quotes, ticker) {
   return deduped;
 }
 
-async function fetchWithRetry(ticker, attempts = 3, interval = '1d', periodMonths = 12) {
+async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3) {
   const period1 = new Date();
-  period1.setMonth(period1.getMonth() - periodMonths);
+
+  if (timeframe === '1wk') {
+    period1.setDate(period1.getDate() - (365 * 5));
+  } else if (timeframe === '1h' || timeframe === '4h') {
+    period1.setDate(period1.getDate() - 180);
+  } else {
+    period1.setDate(period1.getDate() - (365 * 1.5));
+  }
 
   for (let i = 0; i < attempts; i++) {
     try {
@@ -105,7 +112,7 @@ async function fetchWithRetry(ticker, attempts = 3, interval = '1d', periodMonth
 
       const result = await yahooFinance.chart(
         ticker,
-        { period1, interval },
+        { period1, interval: timeframe },
         {
           fetchOptions: {
             headers: { 'User-Agent': USER_AGENT }
