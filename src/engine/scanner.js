@@ -394,13 +394,44 @@ class Scanner {
   // ═══════════════════════════════════════════════════════════
   //  MONITORIZAÇÃO DE INVESTIMENTOS
   // ═══════════════════════════════════════════════════════════
+  //  ALERT_THRESHOLD_PCT: margem (em %) para disparar alerta de
+  //  proximidade ao Stop Loss ou Take Profit.
+  // ═══════════════════════════════════════════════════════════
+  static ALERT_THRESHOLD_PCT = 1.5;
+
+  _calcDistancia(trade, currentPrice) {
+    if (!currentPrice || currentPrice <= 0) return { distancia_stop_pct: null, distancia_tp_pct: null };
+    const distStop = Math.abs(currentPrice - trade.stop_loss) / currentPrice * 100;
+    const distTp = Math.abs(currentPrice - trade.take_profit) / currentPrice * 100;
+    return { distancia_stop_pct: distStop, distancia_tp_pct: distTp };
+  }
+
+  _classifyPosition(trade, currentPrice, currentDirection) {
+    if (currentPrice == null) return 'manter';
+
+    const { distancia_stop_pct, distancia_tp_pct } = this._calcDistancia(trade, currentPrice);
+    const margin = Scanner.ALERT_THRESHOLD_PCT;
+
+    // Inversão de tendência: Markov atual aponta direção oposta à posição
+    if (currentDirection && currentDirection !== 'NEUTRO' && currentDirection !== trade.direcao) {
+      return 'alerta_inversao';
+    }
+
+    if (distancia_stop_pct != null && distancia_stop_pct < margin) return 'alerta_stop';
+    if (distancia_tp_pct != null && distancia_tp_pct < margin) return 'alerta_tp';
+
+    return 'manter';
+  }
+
   async updateActiveTrades() {
     const active = this.db.getActiveTrades();
     if (!Array.isArray(active) || active.length === 0) {
-      return { updated: 0, closed: [], message: 'Nenhum trade ativo para monitorizar.' };
+      return { updated: 0, closed: [], states: [], message: 'Nenhum trade ativo para monitorizar.' };
     }
 
     const closed = [];
+    const states = [];
+
     for (const trade of active) {
       try {
         const candles = await fetchWithRetry(trade.ticker, '1d', 2);
@@ -438,18 +469,64 @@ class Scanner {
             motivo_fecho: hit.reason,
             data_lancamento: last.date
           });
+          continue;
         }
+
+        // ── Análise de proximidade + inversão ────────────────
+        const { distancia_stop_pct, distancia_tp_pct } = this._calcDistancia(trade, last.close);
+
+        // Análise Markov rápida para detetar inversão de tendência
+        let currentDirection = null;
+        try {
+          if (candles.length >= 60) {
+            const result = analyzeSeries(candles, {
+              markovWindow: 100,
+              volumeMult: 1.0,
+              horizonDays: 5,
+              useVolFilter: false
+            });
+            currentDirection = result && result.direction ? result.direction : null;
+          }
+        } catch (_) {
+          currentDirection = null;
+        }
+
+        const status = this._classifyPosition(trade, last.close, currentDirection);
+        const resultadoAtual = trade.preco_entrada
+          ? ((last.close - trade.preco_entrada) / trade.preco_entrada) * (trade.direcao === 'COMPRA' ? 1 : -1) * 100
+          : null;
+
+        states.push({
+          id: trade.id,
+          ticker: trade.ticker,
+          nome: trade.nome,
+          direcao: trade.direcao,
+          preco_entrada: trade.preco_entrada,
+          stop_loss: trade.stop_loss,
+          take_profit: trade.take_profit,
+          preco_atual: last.close,
+          data_atual: last.date,
+          status,
+          distancia_stop_pct,
+          distancia_tp_pct,
+          current_direction: currentDirection,
+          resultado_pct_atual: resultadoAtual
+        });
       } catch (err) {
         console.warn(`[scanner] updateActiveTrades: erro ao processar ${trade.ticker}: ${err.message || err}`);
       }
     }
 
+    const alerts = states.filter(s => s.status !== 'manter').length;
     return {
       updated: closed.length,
       closed,
+      states,
       message: closed.length > 0
-        ? `${closed.length} trade(s) fechado(s).`
-        : 'Nenhum trade atingiu TP ou SL.'
+        ? `${closed.length} trade(s) fechado(s)${alerts > 0 ? `, ${alerts} alerta(s) ativo(s).` : '.'}`
+        : alerts > 0
+          ? `Nenhum trade atingiu TP ou SL. ${alerts} alerta(s) de proximidade.`
+          : 'Nenhum trade atingiu TP ou SL.'
     };
   }
 
