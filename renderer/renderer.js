@@ -1059,18 +1059,33 @@
     }
     const seq = ++shortcutSearchSeq;
     renderShortcutLoading();
+    if (typeof status !== 'undefined' && status) {
+      status.textContent = `A pesquisar "${query}"...`;
+    }
     try {
       const res = await window.api.searchTicker(query, 5);
       if (seq !== shortcutSearchSeq) return;
       if (!res || !res.ok) {
         renderShortcutError(res && res.error ? res.error : 'Erro desconhecido');
+        if (typeof status !== 'undefined' && status) {
+          status.textContent = 'Erro na pesquisa: ' + (res && res.error ? res.error : 'desconhecido');
+        }
         return;
       }
       lastShortcutTickers = res.tickers || [];
       renderShortcutResults(lastShortcutTickers);
+      if (typeof status !== 'undefined' && status) {
+        const n = lastShortcutTickers.length;
+        status.textContent = n > 0
+          ? `${n} resultado(s) para "${query}".`
+          : `Sem resultados para "${query}".`;
+      }
     } catch (err) {
       if (seq !== shortcutSearchSeq) return;
       renderShortcutError(err.message || String(err));
+      if (typeof status !== 'undefined' && status) {
+        status.textContent = 'Erro: ' + (err.message || String(err));
+      }
     }
   }
 

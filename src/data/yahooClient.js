@@ -164,44 +164,62 @@ async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3) {
 async function searchTickers(query, limit = 8) {
   if (!query || typeof query !== 'string' || query.trim().length < 1) return [];
   const q = query.trim();
-  try {
-    const result = await yahooFinance.search(
-      q,
-      {
-        quotesCount: limit,
-        newsCount: 0,
-        listsCount: 0,
-        quotesQueryId: undefined
-      },
-      {
-        fetchOptions: {
-          headers: { 'User-Agent': USER_AGENT }
-        }
+
+  const attempts = 3;
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    // Pequeno delay para evitar rate-limit
+    await sleep(800 + Math.random() * 700);
+
+    try {
+      const result = await yahooFinance.search(
+        q,
+        {
+          quotesCount: Math.max(limit, 6),
+          newsCount: 0
+        },
+        { validateResult: false }
+      );
+
+      const quotes = (result && result.quotes) || [];
+      const out = [];
+      const seen = new Set();
+      for (const item of quotes) {
+        if (!item || item.isYahooFinance === false) continue;
+        const symbol = item.symbol;
+        if (!symbol) continue;
+        if (!/^[A-Z0-9.\-^=]{1,20}$/.test(symbol)) continue;
+        const type = item.quoteType || '';
+        if (type && !['EQUITY', 'ETF', 'INDEX', 'MUTUALFUND'].includes(type)) continue;
+        if (seen.has(symbol)) continue;
+        seen.add(symbol);
+        out.push({
+          ticker: symbol,
+          name: item.shortname || item.longname || symbol,
+          exchange: item.exchange || item.exchDisp || '',
+          type
+        });
+        if (out.length >= limit) break;
       }
-    );
-    const quotes = (result && result.quotes) || [];
-    const out = [];
-    const seen = new Set();
-    for (const item of quotes) {
-      const symbol = item.symbol;
-      if (!symbol) continue;
-      if (!/^[A-Z0-9.\-^=]{1,20}$/.test(symbol)) continue;
-      const type = item.quoteType || '';
-      if (type && !['EQUITY', 'ETF', 'INDEX', 'MUTUALFUND'].includes(type)) continue;
-      if (seen.has(symbol)) continue;
-      seen.add(symbol);
-      out.push({
-        ticker: symbol,
-        name: item.shortname || item.longname || symbol,
-        exchange: item.exchange || item.exchDisp || '',
-        type
-      });
-      if (out.length >= limit) break;
+      return out;
+    } catch (err) {
+      lastErr = err;
+      const msg = err && err.message ? err.message : String(err);
+      const isRateLimit = /429|Too Many|Rate/i.test(msg);
+      if (i === attempts - 1) break;
+      if (isRateLimit) {
+        await sleep(3000 + Math.random() * 2000);
+      } else {
+        await sleep(500 * Math.pow(2, i));
+      }
     }
-    return out;
-  } catch (_err) {
-    return [];
   }
+
+  const msg = lastErr && lastErr.message ? lastErr.message : String(lastErr);
+  if (/429|Too Many|Rate/i.test(msg)) {
+    throw new Error('Yahoo Finance rate limit (429). Aguarde uns segundos antes de pesquisar novamente.');
+  }
+  throw new Error('Falha na pesquisa Yahoo: ' + msg);
 }
 
 module.exports = { fetchWithRetry, searchTickers };
