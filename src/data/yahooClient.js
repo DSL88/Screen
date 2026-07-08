@@ -2,12 +2,81 @@ const yahooFinance = require('yahoo-finance2').default || require('yahoo-finance
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+const MIN_CANDLES = 200;
+const WARMUP_TARGET = 250;
+
 const sleep = ms => new Promise(res => setTimeout(res, ms));
 
-function isValidCandle(c) {
-  return c && Number.isFinite(c.open) && Number.isFinite(c.high)
-    && Number.isFinite(c.low) && Number.isFinite(c.close)
-    && Number.isFinite(c.volume);
+function isNum(v) {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function sanitizeCandle(r) {
+  if (!r) return null;
+  const open = isNum(r.open) ? r.open : null;
+  const high = isNum(r.high) ? r.high : null;
+  const low = isNum(r.low) ? r.low : null;
+  const adjClose = isNum(r.adjustedClose) ? r.adjustedClose : null;
+  const close = isNum(r.close) ? r.close : adjClose;
+  const volume = isNum(r.volume) ? r.volume : 0;
+
+  const hasAnyPrice = open !== null || high !== null || low !== null || close !== null;
+  if (!hasAnyPrice) return null;
+
+  let finalOpen = open;
+  let finalHigh = high;
+  let finalLow = low;
+  let finalClose = close;
+
+  if (finalClose === null && finalOpen !== null) {
+    finalClose = finalOpen;
+  } else if (finalClose === null && finalHigh !== null) {
+    finalClose = finalHigh;
+  } else if (finalClose === null && finalLow !== null) {
+    finalClose = finalLow;
+  }
+
+  if (finalClose === null) return null;
+
+  if (finalOpen === null) finalOpen = finalClose;
+  if (finalHigh === null) finalHigh = Math.max(finalOpen, finalClose);
+  if (finalLow === null) finalLow = Math.min(finalOpen, finalClose);
+
+  if (finalHigh < Math.max(finalOpen, finalClose)) {
+    finalHigh = Math.max(finalOpen, finalClose);
+  }
+  if (finalLow > Math.min(finalOpen, finalClose)) {
+    finalLow = Math.min(finalOpen, finalClose);
+  }
+
+  return {
+    ticker: r.ticker,
+    date: r.date instanceof Date ? r.date.toISOString().slice(0, 10) : String(r.date).slice(0, 10),
+    open: finalOpen,
+    high: finalHigh,
+    low: finalLow,
+    close: adjClose !== null ? adjClose : finalClose,
+    volume
+  };
+}
+
+function sanitizeSeries(rawCandles, ticker) {
+  if (!Array.isArray(rawCandles) || rawCandles.length === 0) return [];
+
+  const enriched = rawCandles.map(r => ({ ...r, ticker }));
+  const cleaned = enriched.map(sanitizeCandle).filter(Boolean);
+
+  const seen = new Set();
+  const deduped = [];
+  for (const c of cleaned) {
+    if (!c.date || seen.has(c.date)) continue;
+    seen.add(c.date);
+    deduped.push(c);
+  }
+
+  deduped.sort((a, b) => a.date.localeCompare(b.date));
+
+  return deduped;
 }
 
 async function fetchWithRetry(ticker, attempts = 3) {
@@ -33,23 +102,26 @@ async function fetchWithRetry(ticker, attempts = 3) {
           }
         }
       );
-      if (!Array.isArray(result) || result.length < 200) {
-        throw new Error(`Insufficient candles for ${ticker}: ${result?.length || 0}`);
+
+      if (!Array.isArray(result) || result.length === 0) {
+        throw new Error(`No candles returned for ${ticker}`);
       }
-      const candles = result
-        .filter(isValidCandle)
-        .map(r => ({
-          ticker,
-          date: r.date instanceof Date ? r.date.toISOString().slice(0, 10) : String(r.date).slice(0, 10),
-          open: r.open,
-          high: r.high,
-          low: r.low,
-          close: r.adjustedClose ?? r.close,
-          volume: r.volume
-        }));
-      if (candles.length < 200) {
-        throw new Error(`Not enough valid candles for ${ticker}: ${candles.length}`);
+
+      const candles = sanitizeSeries(result, ticker);
+
+      if (candles.length < MIN_CANDLES) {
+        const droppedNull = result.length - candles.length;
+        const warn = `[yahooClient] AVISO: ${ticker} produziu apenas ${candles.length} velas válidas ` +
+          `(${droppedNull} removidas por nulos). Warm-up incompleto (mínimo ${MIN_CANDLES}).`;
+        if (candles.length === 0) {
+          throw new Error(`All candles null/empty for ${ticker} após sanitização`);
+        }
+        console.warn(warn);
+        if (candles.length < WARMUP_TARGET) {
+          console.warn(`[yahooClient] ${ticker}: série abaixo do warm-up ideal (${WARMUP_TARGET}). A usar ${candles.length} velas.`);
+        }
       }
+
       return candles;
     } catch (err) {
       const code = err && err.code;
