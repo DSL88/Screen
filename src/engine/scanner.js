@@ -21,9 +21,9 @@ class Scanner {
     if (runId) this.cancelled.add(runId);
   }
 
-  async run({ tickers }, runId, hooks) {
+  async run(options, runId, hooks) {
     const startedAt = Date.now();
-    const list = Array.isArray(tickers) ? tickers : [];
+    const list = Array.isArray(options?.tickers) ? options.tickers : [];
 
     if (list.length > 0 && !this.cancelled.has(runId)) {
       try {
@@ -33,7 +33,13 @@ class Scanner {
       }
     }
 
-    const params = this.db.getAdaptiveParams();
+    const dbParams = this.db.getAdaptiveParams();
+    const params = {
+      edge_threshold: options?.edge_threshold ?? options?.edgeThreshold ?? dbParams.edge_threshold,
+      markov_window: options?.markov_window ?? options?.markovWindow ?? dbParams.markov_window,
+      volume_mult: options?.volume_mult ?? options?.volumeMult ?? dbParams.volume_mult,
+      horizon_days: options?.horizon_days ?? options?.horizonDays ?? dbParams.horizon_days
+    };
     const total = list.length;
     const limit = pLimit(CONCURRENCY);
 
@@ -236,8 +242,15 @@ class Scanner {
     }
   }
 
-  async runBacktest({ tickers, startDate, endDate }, runId) {
-    const params = this.db.getAdaptiveParams();
+  async runBacktest(options, runId) {
+    const { tickers, startDate, endDate } = options;
+    const dbParams = this.db.getAdaptiveParams();
+    const params = {
+      edge_threshold: options.edge_threshold ?? options.edgeThreshold ?? dbParams.edge_threshold,
+      markov_window: options.markov_window ?? options.markovWindow ?? dbParams.markov_window,
+      volume_mult: options.volume_mult ?? options.volumeMult ?? dbParams.volume_mult,
+      horizon_days: options.horizon_days ?? options.horizonDays ?? dbParams.horizon_days
+    };
     const markovWindow = params.markov_window;
     const edgeThreshold = params.edge_threshold;
     const volumeMult = params.volume_mult;

@@ -8,7 +8,7 @@ const ALLOWED_EVENTS = new Set([
 ]);
 
 contextBridge.exposeInMainWorld('api', {
-  startScan: (tickers) => ipcRenderer.invoke('scan:start', { tickers }),
+  startScan: (tickers, params) => ipcRenderer.invoke('scan:start', { tickers, params }),
   cancelScan: (runId) => ipcRenderer.invoke('scan:cancel', { runId }),
   searchTicker: (query) => ipcRenderer.invoke('ticker:search', { query }),
   addTicker: (t) => ipcRenderer.invoke('ticker:add', t),
