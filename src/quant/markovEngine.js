@@ -132,6 +132,34 @@ function analyzeSeries(candles, params = {}) {
   const useVolFilter = params.useVolFilter !== undefined ? params.useVolFilter : true;
   const onlyLongs = params.onlyLongs ?? false;
 
+  // Descarta velas com close null (ainda em formação)
+  candles = candles.filter(c => c && c.close != null);
+
+  if (!candles || candles.length < 60) {
+    return {
+      ticker: null,
+      date: null,
+      close: null,
+      direction: 'NEUTRO',
+      baseDirection: 'NEUTRO',
+      edge: 0,
+      pBull: 0,
+      pBear: 0,
+      pStay: 1,
+      rsi: null,
+      adx: null,
+      bbPct: null,
+      atr: null,
+      volume: null,
+      volumeSma: null,
+      volumeValid: false,
+      stopLoss: null,
+      takeProfit: null,
+      currentState: -1,
+      transitionMatrix: null
+    };
+  }
+
   const closes = candles.map(c => c.close);
   const highs = candles.map(c => c.high);
   const lows = candles.map(c => c.low);

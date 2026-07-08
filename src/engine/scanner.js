@@ -211,19 +211,27 @@ class Scanner {
   // ═══════════════════════════════════════════════════════════
 
   // ── Última vela fechada completa ────────────────────────────
-  //  O Yahoo Finance devolve sempre a vela do dia corrente (mesmo
-  //  com o mercado aberto), com volume e preço ainda incompletos.
-  //  Esta função decide se a última vela deve ser descartada, de
-  //  modo a que o motor analise apenas a ÚLTIMA VELA FECHADA
-  //  consolidate (candles.length - 2 no original).
+  //  O endpoint chart devolve a vela do dia corrente com
+  //  close=null quando o mercado ainda está aberto. Esta função
+  //  garante que o motor quantitativo processa exclusivamente
+  //  velas inteiramente FECHADAS e CONSOLIDADAS, alinhando os
+  //  resultados a 100% com o TradingView.
   //
   //  Critérios para descartar a última vela:
-  //    1. useLatestClosed=true (override manual da UI)
-  //    2. Dia da semana e a vela é a de hoje (mercado aberto)
-  //    3. Volume da última vela abaixo da média móvel recente
+  //    1. close==null → vela em formação (remoção DEFINITIVA)
+  //    2. useLatestClosed=true (override manual da UI)
+  //    3. Dia da semana e a vela é a de hoje (mercado aberto)
+  //    4. Volume da última vela abaixo da média móvel recente
   // ──────────────────────────────────────────────────────────
   _pickAnalysisCandles(candles, params) {
     if (!candles || candles.length < 2) return candles;
+
+    // (1) REMOÇÃO DEFINITIVA: close null → vela ainda em formação
+    const lastIdx = candles.length - 1;
+    if (candles[lastIdx] && candles[lastIdx].close == null) {
+      candles.pop();
+    }
+    if (candles.length < 2) return candles;
 
     const last = candles[candles.length - 1];
     const force = params && params.useLatestClosed === true;
