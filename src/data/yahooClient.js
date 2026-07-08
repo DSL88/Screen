@@ -95,9 +95,9 @@ function processQuotes(quotes, ticker) {
   return deduped;
 }
 
-async function fetchWithRetry(ticker, attempts = 3) {
+async function fetchWithRetry(ticker, attempts = 3, interval = '1d', periodMonths = 12) {
   const period1 = new Date();
-  period1.setDate(period1.getDate() - 365);
+  period1.setMonth(period1.getMonth() - periodMonths);
 
   for (let i = 0; i < attempts; i++) {
     try {
@@ -105,7 +105,7 @@ async function fetchWithRetry(ticker, attempts = 3) {
 
       const result = await yahooFinance.chart(
         ticker,
-        { period1, interval: '1d' },
+        { period1, interval },
         {
           fetchOptions: {
             headers: { 'User-Agent': USER_AGENT }

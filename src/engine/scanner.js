@@ -46,6 +46,7 @@ class Scanner {
     const uiHorizon = uiParams?.horizon_days ?? uiParams?.horizonDays;
     const uiUseVolFilter = uiParams?.useVolFilter;
     const uiUseLatestClosed = uiParams?.useLatestClosed ?? uiParams?.use_latest_closed;
+    const uiTimeframe = uiParams?.timeframe;
 
     return {
       edge_threshold: uiEdge != null ? Number(uiEdge) : Number(dbParams.edge_threshold),
@@ -55,7 +56,8 @@ class Scanner {
       // Se a UI enviar useVolFilter=false, respeitar. Se não enviar, default=true.
       useVolFilter: uiUseVolFilter !== undefined ? Boolean(uiUseVolFilter) : true,
       // Forçar análise com base na última vela fechada (ignora vela de hoje em aberto)
-      useLatestClosed: uiUseLatestClosed === true
+      useLatestClosed: uiUseLatestClosed === true,
+      timeframe: uiTimeframe || '1d'
     };
   }
 
@@ -66,6 +68,12 @@ class Scanner {
     const startedAt = Date.now();
     const list = Array.isArray(options?.tickers) ? options.tickers : [];
 
+    // ── PRIORIDADE ABSOLUTA: UI > SQLite ────────────────────
+    const params = this._resolveParams(options);
+    const timeframe = options?.timeframe || params.timeframe || '1d';
+    const isIntraday = timeframe === '1h' || timeframe === '4h';
+    const periodMonths = isIntraday ? 2 : 12;
+
     // Avaliar trades abertos antes do scan
     if (list.length > 0 && !this.cancelled.has(runId)) {
       try {
@@ -75,13 +83,10 @@ class Scanner {
       }
     }
 
-    // ── PRIORIDADE ABSOLUTA: UI > SQLite ────────────────────
-    const params = this._resolveParams(options);
-
     console.log('');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('  SCANNER INICIADO');
-    console.log(`  Edge ≥ ${params.edge_threshold} | VolMult ≥ ${params.volume_mult} | Window ${params.markov_window} | Horizon ${params.horizon_days}d | VolFilter: ${params.useVolFilter ? 'ON' : 'OFF'}`);
+    console.log(`  Edge ≥ ${params.edge_threshold} | VolMult ≥ ${params.volume_mult} | Window ${params.markov_window} | Horizon ${params.horizon_days}d | VolFilter: ${params.useVolFilter ? 'ON' : 'OFF'} | Timeframe: ${timeframe}`);
     console.log(`  Tickers a processar: ${list.length}`);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
@@ -102,8 +107,8 @@ class Scanner {
         // ── Obter candles frescas da API ──────────────────────
         let candles;
         try {
-          candles = await fetchWithRetry(t.ticker, 3);
-          this.db.cacheOHLCV(t.ticker, candles);
+          candles = await fetchWithRetry(t.ticker, 3, timeframe, periodMonths);
+          this.db.cacheOHLCV(`${t.ticker}_${timeframe}`, candles);
         } catch (e) {
           candles = null;
         }
@@ -259,13 +264,16 @@ class Scanner {
     return candles;
   }
 
-  async _getCandlesSince(ticker, sinceDate) {
+  async _getCandlesSince(ticker, sinceDate, timeframe = '1d') {
+    const cacheKey = `${ticker}_${timeframe}`;
+    const isIntraday = timeframe === '1h' || timeframe === '4h';
+    const periodMonths = isIntraday ? 2 : 12;
     let candles;
     try {
-      candles = await fetchWithRetry(ticker, 3);
-      this.db.cacheOHLCV(ticker, candles);
+      candles = await fetchWithRetry(ticker, 3, timeframe, periodMonths);
+      this.db.cacheOHLCV(cacheKey, candles);
     } catch (_) {
-      candles = this.db.getCachedOHLCV(ticker);
+      candles = this.db.getCachedOHLCV(cacheKey);
       if (!candles) return null;
     }
     if (!sinceDate) return candles;
@@ -398,6 +406,9 @@ class Scanner {
     const volumeMult = params.volume_mult;
     const horizonDays = params.horizon_days;
     const useVolFilter = params.useVolFilter;
+    const timeframe = options?.timeframe || params.timeframe || '1d';
+    const isIntraday = timeframe === '1h' || timeframe === '4h';
+    const periodMonths = isIntraday ? 2 : 12;
 
     const list = Array.isArray(tickers) ? tickers : [];
     const simulatedTrades = [];
@@ -405,11 +416,12 @@ class Scanner {
     for (const t of list) {
       if (this.cancelled.has(runId)) break;
 
-      let candles = this.db.getCachedOHLCV(t.ticker);
+      const cacheKey = `${t.ticker}_${timeframe}`;
+      let candles = this.db.getCachedOHLCV(cacheKey);
       if (!candles) {
         try {
-          candles = await fetchWithRetry(t.ticker, 3);
-          this.db.cacheOHLCV(t.ticker, candles);
+          candles = await fetchWithRetry(t.ticker, 3, timeframe, periodMonths);
+          this.db.cacheOHLCV(cacheKey, candles);
         } catch (_) {
           continue;
         }
