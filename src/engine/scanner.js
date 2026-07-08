@@ -230,43 +230,53 @@ class Scanner {
   }
 
   async _evaluateTrades(runId, hooks) {
-    const open = this.db.getOpenTrades();
-    if (open.length === 0) return;
-
-    const tickersToFetch = [...new Set(open.map(t => t.ticker))];
-    const candleCache = {};
-    for (const ticker of tickersToFetch) {
-      if (this.cancelled.has(runId)) return;
-      candleCache[ticker] = await this._getCandlesSince(ticker, null);
+    let open;
+    try {
+      open = this.db.getOpenTrades();
+    } catch (err) {
+      console.warn(`[scanner] _evaluateTrades: DB indisponível (${err && err.message ? err.message : err}). A continuar o scan normalmente.`);
+      return;
     }
+    if (!Array.isArray(open) || open.length === 0) return;
 
-    let slHit = 0, tpHit = 0;
-    for (const trade of open) {
-      if (this.cancelled.has(runId)) return;
-      if (trade.resultado_pct != null) continue;
-      const candles = candleCache[trade.ticker];
-      if (!candles || candles.length === 0) continue;
-
-      let closed = null;
-      for (const c of candles) {
-        if (c.date <= trade.date) continue;
-        const hit = this._evaluateTradeHit(trade, c);
-        if (hit) { closed = { ...hit, candle: c }; break; }
+    try {
+      const tickersToFetch = [...new Set(open.map(t => t.ticker))];
+      const candleCache = {};
+      for (const ticker of tickersToFetch) {
+        if (this.cancelled.has(runId)) return;
+        candleCache[ticker] = await this._getCandlesSince(ticker, null);
       }
 
-      if (closed) {
-        const resultado = this._calcResultado(trade, closed.exit);
-        this.db.closeTrade(trade.id, resultado, closed.reason);
-        if (closed.reason === 'stop_loss') slHit++;
-        else tpHit++;
-      }
-    }
+      let slHit = 0, tpHit = 0;
+      for (const trade of open) {
+        if (this.cancelled.has(runId)) return;
+        if (trade.resultado_pct != null) continue;
+        const candles = candleCache[trade.ticker];
+        if (!candles || candles.length === 0) continue;
 
-    if (slHit > 0 || tpHit > 0) {
-      hooks.onProgress({
-        processed: 0, total: 0, runId,
-        message: `Avaliação: ${tpHit} TP, ${slHit} SL`
-      });
+        let closed = null;
+        for (const c of candles) {
+          if (c.date <= trade.date) continue;
+          const hit = this._evaluateTradeHit(trade, c);
+          if (hit) { closed = { ...hit, candle: c }; break; }
+        }
+
+        if (closed) {
+          const resultado = this._calcResultado(trade, closed.exit);
+          this.db.closeTrade(trade.id, resultado, closed.reason);
+          if (closed.reason === 'stop_loss') slHit++;
+          else tpHit++;
+        }
+      }
+
+      if (slHit > 0 || tpHit > 0) {
+        hooks.onProgress({
+          processed: 0, total: 0, runId,
+          message: `Avaliação: ${tpHit} TP, ${slHit} SL`
+        });
+      }
+    } catch (err) {
+      console.warn(`[scanner] _evaluateTrades: falha parcial na avaliação de trades abertos (${err && err.message ? err.message : err}). A continuar o scan normalmente.`);
     }
   }
 
