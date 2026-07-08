@@ -1,6 +1,9 @@
 // ─────────────────────────────────────────────────────────────
 //  markovEngine.js  –  Motor de Markov com direção baseada em
-//  probabilidades de transição e disjuntor RSI estrito
+//  probabilidades de transição e disjuntor RSI estrito.
+//
+//  Direção: pBull vs pBear (Markov) → filtro RSI → decisão final
+//  Estados: 9 estados (3 zonas BB × 3 zonas ADX)
 // ─────────────────────────────────────────────────────────────
 
 'use strict';
@@ -19,13 +22,13 @@ const ATR_MULT = 1.5;
 const TP_PCT = 0.025;
 const VOL_SMA_PERIOD = 20;
 
-// ── Classificação de estados bull/bear ──────────────────────
-// Estados bullish: bb_zone=2 (BB% alto) com ADX moderado/forte
-//   state 5 = bb_zone=2, adx_zone=1 → tendência bull moderada
-//   state 7 = bb_zone=1, adx_zone=2 → tendência forte zona média
-// Estados bearish: bb_zone=0 (BB% baixo) com ADX moderado/forte
-//   state 3 = bb_zone=0, adx_zone=1 → tendência bear moderada
-//   state 6 = bb_zone=0, adx_zone=2 → tendência bear forte
+// ── Classificação bull/bear por estado ──────────────────────
+//  state = bb_zone + (adx_zone × 3)
+//
+//  Bull: state 5 (bb=2, adx=1) → BB alto, tendência moderada
+//        state 7 (bb=1, adx=2) → BB médio, tendência forte
+//  Bear: state 3 (bb=0, adx=1) → BB baixo, tendência moderada
+//        state 6 (bb=0, adx=2) → BB baixo, tendência forte
 function isBullishState(s) {
   return s === 5 || s === 7;
 }
@@ -34,10 +37,13 @@ function isBearishState(s) {
   return s === 3 || s === 6;
 }
 
-// ── Construção da série de estados (9 estados: 0–8) ─────────
-// bb_zone:  bbp < 0.33 → 0   |  0.33 ≤ bbp ≤ 0.66 → 1   |  bbp > 0.66 → 2
-// adx_zone: adx < 20   → 0   |  20 ≤ adx ≤ 40     → 1   |  adx > 40   → 2
-// state = bb_zone + (adx_zone * 3)
+// ═══════════════════════════════════════════════════════════
+//  Série de estados (0–8) bidimensional
+//
+//  bb_zone:  bbp < 0.33 → 0 | 0.33 ≤ bbp ≤ 0.66 → 1 | bbp > 0.66 → 2
+//  adx_zone: adx < 20   → 0 | 20 ≤ adx ≤ 40     → 1 | adx > 40   → 2
+//  state = bb_zone + (adx_zone × 3)
+// ═══════════════════════════════════════════════════════════
 function buildStateSeries(bbPct, rsi, adx) {
   const n = bbPct.length;
   const states = new Array(n).fill(-1);
@@ -54,7 +60,9 @@ function buildStateSeries(bbPct, rsi, adx) {
   return states;
 }
 
-// ── Matriz de transição com suavização de Laplace ───────────
+// ═══════════════════════════════════════════════════════════
+//  Matriz de transição com suavização de Laplace
+// ═══════════════════════════════════════════════════════════
 function buildTransitionMatrix(states, window) {
   const alpha = 0.1;
   const M = Array.from({ length: NUM_STATES }, () => new Array(NUM_STATES).fill(alpha));
@@ -68,7 +76,6 @@ function buildTransitionMatrix(states, window) {
     M[a][b] += 1;
   }
 
-  // Normalizar linhas
   for (let i = 0; i < NUM_STATES; i++) {
     let rowSum = 0;
     for (let j = 0; j < NUM_STATES; j++) rowSum += M[i][j];
@@ -81,7 +88,9 @@ function buildTransitionMatrix(states, window) {
   return M;
 }
 
-// ── Multiplicação vetor × matriz (distribuição → próximo passo) ─
+// ═══════════════════════════════════════════════════════════
+//  Multiplicação vetor × matriz
+// ═══════════════════════════════════════════════════════════
 function matVec(M, v) {
   const out = new Array(NUM_STATES).fill(0);
   for (let j = 0; j < NUM_STATES; j++) {
@@ -92,7 +101,9 @@ function matVec(M, v) {
   return out;
 }
 
-// ── Forecast: propaga o estado `h` passos para a frente ─────
+// ═══════════════════════════════════════════════════════════
+//  Forecast: propaga estado `h` passos no futuro
+// ═══════════════════════════════════════════════════════════
 function forecast(M, currentState, h = HORIZON) {
   if (currentState < 0) return null;
   let v = new Array(NUM_STATES).fill(0);
@@ -103,12 +114,22 @@ function forecast(M, currentState, h = HORIZON) {
   return v;
 }
 
-// ── Análise principal da série ──────────────────────────────
+// ═══════════════════════════════════════════════════════════
+//  ANÁLISE PRINCIPAL DA SÉRIE
+//
+//  Lógica de direção em 2 passos:
+//    1. DIREÇÃO BASE (Markov):
+//       pBull > pBear → COMPRA  |  pBear > pBull → VENDA
+//    2. DISJUNTOR RSI (filtro final estrito):
+//       COMPRA + RSI > 53 → COMPRA final  |  senão → NEUTRO
+//       VENDA  + RSI < 47 → VENDA  final  |  senão → NEUTRO
+//    3. NEUTRO → edge = 0 (estritamente)
+// ═══════════════════════════════════════════════════════════
 function analyzeSeries(candles, params = {}) {
   const window = params.markovWindow ?? 150;
   const volThresh = params.volumeMult ?? 1.2;
   const horizon = params.horizonDays ?? HORIZON;
-  const useVolFilter = params.useVolFilter ?? true;
+  const useVolFilter = params.useVolFilter !== undefined ? params.useVolFilter : true;
   const onlyLongs = params.onlyLongs ?? false;
 
   const closes = candles.map(c => c.close);
@@ -131,7 +152,7 @@ function analyzeSeries(candles, params = {}) {
   const lastState = states[lastIdx];
   const dist = forecast(M, lastState, horizon);
 
-  // ── Probabilidades: pBull, pBear, pStay ───────────────────
+  // ── Probabilidades: pBull, pBear ──────────────────────────
   let pBull = 0;
   let pBear = 0;
   let pStay = 1;
@@ -146,10 +167,7 @@ function analyzeSeries(candles, params = {}) {
     edge = Math.abs(pBull - pBear);
   }
 
-  // ── DIRECÇÃO BASE (baseada nas probabilidades de Markov) ──
-  //  pBull > pBear  →  direção base = COMPRA
-  //  pBear > pBull  →  direção base = VENDA
-  //  Iguais         →  NEUTRO
+  // ── PASSO 1: DIREÇÃO BASE (probabilidades de Markov) ──────
   let baseDirection = 'NEUTRO';
   if (pBull > pBear) {
     baseDirection = 'COMPRA';
@@ -157,29 +175,17 @@ function analyzeSeries(candles, params = {}) {
     baseDirection = 'VENDA';
   }
 
-  // ── DISJUNTOR RSI (filtro estrito sobre a direção base) ───
-  //  COMPRA + RSI > 53  →  COMPRA  (confirmado)
-  //  COMPRA + RSI ≤ 53  →  NEUTRO  (bloqueado pelo disjuntor)
-  //  VENDA  + RSI < 47  →  VENDA   (confirmado)
-  //  VENDA  + RSI ≥ 47  →  NEUTRO  (bloqueado pelo disjuntor)
+  // ── PASSO 2: DISJUNTOR RSI (filtro final estrito) ─────────
   const lastRsi = rsi[lastIdx];
   let direction = 'NEUTRO';
 
   if (baseDirection === 'COMPRA') {
-    if (lastRsi != null && lastRsi > 53) {
-      direction = 'COMPRA';
-    } else {
-      direction = 'NEUTRO';
-    }
+    direction = (lastRsi != null && lastRsi > 53) ? 'COMPRA' : 'NEUTRO';
   } else if (baseDirection === 'VENDA') {
-    if (lastRsi != null && lastRsi < 47) {
-      direction = 'VENDA';
-    } else {
-      direction = 'NEUTRO';
-    }
+    direction = (lastRsi != null && lastRsi < 47) ? 'VENDA' : 'NEUTRO';
   }
 
-  // Se a direção final for NEUTRO, forçar edge = 0
+  // ── PASSO 3: NEUTRO → edge estritamente a 0 ──────────────
   if (direction === 'NEUTRO') {
     edge = 0;
   }
@@ -194,7 +200,7 @@ function analyzeSeries(candles, params = {}) {
   const lastVol = volumes[lastIdx];
   const lastVolSma = volSma[lastIdx];
   const volumeValid = !useVolFilter ||
-    (lastVol != null && lastVolSma != null && lastVol > lastVolSma * volThresh);
+    (lastVol != null && lastVolSma != null && lastVolSma > 0 && lastVol > lastVolSma * volThresh);
 
   // ── Stop Loss / Take Profit ───────────────────────────────
   const close = closes[lastIdx];
@@ -215,6 +221,7 @@ function analyzeSeries(candles, params = {}) {
     date: candles[lastIdx]?.date,
     close,
     direction,
+    baseDirection,
     edge,
     pBull,
     pBear,
@@ -233,14 +240,23 @@ function analyzeSeries(candles, params = {}) {
   };
 }
 
-// ── Emissão de sinal ────────────────────────────────────────
-// `shouldEmit` respeita overrides manuais da UI:
-//   - Se useVolFilter foi desativado (volumeValid já será true), não bloqueia
-//   - edgeThreshold é comparado com o edge calculado
+// ═══════════════════════════════════════════════════════════
+//  shouldEmit – Decisão final de emissão de sinal
+//
+//  Respeita overrides manuais da UI:
+//    - Se useVolFilter foi desligado → volumeValid já será true
+//    - edgeThreshold é comparado com o edge calculado
+// ═══════════════════════════════════════════════════════════
 function shouldEmit(result, edgeThreshold) {
+  // Precisa de direção não-neutra
   if (result.direction !== 'COMPRA' && result.direction !== 'VENDA') return false;
+
+  // Edge tem de superar o threshold
   if (result.edge < edgeThreshold) return false;
+
+  // Volume (já incorpora o override de useVolFilter)
   if (!result.volumeValid) return false;
+
   return true;
 }
 
