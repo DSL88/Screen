@@ -131,7 +131,7 @@ class DB {
 
   getOpenTrades() {
     return this.db.prepare(
-      "SELECT * FROM historical_signals WHERE status = 'aberto' ORDER BY date ASC"
+      "SELECT * FROM historical_signals WHERE status = 'aberto' OR resultado_pct IS NULL ORDER BY date ASC"
     ).all();
   }
 
