@@ -51,6 +51,7 @@
   const inputWindow = document.getElementById('input-window');
   const inputHorizon = document.getElementById('input-horizon');
   const inputVolume = document.getElementById('input-volume');
+  const inputTimeframe = document.getElementById('input-timeframe');
 
   const modalBacktest = document.getElementById('modal-backtest');
   const modalBacktestClose = document.getElementById('modal-backtest-close');
@@ -812,11 +813,13 @@
       const windowVal = parseInt(inputWindow?.value, 10);
       const horizonVal = parseInt(inputHorizon?.value, 10);
       const volumeVal = parseFloat(inputVolume?.value);
+      const timeframeVal = inputTimeframe?.value || '1d';
       const params = {};
       if (!isNaN(edgeVal)) params.edge_threshold = edgeVal;
       if (!isNaN(windowVal)) params.markov_window = windowVal;
       if (!isNaN(horizonVal)) params.horizon_days = horizonVal;
       if (!isNaN(volumeVal)) params.volume_mult = volumeVal;
+      params.timeframe = timeframeVal;
 
       const res = await window.api.startScan(watchlist, params);
       if (!res || !res.ok) {
