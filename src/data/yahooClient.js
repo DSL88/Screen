@@ -11,60 +11,57 @@ function isNum(v) {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
-function sanitizeCandle(r) {
-  if (!r) return null;
-  const open = isNum(r.open) ? r.open : null;
-  const high = isNum(r.high) ? r.high : null;
-  const low = isNum(r.low) ? r.low : null;
-  const adjClose = isNum(r.adjustedClose) ? r.adjustedClose : null;
-  const close = isNum(r.close) ? r.close : adjClose;
-  const volume = isNum(r.volume) ? r.volume : 0;
+function processQuote(q, ticker) {
+  if (!q) return null;
 
-  const hasAnyPrice = open !== null || high !== null || low !== null || close !== null;
-  if (!hasAnyPrice) return null;
+  const date = q.date instanceof Date ? q.date.toISOString().slice(0, 10) : String(q.date).slice(0, 10);
+  if (!date || date.length < 8) return null;
 
-  let finalOpen = open;
-  let finalHigh = high;
-  let finalLow = low;
-  let finalClose = close;
+  const open = isNum(q.open) ? q.open : null;
+  const high = isNum(q.high) ? q.high : null;
+  const low = isNum(q.low) ? q.low : null;
+  const adjClose = isNum(q.adjclose) ? q.adjclose : null;
+  const rawClose = isNum(q.close) ? q.close : null;
+  const volume = isNum(q.volume) ? q.volume : 0;
 
-  if (finalClose === null && finalOpen !== null) {
-    finalClose = finalOpen;
-  } else if (finalClose === null && finalHigh !== null) {
-    finalClose = finalHigh;
-  } else if (finalClose === null && finalLow !== null) {
-    finalClose = finalLow;
+  let close = adjClose !== null ? adjClose : rawClose;
+
+  if (close === null && open !== null) {
+    close = open;
+  } else if (close === null && high !== null) {
+    close = high;
+  } else if (close === null && low !== null) {
+    close = low;
   }
 
-  if (finalClose === null) return null;
+  if (close === null) return null;
 
-  if (finalOpen === null) finalOpen = finalClose;
-  if (finalHigh === null) finalHigh = Math.max(finalOpen, finalClose);
-  if (finalLow === null) finalLow = Math.min(finalOpen, finalClose);
+  let finalOpen = open !== null ? open : close;
+  let finalHigh = high !== null ? high : Math.max(finalOpen, close);
+  let finalLow = low !== null ? low : Math.min(finalOpen, close);
 
-  if (finalHigh < Math.max(finalOpen, finalClose)) {
-    finalHigh = Math.max(finalOpen, finalClose);
+  if (finalHigh < Math.max(finalOpen, close)) {
+    finalHigh = Math.max(finalOpen, close);
   }
-  if (finalLow > Math.min(finalOpen, finalClose)) {
-    finalLow = Math.min(finalOpen, finalClose);
+  if (finalLow > Math.min(finalOpen, close)) {
+    finalLow = Math.min(finalOpen, close);
   }
 
   return {
-    ticker: r.ticker,
-    date: r.date instanceof Date ? r.date.toISOString().slice(0, 10) : String(r.date).slice(0, 10),
+    ticker,
+    date,
     open: finalOpen,
     high: finalHigh,
     low: finalLow,
-    close: adjClose !== null ? adjClose : finalClose,
+    close,
     volume
   };
 }
 
-function sanitizeSeries(rawCandles, ticker) {
-  if (!Array.isArray(rawCandles) || rawCandles.length === 0) return [];
+function processQuotes(quotes, ticker) {
+  if (!Array.isArray(quotes) || quotes.length === 0) return [];
 
-  const enriched = rawCandles.map(r => ({ ...r, ticker }));
-  const cleaned = enriched.map(sanitizeCandle).filter(Boolean);
+  const cleaned = quotes.map(q => processQuote(q, ticker)).filter(Boolean);
 
   const seen = new Set();
   const deduped = [];
@@ -82,35 +79,30 @@ function sanitizeSeries(rawCandles, ticker) {
 async function fetchWithRetry(ticker, attempts = 3) {
   const period1 = new Date();
   period1.setDate(period1.getDate() - 365);
-  const period2 = new Date();
+
   for (let i = 0; i < attempts; i++) {
     try {
       await sleep(1500 + Math.random() * 1000);
-      const result = await yahooFinance.historical(
+
+      const result = await yahooFinance.chart(
         ticker,
-        {
-          period1,
-          period2,
-          interval: '1d',
-          includeAdjustedClose: true
-        },
+        { period1, interval: '1d' },
         {
           fetchOptions: {
-            headers: {
-              'User-Agent': USER_AGENT
-            }
+            headers: { 'User-Agent': USER_AGENT }
           }
         }
       );
 
-      if (!Array.isArray(result) || result.length === 0) {
+      const quotes = result && result.quotes;
+      if (!Array.isArray(quotes) || quotes.length === 0) {
         throw new Error(`No candles returned for ${ticker}`);
       }
 
-      const candles = sanitizeSeries(result, ticker);
+      const candles = processQuotes(quotes, ticker);
 
       if (candles.length < MIN_CANDLES) {
-        const droppedNull = result.length - candles.length;
+        const droppedNull = quotes.length - candles.length;
         const warn = `[yahooClient] AVISO: ${ticker} produziu apenas ${candles.length} velas válidas ` +
           `(${droppedNull} removidas por nulos). Warm-up incompleto (mínimo ${MIN_CANDLES}).`;
         if (candles.length === 0) {
@@ -157,9 +149,7 @@ async function searchTickers(query, limit = 8) {
       },
       {
         fetchOptions: {
-          headers: {
-            'User-Agent': USER_AGENT
-          }
+          headers: { 'User-Agent': USER_AGENT }
         }
       }
     );
