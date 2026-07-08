@@ -1,6 +1,9 @@
 // ─────────────────────────────────────────────────────────────
-//  scanner.js  –  Motor de varrimento com prioridade total
-//  aos parâmetros da UI e logging detalhado por ticker
+//  scanner.js  –  Motor de varrimento
+//
+//  1. UI tem PRIORIDADE ABSOLUTA sobre parâmetros do SQLite
+//  2. console.log() detalhado por ticker para auditoria
+//  3. Filtro de volume respeita override da UI
 // ─────────────────────────────────────────────────────────────
 
 'use strict';
@@ -10,8 +13,6 @@ const { fetchWithRetry } = require('../data/yahooClient');
 const { analyzeSeries, shouldEmit } = require('../quant/markovEngine');
 
 const CONCURRENCY = 5;
-const TARGET_GROUP_GAIN_MIN = 0.02;
-const TARGET_GROUP_GAIN_MAX = 0.03;
 const ADAPTIVE_WINDOW = 50;
 const EDGE_MIN = 0.10;
 const EDGE_MAX = 0.30;
@@ -28,13 +29,17 @@ class Scanner {
     if (runId) this.cancelled.add(runId);
   }
 
-  // ── Resolução de parâmetros ─────────────────────────────
-  // PRIORIDADE TOTAL aos valores enviados pela UI.
-  // Só recorre ao SQLite (dbParams) se a UI NÃO enviou o valor.
+  // ═══════════════════════════════════════════════════════════
+  //  Resolução de parâmetros
+  //
+  //  PRIORIDADE ABSOLUTA: valores da UI > valores do SQLite.
+  //  A UI pode enviar snake_case ou camelCase — ambos aceites.
+  //  Se a UI não enviar um valor (undefined), usa o do SQLite.
+  // ═══════════════════════════════════════════════════════════
   _resolveParams(uiParams) {
     const dbParams = this.db.getAdaptiveParams();
 
-    // Normalizar nomes: a UI pode enviar camelCase ou snake_case
+    // Extrair valores da UI (aceitar ambos os formatos)
     const uiEdge = uiParams?.edge_threshold ?? uiParams?.edgeThreshold;
     const uiWindow = uiParams?.markov_window ?? uiParams?.markovWindow;
     const uiVolume = uiParams?.volume_mult ?? uiParams?.volumeMult;
@@ -42,20 +47,23 @@ class Scanner {
     const uiUseVolFilter = uiParams?.useVolFilter;
 
     return {
-      edge_threshold: uiEdge != null ? uiEdge : dbParams.edge_threshold,
-      markov_window: uiWindow != null ? uiWindow : dbParams.markov_window,
-      volume_mult: uiVolume != null ? uiVolume : dbParams.volume_mult,
-      horizon_days: uiHorizon != null ? uiHorizon : dbParams.horizon_days,
-      useVolFilter: uiUseVolFilter != null ? uiUseVolFilter : true
+      edge_threshold: uiEdge != null ? Number(uiEdge) : Number(dbParams.edge_threshold),
+      markov_window: uiWindow != null ? Number(uiWindow) : Number(dbParams.markov_window),
+      volume_mult: uiVolume != null ? Number(uiVolume) : Number(dbParams.volume_mult),
+      horizon_days: uiHorizon != null ? Number(uiHorizon) : Number(dbParams.horizon_days),
+      // Se a UI enviar useVolFilter=false, respeitar. Se não enviar, default=true.
+      useVolFilter: uiUseVolFilter !== undefined ? Boolean(uiUseVolFilter) : true
     };
   }
 
-  // ── Run principal ─────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
+  //  RUN – Varrimento principal
+  // ═══════════════════════════════════════════════════════════
   async run(options, runId, hooks) {
     const startedAt = Date.now();
     const list = Array.isArray(options?.tickers) ? options.tickers : [];
 
-    // Avaliar trades abertos antes de começar o scan
+    // Avaliar trades abertos antes do scan
     if (list.length > 0 && !this.cancelled.has(runId)) {
       try {
         await this._evaluateTrades(runId, hooks);
@@ -64,18 +72,18 @@ class Scanner {
       }
     }
 
-    // PRIORIDADE TOTAL: parâmetros da UI sobrepõem os do SQLite
+    // ── PRIORIDADE ABSOLUTA: UI > SQLite ────────────────────
     const params = this._resolveParams(options);
 
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('  SCANNER INICIADO');
-    console.log(`  Parâmetros: Edge ≥ ${params.edge_threshold} | VolMult ≥ ${params.volume_mult} | Window ${params.markov_window} | Horizon ${params.horizon_days} | VolFilter ${params.useVolFilter}`);
-    console.log(`  Tickers: ${list.length}`);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`  Edge ≥ ${params.edge_threshold} | VolMult ≥ ${params.volume_mult} | Window ${params.markov_window} | Horizon ${params.horizon_days}d | VolFilter: ${params.useVolFilter ? 'ON' : 'OFF'}`);
+    console.log(`  Tickers a processar: ${list.length}`);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     const total = list.length;
     const limit = pLimit(CONCURRENCY);
-
     let processed = 0;
     let emitted = 0;
     const newSignalIds = [];
@@ -88,36 +96,44 @@ class Scanner {
       hooks.onProgress({ processed, total, currentTicker: t.ticker, runId });
 
       try {
+        // ── Obter candles ─────────────────────────────────────
         let candles = this.db.getCachedOHLCV(t.ticker);
         if (!candles) {
           candles = await fetchWithRetry(t.ticker, 3);
           this.db.cacheOHLCV(t.ticker, candles);
         }
 
+        if (!candles || candles.length < 60) {
+          console.log(`  [${String(processed).padStart(4)}/${total}] ${(t.ticker || '???').padEnd(10)} SKIP: insuficientes candles (${candles?.length || 0})`);
+          return;
+        }
+
+        // ── Análise ───────────────────────────────────────────
         const result = analyzeSeries(candles, {
           markovWindow: params.markov_window,
           volumeMult: params.volume_mult,
           horizonDays: params.horizon_days,
-          edgeThreshold: params.edge_threshold,
           useVolFilter: params.useVolFilter
         });
 
-        // ── LOG DETALHADO POR TICKER (auditoria no terminal) ─
+        // ── LOG DETALHADO POR TICKER ──────────────────────────
+        // Ticker | Preço | BB% | ADX | RSI | Estado | Edge | Vol Válido | Direção Final
         const emit = shouldEmit(result, params.edge_threshold);
         console.log(
           `  [${String(processed).padStart(4)}/${total}] ` +
           `${(t.ticker || '???').padEnd(10)} ` +
-          `Preço: ${result.close != null ? result.close.toFixed(2) : 'N/A'}  ` +
-          `BB%: ${result.bbPct != null ? result.bbPct.toFixed(3) : 'N/A'}  ` +
-          `ADX: ${result.adx != null ? result.adx.toFixed(1) : 'N/A'}  ` +
-          `RSI: ${result.rsi != null ? result.rsi.toFixed(1) : 'N/A'}  ` +
-          `Estado: ${result.currentState}  ` +
+          `Preço: ${result.close != null ? result.close.toFixed(2).padStart(9) : '     N/A'}  ` +
+          `BB%: ${result.bbPct != null ? result.bbPct.toFixed(3) : 'N/A  '}  ` +
+          `ADX: ${result.adx != null ? result.adx.toFixed(1).padStart(5) : '  N/A'}  ` +
+          `RSI: ${result.rsi != null ? result.rsi.toFixed(1).padStart(5) : '  N/A'}  ` +
+          `Estado: ${result.currentState >= 0 ? result.currentState : '-'}  ` +
           `Edge: ${result.edge.toFixed(4)}  ` +
-          `VolOK: ${result.volumeValid ? '✓' : '✗'}  ` +
-          `Dir: ${result.direction}  ` +
-          `Emit: ${emit ? '✓ SINAL' : '—'}`
+          `Vol: ${result.volumeValid ? '✓' : '✗'}  ` +
+          `Dir: ${result.direction.padEnd(6)}  ` +
+          `${emit ? '→ SINAL ✓' : ''}`
         );
 
+        // ── Emissão de sinal ──────────────────────────────────
         if (emit) {
           const id = this.db.insertSignal({
             ticker: t.ticker,
@@ -155,15 +171,16 @@ class Scanner {
           });
         }
       } catch (err) {
+        console.log(`  [${String(processed).padStart(4)}/${total}] ${(t.ticker || '???').padEnd(10)} ERRO: ${err.message || err}`);
         hooks.onError({ ticker: t.ticker, message: err.message || String(err), runId });
       }
     }));
 
     await Promise.all(tasks);
 
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`  SCAN CONCLUÍDO: ${processed} processados, ${emitted} sinais emitidos (${(Date.now() - startedAt)}ms)`);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`  CONCLUÍDO: ${processed} processados | ${emitted} sinais emitidos | ${(Date.now() - startedAt)}ms`);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     if (newSignalIds.length > 0 && !this.cancelled.has(runId)) {
       this._tuneAdaptiveParams();
@@ -177,7 +194,10 @@ class Scanner {
     });
   }
 
-  // ── Obter candles ─────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
+  //  Helpers internos
+  // ═══════════════════════════════════════════════════════════
+
   async _getCandlesSince(ticker, sinceDate) {
     let candles = this.db.getCachedOHLCV(ticker);
     if (!candles) {
@@ -192,23 +212,14 @@ class Scanner {
     return candles.filter(c => c.date > sinceDate);
   }
 
-  // ── Avaliação de trades abertos ───────────────────────────
   _evaluateTradeHit(trade, candle) {
     if (trade.stop_loss == null || trade.take_profit == null) return null;
     if (trade.direcao === 'COMPRA') {
-      if (candle.low <= trade.stop_loss) {
-        return { exit: trade.stop_loss, reason: 'stop_loss' };
-      }
-      if (candle.high >= trade.take_profit) {
-        return { exit: trade.take_profit, reason: 'take_profit' };
-      }
+      if (candle.low <= trade.stop_loss) return { exit: trade.stop_loss, reason: 'stop_loss' };
+      if (candle.high >= trade.take_profit) return { exit: trade.take_profit, reason: 'take_profit' };
     } else if (trade.direcao === 'VENDA') {
-      if (candle.high >= trade.stop_loss) {
-        return { exit: trade.stop_loss, reason: 'stop_loss' };
-      }
-      if (candle.low <= trade.take_profit) {
-        return { exit: trade.take_profit, reason: 'take_profit' };
-      }
+      if (candle.high >= trade.stop_loss) return { exit: trade.stop_loss, reason: 'stop_loss' };
+      if (candle.low <= trade.take_profit) return { exit: trade.take_profit, reason: 'take_profit' };
     }
     return null;
   }
@@ -235,16 +246,12 @@ class Scanner {
       if (trade.resultado_pct != null) continue;
       const candles = candleCache[trade.ticker];
       if (!candles || candles.length === 0) continue;
-      const entryDate = trade.date;
 
       let closed = null;
       for (const c of candles) {
-        if (c.date <= entryDate) continue;
+        if (c.date <= trade.date) continue;
         const hit = this._evaluateTradeHit(trade, c);
-        if (hit) {
-          closed = { ...hit, candle: c };
-          break;
-        }
+        if (hit) { closed = { ...hit, candle: c }; break; }
       }
 
       if (closed) {
@@ -263,7 +270,9 @@ class Scanner {
     }
   }
 
-  // ── Auto-tuning adaptativo ────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
+  //  Auto-tuning adaptativo
+  // ═══════════════════════════════════════════════════════════
   _tuneAdaptiveParams() {
     const closed = this.db.getClosedTrades(ADAPTIVE_WINDOW);
     if (closed.length < ADAPTIVE_WINDOW) return;
@@ -308,11 +317,11 @@ class Scanner {
     }
   }
 
-  // ── Backtest ──────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════
+  //  BACKTEST
+  // ═══════════════════════════════════════════════════════════
   async runBacktest(options, runId) {
     const { tickers, startDate, endDate } = options;
-
-    // Prioridade total à UI, depois SQLite
     const params = this._resolveParams(options);
     const markovWindow = params.markov_window;
     const edgeThreshold = params.edge_threshold;
@@ -348,7 +357,6 @@ class Scanner {
           markovWindow,
           volumeMult,
           horizonDays,
-          edgeThreshold,
           useVolFilter
         });
 
@@ -364,41 +372,20 @@ class Scanner {
 
           const maxExitIndex = Math.min(candles.length - 1, i + horizonDays);
           for (let j = i + 1; j <= maxExitIndex; j++) {
-            const nextCandle = candles[j];
+            const nc = candles[j];
             if (direction === 'COMPRA') {
-              if (nextCandle.low <= stopLoss) {
-                exitPrice = stopLoss;
-                exitDate = nextCandle.date;
-                reason = 'stop_loss';
-                break;
-              }
-              if (nextCandle.high >= takeProfit) {
-                exitPrice = takeProfit;
-                exitDate = nextCandle.date;
-                reason = 'take_profit';
-                break;
-              }
+              if (nc.low <= stopLoss) { exitPrice = stopLoss; exitDate = nc.date; reason = 'stop_loss'; break; }
+              if (nc.high >= takeProfit) { exitPrice = takeProfit; exitDate = nc.date; reason = 'take_profit'; break; }
             } else if (direction === 'VENDA') {
-              if (nextCandle.high >= stopLoss) {
-                exitPrice = stopLoss;
-                exitDate = nextCandle.date;
-                reason = 'stop_loss';
-                break;
-              }
-              if (nextCandle.low <= takeProfit) {
-                exitPrice = takeProfit;
-                exitDate = nextCandle.date;
-                reason = 'take_profit';
-                break;
-              }
+              if (nc.high >= stopLoss) { exitPrice = stopLoss; exitDate = nc.date; reason = 'stop_loss'; break; }
+              if (nc.low <= takeProfit) { exitPrice = takeProfit; exitDate = nc.date; reason = 'take_profit'; break; }
             }
           }
 
           if (exitPrice === null && i + 1 < candles.length) {
-            const finalIndex = Math.min(candles.length - 1, i + horizonDays);
-            const finalCandle = candles[finalIndex];
-            exitPrice = finalCandle.close;
-            exitDate = finalCandle.date;
+            const fi = Math.min(candles.length - 1, i + horizonDays);
+            exitPrice = candles[fi].close;
+            exitDate = candles[fi].date;
             reason = 'horizonte';
           }
 
@@ -448,13 +435,9 @@ class Scanner {
     for (const tr of sortedTrades) {
       currentEquity = currentEquity * (1 + tr.profitPct);
       equityCurve.push(currentEquity);
-      if (currentEquity > peakEquity) {
-        peakEquity = currentEquity;
-      }
+      if (currentEquity > peakEquity) peakEquity = currentEquity;
       const dd = (peakEquity - currentEquity) / peakEquity;
-      if (dd > maxDrawdown) {
-        maxDrawdown = dd;
-      }
+      if (dd > maxDrawdown) maxDrawdown = dd;
     }
 
     let sharpeRatio = 0;
