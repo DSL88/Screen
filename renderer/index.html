@@ -112,24 +112,25 @@
       </nav>
 
       <div class="tab-content active" id="tab-scanner">
-        <div class="topbar-info">
-          <h1>Daily Scanner</h1>
-          <p id="status-line">Pronto. Adiciona tickers à watchlist e clica em iniciar.</p>
-        </div>
-        <div class="topbar-actions">
-          <div class="progress" id="progress-wrap" hidden>
-            <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-            <div class="progress-text" id="progress-text">0 / 0</div>
+        <header class="topbar">
+          <div class="topbar-info">
+            <h1>Daily Scanner</h1>
+            <p id="status-line">Pronto. Adiciona tickers à watchlist e clica em iniciar.</p>
           </div>
-          <button class="btn-secondary" id="btn-open-backtest">
-            <span>Simulação Histórica</span>
-          </button>
-          <button class="btn-primary" id="btn-scan">
-            <span class="btn-label">Iniciar Análise Diária</span>
-            <span class="spinner" id="spinner" hidden></span>
-          </button>
-        </div>
-      </header>
+          <div class="topbar-actions">
+            <div class="progress" id="progress-wrap" hidden>
+              <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+              <div class="progress-text" id="progress-text">0 / 0</div>
+            </div>
+            <button class="btn-secondary" id="btn-open-backtest">
+              <span>Simulação Histórica</span>
+            </button>
+            <button class="btn-primary" id="btn-scan">
+              <span class="btn-label">Iniciar Análise Diária</span>
+              <span class="spinner" id="spinner" hidden></span>
+            </button>
+          </div>
+        </header>
 
       <section class="results">
         <table class="results-table">
