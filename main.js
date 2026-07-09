@@ -98,9 +98,10 @@ app.whenReady().then(async () => {
       const limit = (payload && payload.limit) || 5;
       try {
         const tickerResults = await yahooClient.searchTickers(query, limit);
-        return { ok: true, tickers: tickerResults };
+        return { ok: true, tickers: Array.isArray(tickerResults) ? tickerResults : [] };
       } catch (err) {
-        return { ok: false, error: err.message || String(err), tickers: [] };
+        console.error('[ticker:search] falha na pesquisa Yahoo:', err && err.message ? err.message : err);
+        return { ok: false, error: err && err.message ? err.message : String(err), tickers: [] };
       }
     });
 

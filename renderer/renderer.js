@@ -1058,21 +1058,25 @@
       return;
     }
     const seq = ++shortcutSearchSeq;
+    let isLoading = true;
     renderShortcutLoading();
+    if (shortcutSearchBtn) shortcutSearchBtn.disabled = true;
     if (typeof status !== 'undefined' && status) {
       status.textContent = `A pesquisar "${query}"...`;
     }
     try {
       const res = await window.api.searchTicker(query, 5);
       if (seq !== shortcutSearchSeq) return;
-      if (!res || !res.ok) {
+      const tickers = (res && Array.isArray(res.tickers)) ? res.tickers : [];
+      if (!res || res.ok === false) {
+        lastShortcutTickers = [];
         renderShortcutError(res && res.error ? res.error : 'Erro desconhecido');
         if (typeof status !== 'undefined' && status) {
           status.textContent = 'Erro na pesquisa: ' + (res && res.error ? res.error : 'desconhecido');
         }
         return;
       }
-      lastShortcutTickers = res.tickers || [];
+      lastShortcutTickers = tickers;
       renderShortcutResults(lastShortcutTickers);
       if (typeof status !== 'undefined' && status) {
         const n = lastShortcutTickers.length;
@@ -1081,10 +1085,23 @@
           : `Sem resultados para "${query}".`;
       }
     } catch (err) {
-      if (seq !== shortcutSearchSeq) return;
-      renderShortcutError(err.message || String(err));
-      if (typeof status !== 'undefined' && status) {
-        status.textContent = 'Erro: ' + (err.message || String(err));
+      if (seq === shortcutSearchSeq) {
+        lastShortcutTickers = [];
+        renderShortcutError(err && err.message ? err.message : String(err));
+        if (typeof status !== 'undefined' && status) {
+          status.textContent = 'Erro: ' + (err && err.message ? err.message : String(err));
+        }
+      }
+    } finally {
+      isLoading = false;
+      if (seq === shortcutSearchSeq) {
+        if (shortcutSearchBtn) shortcutSearchBtn.disabled = false;
+        if (shortcutResultsEl) {
+          const hasLoading = shortcutResultsEl.querySelector('.shortcuts-loading');
+          if (hasLoading) {
+            shortcutResultsEl.innerHTML = '<div class="shortcuts-empty-results">Pesquisa interrompida. Tenta novamente.</div>';
+          }
+        }
       }
     }
   }
