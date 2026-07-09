@@ -188,6 +188,9 @@
             <p id="portfolio-status">Posições ativas abertas a partir dos sinais do scanner.</p>
           </div>
           <div class="topbar-actions">
+            <button class="btn-secondary btn-danger-ghost" id="btn-clear-trades" disabled>
+              <span>🗑️ Apagar tudo</span>
+            </button>
             <button class="btn-secondary" id="btn-sync-trades">
               <span>Sincronizar Posições</span>
             </button>
@@ -212,11 +215,12 @@
                 <th class="col-status">Status</th>
                 <th class="col-alerta">Alerta</th>
                 <th class="col-num">Resultado</th>
+                <th class="col-action">Ação</th>
               </tr>
             </thead>
             <tbody id="portfolio-body">
               <tr class="empty">
-                <td colspan="11">Nenhuma posição ativa. Clique em "Investir" num sinal do scanner para começar.</td>
+                <td colspan="12">Nenhuma posição ativa. Clique em "Investir" num sinal do scanner para começar.</td>
               </tr>
             </tbody>
           </table>

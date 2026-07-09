@@ -291,6 +291,14 @@ class DB {
     `).run(resultadoPct, precoFecho, 'auto', new Date().toISOString().slice(0, 10), id);
   }
 
+  removeActiveTrade(id) {
+    return this.db.prepare('DELETE FROM active_trades WHERE id = ?').run(id);
+  }
+
+  clearActiveTrades() {
+    return this.db.prepare("DELETE FROM active_trades WHERE status = 'aberto'").run();
+  }
+
   addShortcut(tickerOrArray, nome, mercado, tipo = '') {
     if (Array.isArray(tickerOrArray)) {
       const stmt = this.db.prepare(`

@@ -1182,6 +1182,59 @@ html, body {
 /* ============== ACTION BUTTONS ============== */
 .col-action {
   text-align: center !important;
+  width: 56px;
+}
+
+.portfolio-row-remove {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.portfolio-row-remove:hover {
+  background: var(--bear);
+  color: #fff;
+  border-color: var(--bear);
+  transform: scale(1.06);
+}
+.portfolio-row-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+.portfolio-row-remove:disabled:hover {
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+
+tr.removing .portfolio-row-remove { opacity: 0.4; }
+
+.btn-secondary.btn-danger-ghost {
+  color: var(--bear);
+  border-color: var(--border);
+}
+.btn-secondary.btn-danger-ghost:hover {
+  background: var(--bear-soft);
+  border-color: var(--bear);
+  color: var(--bear);
+}
+.btn-secondary.btn-danger-ghost:disabled {
+  background: var(--surface-2);
+  color: var(--text-mute);
+  border-color: var(--border);
+  cursor: not-allowed;
 }
 .btn-investir {
   padding: 5px 14px;

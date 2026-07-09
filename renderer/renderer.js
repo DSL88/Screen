@@ -1343,6 +1343,7 @@
   const portfolioStatus = document.getElementById('portfolio-status');
   const btnSyncTrades = document.getElementById('btn-sync-trades');
   const btnReanalisar = document.getElementById('btn-reanalisar');
+  const btnClearTrades = document.getElementById('btn-clear-trades');
 
   // Cache local de estados calculados na última reanálise (ticker -> state)
   let lastStatesByTicker = {};
@@ -1430,7 +1431,17 @@
       <td class="col-status"><span class="portfolio-status-badge portfolio-status-aberto">ABERTO</span></td>
       <td class="col-alerta">${renderAlerta(state)}</td>
       <td class="col-num" style="color: ${resultadoColor}; font-weight: 600;">${resultadoText}</td>
+      <td class="col-action">
+        <button class="portfolio-row-remove" data-trade-id="${trade.id}" data-ticker="${escapeHtml(trade.ticker)}" title="Apagar esta posição">×</button>
+      </td>
     `;
+    const removeBtn = tr.querySelector('.portfolio-row-remove');
+    if (removeBtn) {
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeOneTrade(trade, removeBtn);
+      });
+    }
     return tr;
   }
 
@@ -1456,13 +1467,15 @@
   function renderPortfolioTable() {
     portfolioBody.innerHTML = '';
     if (lastActiveTrades.length === 0) {
-      portfolioBody.innerHTML = '<tr class="empty"><td colspan="11">Nenhuma posição ativa. Clique em "Investir" num sinal do scanner para começar.</td></tr>';
+      portfolioBody.innerHTML = '<tr class="empty"><td colspan="12">Nenhuma posição ativa. Clique em "Investir" num sinal do scanner para começar.</td></tr>';
+      if (btnClearTrades) btnClearTrades.disabled = true;
       return;
     }
     for (const t of lastActiveTrades) {
       const state = lastStatesByTicker[t.ticker] || null;
       portfolioBody.appendChild(renderPortfolioRow(t, state));
     }
+    if (btnClearTrades) btnClearTrades.disabled = false;
   }
 
   async function loadPortfolio() {
@@ -1491,6 +1504,79 @@
         ? `${lastActiveTrades.length} posição(ões) ativa(s) em monitorização.${hasStates ? ' (última reanálise aplicada)' : ''}`
         : 'Posições ativas abertas a partir dos sinais do scanner.';
     } catch (err) {
+      portfolioStatus.textContent = 'Erro: ' + (err.message || String(err));
+    }
+  }
+
+  async function removeOneTrade(trade, btnEl) {
+    const ticker = trade && trade.ticker ? trade.ticker : '';
+    if (!trade || trade.id == null) return;
+    const ok = await openConfirmModal({
+      title: 'Apagar posição',
+      message: `Queres mesmo apagar a posição <strong>${escapeHtml(ticker)}</strong> (${escapeHtml(trade.direcao || '')})? Esta ação não pode ser revertida.`,
+      confirmLabel: 'Apagar',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!ok) return;
+
+    const row = btnEl && btnEl.closest ? btnEl.closest('tr') : null;
+    if (row) row.classList.add('removing');
+    if (btnEl) btnEl.disabled = true;
+
+    try {
+      const res = await window.api.removeTrade(trade.id);
+      if (!res || !res.ok) {
+        if (row) row.classList.remove('removing');
+        if (btnEl) btnEl.disabled = false;
+        portfolioStatus.textContent = 'Erro ao apagar: ' + (res && res.error ? res.error : 'desconhecido');
+        return;
+      }
+      if (lastStatesByTicker && lastStatesByTicker[ticker]) {
+        delete lastStatesByTicker[ticker];
+      }
+      await loadPortfolio();
+      portfolioStatus.textContent = `Posição ${ticker} removida.`;
+    } catch (err) {
+      if (row) row.classList.remove('removing');
+      if (btnEl) btnEl.disabled = false;
+      portfolioStatus.textContent = 'Erro: ' + (err.message || String(err));
+    }
+  }
+
+  async function clearAllTrades() {
+    if (lastActiveTrades.length === 0) {
+      portfolioStatus.textContent = 'Não há posições ativas para apagar.';
+      return;
+    }
+    const count = lastActiveTrades.length;
+    const ok = await openConfirmModal({
+      title: 'Apagar todas as posições',
+      message: `Tens a certeza que queres apagar <strong>todas as ${count} posições ativas</strong>? Esta ação não pode ser revertida e o histórico de trades fechados não é afetado.`,
+      confirmLabel: 'Sim, apagar tudo',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!ok) return;
+
+    if (btnClearTrades) btnClearTrades.disabled = true;
+    const prev = lastActiveTrades;
+    lastActiveTrades = [];
+    renderPortfolioTable();
+    try {
+      const res = await window.api.clearTrades();
+      if (!res || !res.ok) {
+        lastActiveTrades = prev;
+        renderPortfolioTable();
+        portfolioStatus.textContent = 'Erro ao apagar: ' + (res && res.error ? res.error : 'desconhecido');
+        return;
+      }
+      lastStatesByTicker = {};
+      portfolioStatus.textContent = `${res.changes || count} ${(res.changes || count) === 1 ? 'posição removida' : 'posições removidas'}.`;
+      await loadPortfolio();
+    } catch (err) {
+      lastActiveTrades = prev;
+      renderPortfolioTable();
       portfolioStatus.textContent = 'Erro: ' + (err.message || String(err));
     }
   }
@@ -1578,6 +1664,9 @@
   }
   if (btnReanalisar) {
     btnReanalisar.addEventListener('click', reanalisarTrades);
+  }
+  if (btnClearTrades) {
+    btnClearTrades.addEventListener('click', clearAllTrades);
   }
 
   const portfolioTab = document.querySelector('.tab-btn[data-tab="portfolio"]');
