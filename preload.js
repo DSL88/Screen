@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('api', {
   addTrade: (trade) => ipcRenderer.invoke('trade:add', trade),
   listTrades: () => ipcRenderer.invoke('trade:list'),
   updateTrades: () => ipcRenderer.invoke('trade:update'),
+  removeTrade: (id) => ipcRenderer.invoke('trade:remove', { id }),
+  clearTrades: () => ipcRenderer.invoke('trade:clear'),
   addShortcut: (s) => ipcRenderer.invoke('shortcut:add', s),
   listShortcuts: () => ipcRenderer.invoke('shortcut:list'),
   removeShortcut: (ticker) => ipcRenderer.invoke('shortcut:remove', { ticker }),

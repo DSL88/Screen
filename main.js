@@ -202,6 +202,34 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('trade:remove', async (_event, payload) => {
+      if (!payload || (!payload.id && !payload.ticker)) {
+        return { ok: false, error: 'missing-id-or-ticker' };
+      }
+      try {
+        let result;
+        if (payload.id != null) {
+          result = db.removeActiveTrade(payload.id);
+        } else {
+          const r = db.db.prepare("DELETE FROM active_trades WHERE ticker = ? AND status = 'aberto'")
+            .run(String(payload.ticker).toUpperCase().trim());
+          result = r;
+        }
+        return { ok: true, changes: result && typeof result.changes === 'number' ? result.changes : 0 };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('trade:clear', async () => {
+      try {
+        const result = db.clearActiveTrades();
+        return { ok: true, changes: result && typeof result.changes === 'number' ? result.changes : 0 };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     ipcMain.handle('shortcut:add', async (_event, payload) => {
       if (!payload || !payload.ticker) return { ok: false, error: 'missing-ticker' };
       try {
