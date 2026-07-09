@@ -373,7 +373,7 @@
   }
 
   function renderSearchModalResults(res, query) {
-    const tickers = (res && res.tickers) || [];
+    const tickers = ((res && res.tickers) || []).filter(r => !r.ticker.startsWith('BULK:'));
 
     if (tickers.length === 0) {
       modalSearchResults.innerHTML = `
@@ -976,7 +976,11 @@
         status.textContent = 'Erro ao guardar atalho: ' + (res ? res.error : 'desconhecido');
         return;
       }
-      status.textContent = `Atalho ${trade.ticker} guardado.`;
+      if (res.bulkCount) {
+        status.textContent = `${res.bulkCount} atalhos de mercado adicionados em lote.`;
+      } else {
+        status.textContent = `Atalho ${trade.ticker} guardado.`;
+      }
       await loadShortcuts();
     } catch (err) {
       status.textContent = 'Erro: ' + (err.message || String(err));

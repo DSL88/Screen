@@ -1,4 +1,5 @@
 const yahooFinance = require('yahoo-finance2').default || require('yahoo-finance2');
+const tickerLists = require('./tickerLists');
 
 // Suprimir avisos de validação de esquema no terminal
 const yfConfig = yahooFinance._opts;
@@ -161,9 +162,68 @@ async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3) {
   }
 }
 
+function getBulkIndexTickers(queryOrTicker) {
+  const q = String(queryOrTicker || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (['portugal', 'psi', '^psi20', 'psi20'].includes(q)) {
+    const list = tickerLists.PSI || [];
+    return {
+      id: 'PSI',
+      name: 'Índice PSI (Portugal) - Inclui todas as ações portuguesas',
+      tickers: list.map(item => ({
+        ticker: item.ticker,
+        name: item.name,
+        exchange: 'LIS',
+        type: 'EQUITY'
+      }))
+    };
+  }
+  if (['franca', 'frança', 'cac40', 'cac 40', '^fchi', 'fchi'].includes(q)) {
+    const list = tickerLists.CAC40 || [];
+    return {
+      id: 'CAC40',
+      name: 'Índice CAC 40 (França) - Inclui todas as ações francesas',
+      tickers: list.map(item => ({
+        ticker: item.ticker,
+        name: item.name,
+        exchange: 'PAR',
+        type: 'EQUITY'
+      }))
+    };
+  }
+  if (['espanha', 'ibex', 'ibex35', 'ibex 35', '^ibex', 'ibex-35'].includes(q)) {
+    const list = tickerLists.IBEX35 || [];
+    return {
+      id: 'IBEX35',
+      name: 'Índice IBEX 35 (Espanha) - Inclui todas as ações espanholas',
+      tickers: list.map(item => ({
+        ticker: item.ticker,
+        name: item.name,
+        exchange: 'MC',
+        type: 'EQUITY'
+      }))
+    };
+  }
+  return null;
+}
+
 async function searchTickers(query, limit = 8) {
   if (!query || typeof query !== 'string' || query.trim().length < 1) return [];
   const q = query.trim();
+
+  const bulkMatch = getBulkIndexTickers(q);
+  const out = [];
+  const seen = new Set();
+
+  if (bulkMatch) {
+    const bulkItem = {
+      ticker: `BULK:${bulkMatch.id}`,
+      name: bulkMatch.name,
+      exchange: bulkMatch.tickers[0]?.exchange || '',
+      type: 'INDEX'
+    };
+    out.push(bulkItem);
+    seen.add(bulkItem.ticker);
+  }
 
   const attempts = 3;
   let lastErr = null;
@@ -179,22 +239,33 @@ async function searchTickers(query, limit = 8) {
       );
 
       const quotes = (result && result.quotes) || [];
-      const out = [];
-      const seen = new Set();
       for (const item of quotes) {
         if (!item || item.isYahooFinance === false) continue;
         const symbol = item.symbol;
         if (!symbol) continue;
-        if (!/^[A-Z0-9.\-^=]{1,20}$/.test(symbol)) continue;
-        const type = item.quoteType || '';
-        if (type && !['EQUITY', 'ETF', 'INDEX', 'MUTUALFUND'].includes(type)) continue;
+        if (!/^\^?[A-Z0-9.\-=]{1,20}$/i.test(symbol)) continue;
+        
+        const quoteType = item.quoteType;
+        const typeUpper = typeof quoteType === 'string' ? quoteType.toUpperCase() : '';
+        const allowedTypes = ['EQUITY', 'ETF', 'INDEX', 'CURRENCY', 'CRYPTOCURRENCY'];
+        
+        let isTypeValid = false;
+        if (quoteType) {
+          isTypeValid = allowedTypes.includes(typeUpper);
+        } else if (symbol.startsWith('^')) {
+          isTypeValid = true;
+        }
+        
+        if (!isTypeValid) continue;
+        
         if (seen.has(symbol)) continue;
         seen.add(symbol);
+        
         out.push({
-          ticker: symbol,
-          name: item.shortname || item.longname || symbol,
-          exchange: item.exchange || item.exchDisp || '',
-          type
+          ticker: item.symbol,
+          name: item.shortname || item.longname || item.symbol,
+          exchange: item.exchange || '',
+          type: item.quoteType
         });
         if (out.length >= limit) break;
       }
@@ -219,4 +290,4 @@ async function searchTickers(query, limit = 8) {
   throw new Error('Falha na pesquisa Yahoo: ' + msg);
 }
 
-module.exports = { fetchWithRetry, searchTickers };
+module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers };
