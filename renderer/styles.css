@@ -914,6 +914,25 @@ html, body {
   -webkit-app-region: no-drag;
 }
 
+.topbar-actions .btn-primary,
+.topbar-actions .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 18px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  border-radius: var(--radius);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  box-shadow: none;
+}
+.topbar-actions .btn-primary { box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3), 0 0 20px rgba(59, 130, 246, 0.08); }
+.topbar-actions .btn-secondary { border: 1px solid var(--border-strong); }
+
 .progress {
   display: flex;
   align-items: center;
