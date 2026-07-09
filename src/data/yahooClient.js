@@ -162,65 +162,91 @@ async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3) {
   }
 }
 
-function getBulkIndexTickers(queryOrTicker) {
-  const q = String(queryOrTicker || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  if (['portugal', 'psi', '^psi20', 'psi20'].includes(q)) {
-    const list = tickerLists.PSI || [];
-    return {
-      id: 'PSI',
-      name: 'Índice PSI (Portugal) - Inclui todas as ações portuguesas',
-      tickers: list.map(item => ({
-        ticker: item.ticker,
-        name: item.name,
-        exchange: 'LIS',
-        type: 'EQUITY'
-      }))
-    };
-  }
-  if (['franca', 'frança', 'cac40', 'cac 40', '^fchi', 'fchi'].includes(q)) {
-    const list = tickerLists.CAC40 || [];
-    return {
-      id: 'CAC40',
-      name: 'Índice CAC 40 (França) - Inclui todas as ações francesas',
-      tickers: list.map(item => ({
-        ticker: item.ticker,
-        name: item.name,
-        exchange: 'PAR',
-        type: 'EQUITY'
-      }))
-    };
-  }
-  if (['espanha', 'ibex', 'ibex35', 'ibex 35', '^ibex', 'ibex-35'].includes(q)) {
-    const list = tickerLists.IBEX35 || [];
-    return {
-      id: 'IBEX35',
-      name: 'Índice IBEX 35 (Espanha) - Inclui todas as ações espanholas',
-      tickers: list.map(item => ({
-        ticker: item.ticker,
-        name: item.name,
-        exchange: 'MC',
-        type: 'EQUITY'
-      }))
-    };
-  }
+const MARKET_EXCHANGES = {
+  PSI: 'Euronext Lisbon',
+  IBEX35: 'BME Madrid',
+  SP500: 'NYSE/NASDAQ',
+  DAX40: 'Xetra Frankfurt',
+  CAC40: 'Euronext Paris',
+  AEX25: 'Euronext Amsterdam',
+  SMI: 'SIX Swiss Exchange',
+  BEL20: 'Euronext Brussels',
+  OMXS30: 'Nasdaq Stockholm',
+  FTSE100: 'London Stock Exchange',
+  NIKKEI30: 'Tokyo Stock Exchange',
+  HANGSENG30: 'Hong Kong Stock Exchange'
+};
+
+function resolveIndexId(queryOrId) {
+  if (!queryOrId) return null;
+  const raw = String(queryOrId).trim();
+  const upper = raw.toUpperCase().replace(/^MERCADO_/, '').replace(/^BULK:/, '');
+
+  if (tickerLists.INDICES && tickerLists.INDICES[upper]) return upper;
+
+  const stripped = upper.replace(/[^A-Z0-9]/g, '');
+  if (tickerLists.INDICES && tickerLists.INDICES[stripped]) return stripped;
+
+  const alphaOnly = upper.replace(/[0-9]/g, '');
+  if (alphaOnly && alphaOnly !== upper && tickerLists.INDICES && tickerLists.INDICES[alphaOnly]) return alphaOnly;
+
+  const upperHyphen = upper.replace(/(\d+)/g, '-$1').replace(/--+/g, '-');
+  if (upperHyphen !== upper && tickerLists.INDICES && tickerLists.INDICES[upperHyphen]) return upperHyphen;
+
+  const matches = tickerLists.searchWorldIndices(raw);
+  if (!matches || matches.length === 0) return null;
+
+  const withComponents = matches.find(m => m.hasComponents);
+  const chosen = withComponents || matches[0];
+  if (!chosen) return null;
+  if (chosen.id && tickerLists.INDICES && tickerLists.INDICES[chosen.id]) return chosen.id;
   return null;
+}
+
+function getBulkIndexTickers(queryOrId) {
+  const id = resolveIndexId(queryOrId);
+  if (!id) return null;
+  const list = (tickerLists.INDICES && tickerLists.INDICES[id]) || [];
+  if (!Array.isArray(list) || list.length === 0) return null;
+  return {
+    id,
+    exchange: MARKET_EXCHANGES[id] || 'Índice',
+    tickers: list.map(item => ({
+      ticker: item.ticker,
+      name: item.name,
+      exchange: MARKET_EXCHANGES[id] || '',
+      type: 'EQUITY'
+    }))
+  };
+}
+
+function buildBulkSearchResult(id) {
+  const list = (tickerLists.INDICES && tickerLists.INDICES[id]) || [];
+  const meta = (tickerLists.WORLD_INDICES || []).find(i => i.id === id);
+  const name = meta && meta.name
+    ? `${meta.name} - Adicionar todas as componentes`
+    : `Índice ${id} - Adicionar todas as componentes`;
+  return {
+    ticker: `MERCADO_${id}`,
+    name,
+    exchange: MARKET_EXCHANGES[id] || 'Índice',
+    quoteType: 'INDEX',
+    isBulk: true,
+    bulkId: id,
+    bulkCount: list.length
+  };
 }
 
 async function searchTickers(query, limit = 8) {
   if (!query || typeof query !== 'string' || query.trim().length < 1) return [];
   const q = query.trim();
 
-  const bulkMatch = getBulkIndexTickers(q);
+  const bulkId = resolveIndexId(q);
   const out = [];
   const seen = new Set();
 
-  if (bulkMatch) {
-    const bulkItem = {
-      ticker: `BULK:${bulkMatch.id}`,
-      name: bulkMatch.name,
-      exchange: bulkMatch.tickers[0]?.exchange || '',
-      type: 'INDEX'
-    };
+  if (bulkId) {
+    const bulkItem = buildBulkSearchResult(bulkId);
     out.push(bulkItem);
     seen.add(bulkItem.ticker);
   }
