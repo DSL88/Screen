@@ -116,6 +116,18 @@ app.whenReady().then(async () => {
       return { ok: true };
     });
 
+    ipcMain.handle('ticker:addBulk', async (_event, payload) => {
+      if (!payload || !Array.isArray(payload.tickers) || payload.tickers.length === 0) {
+        return { ok: false, error: 'missing-tickers' };
+      }
+      try {
+        const result = db.addCustomTickersBulk(payload.tickers);
+        return { ok: true, count: result.changes || 0, total: result.total || payload.tickers.length };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     ipcMain.handle('ticker:remove', async (_event, payload) => {
       if (!payload || !payload.ticker) return { ok: false, error: 'missing-ticker' };
       db.removeCustomTicker(payload.ticker);

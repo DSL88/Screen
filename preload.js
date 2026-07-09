@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('api', {
   cancelScan: (runId) => ipcRenderer.invoke('scan:cancel', { runId }),
   searchTicker: (query, limit) => ipcRenderer.invoke('ticker:search', { query, limit }),
   addTicker: (t) => ipcRenderer.invoke('ticker:add', t),
+  addBulkTickers: (tickers) => ipcRenderer.invoke('ticker:addBulk', { tickers }),
   removeTicker: (ticker) => ipcRenderer.invoke('ticker:remove', { ticker }),
   listTickers: () => ipcRenderer.invoke('ticker:list'),
   clearTickers: () => ipcRenderer.invoke('ticker:clear'),

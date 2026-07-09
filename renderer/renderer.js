@@ -425,21 +425,24 @@
           btnEl.disabled = true;
           btnEl.textContent = 'A guardar...';
           try {
-            const r = await window.api.addShortcut({
-              ticker: b.ticker,
-              nome: b.name,
-              mercado: b.exchange || '',
-              tipo: 'INDEX',
-              isBulk: true
-            });
-            if (r && r.ok) {
-              btnEl.textContent = `✓ ${r.count || b.bulkCount} adicionadas`;
-              div.classList.add('is-added');
-              await loadShortcuts();
+            const tickerList = Array.isArray(b.bulkTickers) ? b.bulkTickers : [];
+            if (tickerList.length === 0) {
+              btnEl.textContent = 'Erro';
+              btnEl.disabled = false;
               if (typeof status !== 'undefined' && status) {
-                status.textContent = `${r.count || b.bulkCount} ações de ${b.bulkId} adicionadas aos atalhos.`;
+                status.textContent = 'Erro: lista de componentes vazia para ' + b.bulkId;
               }
-              setTimeout(() => closeSearchModal(), 700);
+              return;
+            }
+            const r = await window.api.addBulkTickers(tickerList);
+            if (r && r.ok) {
+              btnEl.textContent = `✓ ${r.count || tickerList.length} na watchlist`;
+              div.classList.add('is-added');
+              await loadInitial();
+              if (typeof status !== 'undefined' && status) {
+                status.textContent = `${r.count || tickerList.length} ações de ${b.bulkId} adicionadas à Watchlist.`;
+              }
+              setTimeout(() => closeSearchModal(), 900);
             } else {
               btnEl.textContent = 'Erro';
               btnEl.disabled = false;
