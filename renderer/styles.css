@@ -1159,23 +1159,15 @@ html, body {
 }
 .mylist-grid {
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  grid-template-columns: 1fr;
   gap: 20px;
   align-items: start;
+  max-width: 720px;
 }
 .mylist-panel {
   display: flex;
   flex-direction: column;
   min-height: 360px;
-}
-.mylist-panel .shortcuts-grid {
-  max-height: 360px;
-  overflow-y: auto;
-}
-@media (max-width: 1100px) {
-  .mylist-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* ============== ACTION BUTTONS ============== */
