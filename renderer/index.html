@@ -31,44 +31,6 @@
       </div>
 
       <div class="panel">
-        <div class="panel-title">Atalhos de Mercado</div>
-        <div class="shortcuts-search-wrap">
-          <div class="shortcuts-search-row">
-            <input
-              type="text"
-              id="ticker-search-input"
-              class="shortcuts-search-input"
-              placeholder="Pesquisar ticker (AAPL, NVDA, GALP.LS)..."
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <button class="shortcuts-search-btn" id="btn-shortcuts-search">
-              <span>🔍 Pesquisar</span>
-            </button>
-          </div>
-          <div class="shortcuts-results" id="shortcuts-results" hidden></div>
-        </div>
-        <div class="shortcuts-grid" id="shortcuts-grid">
-          <div class="shortcuts-empty" id="shortcuts-empty">
-            Nenhum atalho. Pesquisa acima para começar.
-          </div>
-        </div>
-      </div>
-
-      <div class="panel watchlist-panel">
-        <div class="panel-title">
-          <span>Watchlist</span>
-          <span class="watchlist-count" id="watchlist-count">0</span>
-          <button class="link-btn" id="btn-clear-all">Limpar tudo</button>
-        </div>
-        <div class="watchlist" id="watchlist">
-          <div class="watchlist-empty" id="watchlist-empty">
-            Procura um ticker acima ou usa os atalhos de mercado.
-          </div>
-        </div>
-      </div>
-
-      <div class="panel">
         <div class="panel-title">Parâmetros</div>
         <div class="param">
           <span>Edge mínimo (%)</span>
@@ -112,6 +74,7 @@
     <main class="main">
       <nav class="tab-nav">
         <button class="tab-btn active" data-tab="scanner">Scanner de Mercado</button>
+        <button class="tab-btn" data-tab="mylist">My List</button>
         <button class="tab-btn" data-tab="portfolio">Monitorização de Investimentos</button>
       </nav>
 
@@ -165,6 +128,57 @@
         <span id="footer-summary">0 sinais emitidos · 0 tickers processados</span>
         <span class="footer-meta">Markov 9×9 · BB(30,2) · RSI(21) · ADX(14) · 252 d</span>
       </footer>
+      </div>
+
+      <div class="tab-content" id="tab-mylist">
+        <header class="topbar mylist-topbar">
+          <div class="topbar-info">
+            <h1>My List</h1>
+            <p>Atalhos de mercado e watchlist pessoal.</p>
+          </div>
+        </header>
+
+        <section class="mylist-content">
+          <div class="mylist-grid">
+            <div class="panel mylist-panel">
+              <div class="panel-title">Atalhos de Mercado</div>
+              <div class="shortcuts-search-wrap">
+                <div class="shortcuts-search-row">
+                  <input
+                    type="text"
+                    id="ticker-search-input"
+                    class="shortcuts-search-input"
+                    placeholder="Pesquisar ticker (AAPL, NVDA, GALP.LS)..."
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <button class="shortcuts-search-btn" id="btn-shortcuts-search">
+                    <span>🔍 Pesquisar</span>
+                  </button>
+                </div>
+                <div class="shortcuts-results" id="shortcuts-results" hidden></div>
+              </div>
+              <div class="shortcuts-grid" id="shortcuts-grid">
+                <div class="shortcuts-empty" id="shortcuts-empty">
+                  Nenhum atalho. Pesquisa acima para começar.
+                </div>
+              </div>
+            </div>
+
+            <div class="panel watchlist-panel">
+              <div class="panel-title">
+                <span>Watchlist</span>
+                <span class="watchlist-count" id="watchlist-count">0</span>
+                <button class="link-btn" id="btn-clear-all">Limpar tudo</button>
+              </div>
+              <div class="watchlist" id="watchlist">
+                <div class="watchlist-empty" id="watchlist-empty">
+                  Procura um ticker acima ou usa os atalhos de mercado.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
 
       <div class="tab-content" id="tab-portfolio">
