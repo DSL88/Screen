@@ -969,6 +969,15 @@ html, body {
   color: var(--text-mute);
   cursor: not-allowed;
   transform: none;
+}
+.btn-primary.btn-danger {
+  background: var(--bear);
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3), 0 0 20px rgba(239, 68, 68, 0.08);
+}
+.btn-primary.btn-danger:hover {
+  background: #dc2626;
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.45), 0 0 32px rgba(239, 68, 68, 0.15);
+}
   box-shadow: none;
 }
 
@@ -1626,6 +1635,21 @@ html, body {
 }
 .btn-secondary:hover {
   background: var(--border-strong);
+}
+.btn-secondary:disabled {
+  background: var(--surface-2);
+  color: var(--text-mute);
+  cursor: not-allowed;
+}
+
+.modal-confirm-dialog {
+  max-width: 420px;
+}
+.modal-confirm-message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
 }
 
 /* ============== MODAL SEARCH ============== */
