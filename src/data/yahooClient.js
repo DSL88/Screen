@@ -174,11 +174,8 @@ async function searchTickers(query, limit = 8) {
     try {
       const result = await yahooFinance.search(
         q,
-        {
-          quotesCount: Math.max(limit, 6),
-          newsCount: 0
-        },
-        { validateResult: false }
+        { quotesCount: limit, newsCount: 0 },
+        { fetchOptions: { headers: { 'User-Agent': USER_AGENT } } }
       );
 
       const quotes = (result && result.quotes) || [];
