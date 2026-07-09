@@ -193,6 +193,19 @@ app.whenReady().then(async () => {
     ipcMain.handle('shortcut:add', async (_event, payload) => {
       if (!payload || !payload.ticker) return { ok: false, error: 'missing-ticker' };
       try {
+        let bulkInfo = null;
+        if (payload.ticker.startsWith('BULK:')) {
+          const marketId = payload.ticker.replace('BULK:', '');
+          bulkInfo = yahooClient.getBulkIndexTickers(marketId);
+        } else {
+          bulkInfo = yahooClient.getBulkIndexTickers(payload.ticker);
+        }
+
+        if (bulkInfo && bulkInfo.tickers) {
+          db.addShortcut(bulkInfo.tickers);
+          return { ok: true, bulkCount: bulkInfo.tickers.length };
+        }
+
         db.addShortcut(
           payload.ticker,
           payload.nome || payload.ticker,

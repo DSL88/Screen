@@ -152,6 +152,31 @@
                 </div>
               </div>
             </div>
+
+            <div class="panel shortcuts-panel mylist-panel">
+              <div class="panel-title">Atalhos de Mercado</div>
+              <div class="shortcuts-search-wrap">
+                <div class="shortcuts-search-row">
+                  <input
+                    type="text"
+                    id="ticker-search-input"
+                    class="shortcuts-search-input"
+                    placeholder="Pesquisar atalhos Yahoo (ex: EURUSD=X, AAPL)..."
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <button id="btn-shortcuts-search" class="shortcuts-search-btn">Pesquisar</button>
+                </div>
+                <div id="shortcuts-results" class="shortcuts-results" hidden></div>
+              </div>
+              <div class="shortcuts-grid-container" style="flex: 1; min-height: 0; overflow-y: auto;">
+                <div id="shortcuts-grid" class="shortcuts-grid">
+                  <div id="shortcuts-empty" class="shortcuts-empty">
+                    Nenhum atalho adicionado. Pesquisa ativos acima para criar atalhos rápidos.
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
       </div>

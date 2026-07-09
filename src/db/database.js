@@ -262,15 +262,32 @@ class DB {
     `).run(resultadoPct, precoFecho, 'auto', new Date().toISOString().slice(0, 10), id);
   }
 
-  addShortcut(ticker, nome, mercado, tipo = '') {
+  addShortcut(tickerOrArray, nome, mercado, tipo = '') {
+    if (Array.isArray(tickerOrArray)) {
+      const stmt = this.db.prepare(`
+        INSERT OR IGNORE INTO market_shortcuts (ticker, nome, mercado, tipo)
+        VALUES (?, ?, ?, ?)
+      `);
+      const tx = this.db.transaction((list) => {
+        for (const item of list) {
+          const t = String(item.ticker || '').toUpperCase().trim();
+          if (!t) continue;
+          stmt.run(
+            t,
+            item.name || item.nome || item.ticker,
+            item.exchange || item.mercado || '',
+            item.type || item.tipo || ''
+          );
+        }
+      });
+      tx(tickerOrArray);
+      return { changes: tickerOrArray.length };
+    }
+
     return this.db.prepare(`
-      INSERT INTO market_shortcuts (ticker, nome, mercado, tipo)
+      INSERT OR IGNORE INTO market_shortcuts (ticker, nome, mercado, tipo)
       VALUES (?, ?, ?, ?)
-      ON CONFLICT(ticker) DO UPDATE SET
-        nome = excluded.nome,
-        mercado = excluded.mercado,
-        tipo = excluded.tipo
-    `).run(String(ticker).toUpperCase().trim(), nome || ticker, mercado || '', tipo || '');
+    `).run(String(tickerOrArray).toUpperCase().trim(), nome || tickerOrArray, mercado || '', tipo || '');
   }
 
   getShortcuts() {
