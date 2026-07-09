@@ -213,6 +213,35 @@ class DB {
     `).run(t.ticker, t.name || '', t.exchange || '', t.type || '');
   }
 
+  addCustomTickersBulk(list) {
+    if (!Array.isArray(list) || list.length === 0) return { changes: 0 };
+    const stmt = this.db.prepare(`
+      INSERT INTO custom_tickers (ticker, name, exchange, type)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(ticker) DO UPDATE SET
+        name = excluded.name,
+        exchange = excluded.exchange,
+        type = excluded.type
+    `);
+    const tx = this.db.transaction((items) => {
+      let changes = 0;
+      for (const item of items) {
+        const tk = String(item.ticker || '').toUpperCase().trim();
+        if (!tk) continue;
+        const r = stmt.run(
+          tk,
+          item.name || item.nome || '',
+          item.exchange || item.mercado || '',
+          item.type || item.tipo || ''
+        );
+        changes += r.changes || 0;
+      }
+      return changes;
+    });
+    const changes = tx(list);
+    return { changes, total: list.length };
+  }
+
   removeCustomTicker(ticker) {
     this.db.prepare('DELETE FROM custom_tickers WHERE ticker = ?').run(ticker);
   }

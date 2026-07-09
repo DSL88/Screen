@@ -233,7 +233,13 @@ function buildBulkSearchResult(id) {
     quoteType: 'INDEX',
     isBulk: true,
     bulkId: id,
-    bulkCount: list.length
+    bulkCount: list.length,
+    bulkTickers: list.map(t => ({
+      ticker: t.ticker,
+      name: t.name,
+      exchange: MARKET_EXCHANGES[id] || '',
+      type: 'EQUITY'
+    }))
   };
 }
 
