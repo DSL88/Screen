@@ -91,6 +91,7 @@
   function updateWatchlistCount() {
     watchlistCount.textContent = watchlist.length;
     watchlistEmpty.style.display = watchlist.length === 0 ? 'block' : 'none';
+    if (btnClearAll) btnClearAll.disabled = watchlist.length === 0;
   }
 
   function renderWatchlist(highlightTicker) {
@@ -621,14 +622,48 @@
   }
 
   async function clearAll() {
-    if (watchlist.length === 0) return;
-    if (!confirm(`Remover todos os ${watchlist.length} tickers da watchlist?`)) return;
+    if (watchlist.length === 0) {
+      if (typeof status !== 'undefined' && status) {
+        status.textContent = 'Watchlist já está vazia.';
+      }
+      return;
+    }
+    const count = watchlist.length;
+    const ok = await openConfirmModal({
+      title: 'Limpar Watchlist',
+      message: `Tens a certeza que queres remover todos os <strong>${count}</strong> ${count === 1 ? 'ticker' : 'tickers'} da Watchlist?`,
+      confirmLabel: 'Sim, limpar tudo',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!ok) return;
+
+    if (btnClearAll) btnClearAll.disabled = true;
+    const prev = watchlist;
     watchlist = [];
     renderWatchlist();
     try {
-      await window.api.clearTickers();
+      const res = await window.api.clearTickers();
+      if (!res || !res.ok) {
+        watchlist = prev;
+        renderWatchlist();
+        if (typeof status !== 'undefined' && status) {
+          status.textContent = 'Erro ao limpar watchlist: ' + (res && res.error ? res.error : 'desconhecido');
+        }
+        return;
+      }
+      if (typeof status !== 'undefined' && status) {
+        status.textContent = `Watchlist limpa (${count} ${count === 1 ? 'ticker removido' : 'tickers removidos'}).`;
+      }
+      await loadInitial();
     } catch (err) {
-      console.warn('clearTickers failed:', err);
+      watchlist = prev;
+      renderWatchlist();
+      if (typeof status !== 'undefined' && status) {
+        status.textContent = 'Erro: ' + (err && err.message ? err.message : String(err));
+      }
+    } finally {
+      if (btnClearAll) btnClearAll.disabled = watchlist.length === 0;
     }
   }
 
@@ -1549,4 +1584,64 @@
   if (portfolioTab) {
     portfolioTab.addEventListener('click', loadPortfolio);
   }
+
+  // ═══════════════════════════════════════════════════════════
+  //  MODAL DE CONFIRMAÇÃO GENÉRICO
+  // ═══════════════════════════════════════════════════════════
+  const confirmModal = document.getElementById('modal-confirm');
+  const confirmTitle = document.getElementById('modal-confirm-title');
+  const confirmMessage = document.getElementById('modal-confirm-message');
+  const confirmOk = document.getElementById('modal-confirm-ok');
+  const confirmCancel = document.getElementById('modal-confirm-cancel');
+  const confirmClose = document.getElementById('modal-confirm-close');
+  let confirmResolver = null;
+
+  function openConfirmModal(opts) {
+    if (!confirmModal) return Promise.resolve(false);
+    const cfg = Object.assign({
+      title: 'Confirmar',
+      message: 'Tens a certeza?',
+      confirmLabel: 'Confirmar',
+      cancelLabel: 'Cancelar',
+      danger: false
+    }, opts || {});
+    if (confirmTitle) confirmTitle.textContent = cfg.title;
+    if (confirmMessage) confirmMessage.innerHTML = cfg.message;
+    if (confirmOk) {
+      confirmOk.textContent = cfg.confirmLabel;
+      confirmOk.className = cfg.danger ? 'btn-primary btn-danger' : 'btn-primary';
+    }
+    if (confirmCancel) confirmCancel.textContent = cfg.cancelLabel;
+    confirmModal.hidden = false;
+    return new Promise(resolve => {
+      confirmResolver = resolve;
+    });
+  }
+
+  function closeConfirmModal(result) {
+    if (!confirmModal) return;
+    confirmModal.hidden = true;
+    if (confirmResolver) {
+      const r = confirmResolver;
+      confirmResolver = null;
+      r(result === true);
+    }
+  }
+
+  if (confirmOk) confirmOk.addEventListener('click', () => closeConfirmModal(true));
+  if (confirmCancel) confirmCancel.addEventListener('click', () => closeConfirmModal(false));
+  if (confirmClose) confirmClose.addEventListener('click', () => closeConfirmModal(false));
+  if (confirmModal) {
+    confirmModal.addEventListener('click', (e) => {
+      if (e.target === confirmModal) closeConfirmModal(false);
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (!confirmModal || confirmModal.hidden) return;
+    if (e.key === 'Escape') closeConfirmModal(false);
+    else if (e.key === 'Enter' && document.activeElement !== confirmCancel) {
+      e.preventDefault();
+      closeConfirmModal(true);
+    }
+  });
 })();
