@@ -193,17 +193,22 @@ app.whenReady().then(async () => {
     ipcMain.handle('shortcut:add', async (_event, payload) => {
       if (!payload || !payload.ticker) return { ok: false, error: 'missing-ticker' };
       try {
-        let bulkInfo = null;
-        if (payload.ticker.startsWith('BULK:')) {
-          const marketId = payload.ticker.replace('BULK:', '');
-          bulkInfo = yahooClient.getBulkIndexTickers(marketId);
-        } else {
-          bulkInfo = yahooClient.getBulkIndexTickers(payload.ticker);
-        }
-
-        if (bulkInfo && bulkInfo.tickers) {
-          db.addShortcut(bulkInfo.tickers);
-          return { ok: true, bulkCount: bulkInfo.tickers.length };
+        if (payload.isBulk === true || /^MERCADO_/i.test(String(payload.ticker))) {
+          const marketId = String(payload.ticker).replace(/^MERCADO_/i, '');
+          const bulkInfo = yahooClient.getBulkIndexTickers(marketId);
+          if (!bulkInfo || !Array.isArray(bulkInfo.tickers) || bulkInfo.tickers.length === 0) {
+            return { ok: false, error: 'unknown-market:' + marketId };
+          }
+          const items = bulkInfo.tickers.map(t => ({
+            ticker: t.ticker,
+            name: t.name,
+            exchange: t.exchange || bulkInfo.exchange || '',
+            type: t.type || 'EQUITY',
+            mercado: bulkInfo.id,
+            tipo: 'EQUITY'
+          }));
+          const result = db.addShortcut(items);
+          return { ok: true, bulk: true, mercado: bulkInfo.id, count: result && typeof result.changes === 'number' ? result.changes : items.length };
         }
 
         db.addShortcut(

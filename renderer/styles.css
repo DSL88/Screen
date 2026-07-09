@@ -1756,6 +1756,31 @@ html, body {
 }
 .modal-search-result.is-added { opacity: 0.55; }
 
+.modal-search-result.modal-search-bulk {
+  background: linear-gradient(90deg, var(--accent-soft) 0%, transparent 70%);
+  border-left: 3px solid var(--accent);
+}
+.modal-search-result.modal-search-bulk .modal-search-symbol {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+  min-width: 120px;
+}
+.modal-search-result.modal-search-bulk .modal-search-add-btn {
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+  font-weight: 600;
+}
+.modal-search-result.modal-search-bulk .modal-search-add-btn:disabled {
+  background: var(--surface-2);
+  color: var(--text-mute);
+  border-color: var(--border);
+  cursor: wait;
+}
+
 .modal-search-result-index {
   background: linear-gradient(90deg, var(--accent-soft) 0%, transparent 60%);
   border-left: 3px solid var(--accent);

@@ -373,9 +373,11 @@
   }
 
   function renderSearchModalResults(res, query) {
-    const tickers = ((res && res.tickers) || []).filter(r => !r.ticker.startsWith('BULK:'));
+    const all = (res && res.tickers) || [];
+    const bulkItems = all.filter(r => r && r.isBulk === true);
+    const tickers = all.filter(r => r && !r.isBulk && !/^BULK:/i.test(String(r.ticker || '')));
 
-    if (tickers.length === 0) {
+    if (tickers.length === 0 && bulkItems.length === 0) {
       modalSearchResults.innerHTML = `
         <div class="modal-search-no-results">
           Sem resultados para <strong>"${escapeHtml(query)}"</strong>
@@ -397,36 +399,101 @@
 
     modalSearchResults.innerHTML = '';
 
-    const section = document.createElement('div');
-    section.className = 'modal-search-section';
-    section.innerHTML = `
-      <div class="modal-search-section-header">
-        <div class="modal-search-section-title">📈 Resultados</div>
-        <div class="modal-search-section-count">${tickers.length}</div>
-      </div>
-    `;
-    for (const r of tickers) {
-      const div = document.createElement('div');
-      div.className = 'modal-search-result';
-      const isAdded = isInWatchlist(r.ticker);
-      if (isAdded) div.classList.add('is-added');
-      div.innerHTML = `
-        <span class="modal-search-symbol">${escapeHtml(r.ticker)}</span>
-        <div class="modal-search-info">
-          <div class="modal-search-name">${escapeHtml(r.name)}</div>
-          <div class="modal-search-meta">${escapeHtml(r.type || '')}</div>
+    if (bulkItems.length > 0) {
+      const bulkSection = document.createElement('div');
+      bulkSection.className = 'modal-search-section';
+      bulkSection.innerHTML = `
+        <div class="modal-search-section-header">
+          <div class="modal-search-section-title">🌍 Mercados</div>
+          <div class="modal-search-section-count">${bulkItems.length}</div>
         </div>
-        ${r.exchange ? `<span class="modal-search-exchange">${escapeHtml(r.exchange)}</span>` : ''}
-        <button class="modal-search-add-btn">${isAdded ? 'Adicionado' : 'Adicionar'}</button>
       `;
-      if (!isAdded) {
-        const add = () => addTicker(r);
-        div.querySelector('.modal-search-add-btn').addEventListener('click', (e) => { e.stopPropagation(); add(); });
-        div.addEventListener('click', add);
+      for (const b of bulkItems) {
+        const div = document.createElement('div');
+        div.className = 'modal-search-result modal-search-bulk';
+        div.innerHTML = `
+          <span class="modal-search-symbol">${escapeHtml(b.ticker)}</span>
+          <div class="modal-search-info">
+            <div class="modal-search-name">${escapeHtml(b.name)}</div>
+            <div class="modal-search-meta">${escapeHtml(b.exchange || '')} · ${b.bulkCount || 0} componentes</div>
+          </div>
+          <button class="modal-search-add-btn">Adicionar todas</button>
+        `;
+        const btnEl = div.querySelector('.modal-search-add-btn');
+        const handler = async (e) => {
+          if (e) e.stopPropagation();
+          btnEl.disabled = true;
+          btnEl.textContent = 'A guardar...';
+          try {
+            const r = await window.api.addShortcut({
+              ticker: b.ticker,
+              nome: b.name,
+              mercado: b.exchange || '',
+              tipo: 'INDEX',
+              isBulk: true
+            });
+            if (r && r.ok) {
+              btnEl.textContent = `✓ ${r.count || b.bulkCount} adicionadas`;
+              div.classList.add('is-added');
+              await loadShortcuts();
+              if (typeof status !== 'undefined' && status) {
+                status.textContent = `${r.count || b.bulkCount} ações de ${b.bulkId} adicionadas aos atalhos.`;
+              }
+              setTimeout(() => closeSearchModal(), 700);
+            } else {
+              btnEl.textContent = 'Erro';
+              btnEl.disabled = false;
+              if (typeof status !== 'undefined' && status) {
+                status.textContent = 'Erro: ' + (r && r.error ? r.error : 'desconhecido');
+              }
+            }
+          } catch (err) {
+            btnEl.textContent = 'Erro';
+            btnEl.disabled = false;
+            if (typeof status !== 'undefined' && status) {
+              status.textContent = 'Erro: ' + (err && err.message ? err.message : String(err));
+            }
+          }
+        };
+        btnEl.addEventListener('click', handler);
+        div.addEventListener('click', handler);
+        bulkSection.appendChild(div);
       }
-      section.appendChild(div);
+      modalSearchResults.appendChild(bulkSection);
     }
-    modalSearchResults.appendChild(section);
+
+    if (tickers.length > 0) {
+      const section = document.createElement('div');
+      section.className = 'modal-search-section';
+      section.innerHTML = `
+        <div class="modal-search-section-header">
+          <div class="modal-search-section-title">📈 Resultados</div>
+          <div class="modal-search-section-count">${tickers.length}</div>
+        </div>
+      `;
+      for (const r of tickers) {
+        const div = document.createElement('div');
+        div.className = 'modal-search-result';
+        const isAdded = isInWatchlist(r.ticker);
+        if (isAdded) div.classList.add('is-added');
+        div.innerHTML = `
+          <span class="modal-search-symbol">${escapeHtml(r.ticker)}</span>
+          <div class="modal-search-info">
+            <div class="modal-search-name">${escapeHtml(r.name)}</div>
+            <div class="modal-search-meta">${escapeHtml(r.type || '')}</div>
+          </div>
+          ${r.exchange ? `<span class="modal-search-exchange">${escapeHtml(r.exchange)}</span>` : ''}
+          <button class="modal-search-add-btn">${isAdded ? 'Adicionado' : 'Adicionar'}</button>
+        `;
+        if (!isAdded) {
+          const add = () => addTicker(r);
+          div.querySelector('.modal-search-add-btn').addEventListener('click', (e) => { e.stopPropagation(); add(); });
+          div.addEventListener('click', add);
+        }
+        section.appendChild(div);
+      }
+      modalSearchResults.appendChild(section);
+    }
   }
 
   async function doModalSearch(query) {
