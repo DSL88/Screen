@@ -52,23 +52,37 @@ function ema(values, period) {
 // ═══════════════════════════════════════════════════════════
 //  StdDev – Population standard deviation (N divisor)
 //  Alinhado com ta.stdev() do TradingView (biased=true, default)
+//
+//  Sliding Window O(N): mantém soma e soma dos quadrados
+//  em tempo real, eliminando o loop aninhado O(N × period).
+//  Variância via E[X²] − (E[X])² com guarda numérica.
 // ═══════════════════════════════════════════════════════════
 function stddev(values, period) {
   const n = values.length;
   const out = new Array(n).fill(null);
   if (n < period || period <= 0) return out;
 
-  for (let i = period - 1; i < n; i++) {
-    let sum = 0;
-    for (let j = i - period + 1; j <= i; j++) sum += values[j];
-    const mean = sum / period;
-    let sq = 0;
-    for (let j = i - period + 1; j <= i; j++) {
-      const d = values[j] - mean;
-      sq += d * d;
-    }
-    out[i] = Math.sqrt(sq / period);
+  let sum = 0;
+  let sumSq = 0;
+
+  for (let i = 0; i < period; i++) {
+    const v = values[i];
+    sum += v;
+    sumSq += v * v;
   }
+
+  let mean = sum / period;
+  out[period - 1] = Math.sqrt(Math.max(0, sumSq / period - mean * mean));
+
+  for (let i = period; i < n; i++) {
+    const outgoing = values[i - period];
+    const incoming = values[i];
+    sum += incoming - outgoing;
+    sumSq += incoming * incoming - outgoing * outgoing;
+    mean = sum / period;
+    out[i] = Math.sqrt(Math.max(0, sumSq / period - mean * mean));
+  }
+
   return out;
 }
 
@@ -192,54 +206,95 @@ function rsiWilder(closes, period = 21) {
 // ═══════════════════════════════════════════════════════════
 //  ADX – Average Directional Index (Wilder/RMA puro)
 //
-//  Pipeline sem qualquer SMA temporária:
-//    1. +DM, -DM  (regras clássicas de Wilder)
-//    2. smoothTR   = RMA(TR, period)
-//    3. smooth+DM  = RMA(+DM, period)
-//    4. smooth-DM  = RMA(-DM, period)
-//    5. +DI = 100 × smooth+DM / smoothTR
-//    6. -DI = 100 × smooth-DM / smoothTR
-//    7. DX  = 100 × |+DI − -DI| / (+DI + -DI)
-//    8. ADX = RMA(DX, period)  ← segunda suavização Wilder
+//  Pipeline single-pass sem arrays intermédios:
+//    1. +DM, -DM, TR calculados inline por barra
+//    2. RMA inline para smoothTR, smooth±DM (1ª suavização)
+//    3. DX calculado imediatamente a partir dos DI
+//    4. RMA inline sobre DX → ADX (2ª suavização)
+//
+//  Reduz alocação de 7 arrays de tamanho N para 0 arrays
+//  intermédios — apenas escalares de estado + 1 array de saída.
 // ═══════════════════════════════════════════════════════════
 function adxWilder(highs, lows, closes, period = 14) {
   const n = closes.length;
   const out = new Array(n).fill(null);
-  // Precisamos de pelo menos 2×period bars para seed+smooth
   if (n < period * 2) return out;
 
-  // +DM / -DM (bar 0 fica a 0, sem previous bar)
-  const plusDM = new Array(n).fill(0);
-  const minusDM = new Array(n).fill(0);
-  for (let i = 1; i < n; i++) {
-    const up = highs[i] - highs[i - 1];
-    const down = lows[i - 1] - lows[i];
-    plusDM[i] = (up > down && up > 0) ? up : 0;
-    minusDM[i] = (down > up && down > 0) ? down : 0;
-  }
+  const k = period - 1;
 
-  const tr = trueRange(highs, lows, closes);
+  // Estado RMA para TR, +DM, -DM (1ª suavização)
+  let trSum = 0, plusDmSum = 0, minusDmSum = 0;
+  let trRma = null, plusRma = null, minusRma = null;
+  let count = 0;
 
-  // 1ª suavização RMA
-  const trSmooth = rma(tr, period);
-  const plusSmooth = rma(plusDM, period);
-  const minusSmooth = rma(minusDM, period);
+  // Estado RMA para DX → ADX (2ª suavização)
+  let dxSum = 0;
+  let adxRma = null;
+  let dxCount = 0;
 
-  // DX série
-  const dx = new Array(n).fill(null);
   for (let i = 0; i < n; i++) {
-    if (trSmooth[i] === null || plusSmooth[i] === null || minusSmooth[i] === null) {
-      continue;
+    // ── TR inline ────────────────────────────────────────
+    let tr;
+    if (i === 0) {
+      tr = highs[i] - lows[i];
+    } else {
+      const hl = highs[i] - lows[i];
+      const hc = Math.abs(highs[i] - closes[i - 1]);
+      const lc = Math.abs(lows[i] - closes[i - 1]);
+      tr = Math.max(hl, hc, lc);
     }
-    const trVal = trSmooth[i];
-    const plusDI = trVal === 0 ? 0 : 100 * plusSmooth[i] / trVal;
-    const minusDI = trVal === 0 ? 0 : 100 * minusSmooth[i] / trVal;
+
+    // ── +DM / -DM inline ────────────────────────────────
+    let plusDM = 0, minusDM = 0;
+    if (i > 0) {
+      const up = highs[i] - highs[i - 1];
+      const down = lows[i - 1] - lows[i];
+      if (up > down && up > 0) plusDM = up;
+      if (down > up && down > 0) minusDM = down;
+    }
+
+    // ── 1ª suavização RMA (TR, +DM, -DM) ────────────────
+    count++;
+    if (count < period) {
+      trSum += tr;
+      plusDmSum += plusDM;
+      minusDmSum += minusDM;
+    } else if (count === period) {
+      trSum += tr;
+      plusDmSum += plusDM;
+      minusDmSum += minusDM;
+      trRma = trSum / period;
+      plusRma = plusDmSum / period;
+      minusRma = minusDmSum / period;
+    } else {
+      trRma = (tr + k * trRma) / period;
+      plusRma = (plusDM + k * plusRma) / period;
+      minusRma = (minusDM + k * minusRma) / period;
+    }
+
+    // ── DX inline ───────────────────────────────────────
+    if (trRma === null || plusRma === null || minusRma === null) continue;
+
+    const plusDI = trRma === 0 ? 0 : 100 * plusRma / trRma;
+    const minusDI = trRma === 0 ? 0 : 100 * minusRma / trRma;
     const diSum = plusDI + minusDI;
-    dx[i] = diSum === 0 ? 0 : 100 * Math.abs(plusDI - minusDI) / diSum;
+    const dx = diSum === 0 ? 0 : 100 * Math.abs(plusDI - minusDI) / diSum;
+
+    // ── 2ª suavização RMA (DX → ADX) ────────────────────
+    dxCount++;
+    if (dxCount < period) {
+      dxSum += dx;
+    } else if (dxCount === period) {
+      dxSum += dx;
+      adxRma = dxSum / period;
+      out[i] = adxRma;
+    } else {
+      adxRma = (dx + k * adxRma) / period;
+      out[i] = adxRma;
+    }
   }
 
-  // 2ª suavização RMA sobre DX → ADX
-  return rma(dx, period);
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -132,6 +132,15 @@ function analyzeSeries(candles, params = {}) {
   const useVolFilter = params.useVolFilter !== undefined ? params.useVolFilter : true;
   const onlyLongs = params.onlyLongs ?? false;
 
+  // ── Períodos dinâmicos (fallbacks = constantes do topo) ──
+  const rsiPeriod = params.rsiPeriod ?? RSI_PERIOD;
+  const adxPeriod = params.adxPeriod ?? ADX_PERIOD;
+  const bbPeriod = params.bbPeriod ?? BB_PERIOD;
+  const bbMult = params.bbMult ?? BB_MULT;
+  const atrPeriod = params.atrPeriod ?? ATR_PERIOD;
+  const atrMult = params.atrMult ?? ATR_MULT;
+  const tpPct = params.tpPct ?? TP_PCT;
+
   // Descarta velas com close null (ainda em formação)
   candles = candles.filter(c => c && c.close != null);
 
@@ -166,10 +175,10 @@ function analyzeSeries(candles, params = {}) {
   const volumes = candles.map(c => c.volume);
 
   // ── Indicadores ───────────────────────────────────────────
-  const rsi = rsiWilder(closes, RSI_PERIOD);
-  const adx = adxWilder(highs, lows, closes, ADX_PERIOD);
-  const bb = bollingerBands(closes, BB_PERIOD, BB_MULT);
-  const atr = atrWilder(highs, lows, closes, ATR_PERIOD);
+  const rsi = rsiWilder(closes, rsiPeriod);
+  const adx = adxWilder(highs, lows, closes, adxPeriod);
+  const bb = bollingerBands(closes, bbPeriod, bbMult);
+  const atr = atrWilder(highs, lows, closes, atrPeriod);
   const volSma = sma(volumes, VOL_SMA_PERIOD);
 
   // ── Cadeia de Markov ──────────────────────────────────────
@@ -237,11 +246,11 @@ function analyzeSeries(candles, params = {}) {
   let takeProfit = null;
 
   if (direction === 'COMPRA' && close != null && atrVal != null) {
-    stopLoss = close - ATR_MULT * atrVal;
-    takeProfit = close * (1 + TP_PCT);
+    stopLoss = close - atrMult * atrVal;
+    takeProfit = close * (1 + tpPct);
   } else if (direction === 'VENDA' && close != null && atrVal != null) {
-    stopLoss = close + ATR_MULT * atrVal;
-    takeProfit = close * (1 - TP_PCT);
+    stopLoss = close + atrMult * atrVal;
+    takeProfit = close * (1 - tpPct);
   }
 
   return {

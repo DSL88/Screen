@@ -1,12 +1,158 @@
 const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { Worker } = require('worker_threads');
 const path = require('path');
 const Database = require('./src/db/database');
-const Scanner = require('./src/engine/scanner');
 const yahooClient = require('./src/data/yahooClient');
 
 let mainWindow = null;
 let db = null;
-let scanner = null;
+let scannerWorker = null;
+
+// ═══════════════════════════════════════════════════════════
+//  Worker Thread — gestão do scanner fora do Main Process
+// ═══════════════════════════════════════════════════════════
+function getScannerWorker() {
+  if (scannerWorker && !scannerWorker.isTerminated) return scannerWorker;
+
+  scannerWorker = new Worker(path.join(__dirname, 'src/engine/scanner.worker.js'));
+
+  scannerWorker.on('message', (msg) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    switch (msg.type) {
+      case 'progress':
+        mainWindow.webContents.send('scan:progress', msg.payload);
+        break;
+
+      case 'row':
+        // Inserir sinal no DB a partir do processo principal
+        try {
+          const id = db.insertSignal(msg.payload);
+          mainWindow.webContents.send('scan:row', { id, ...msg.payload });
+        } catch (err) {
+          console.error('[Worker] Falha ao inserir sinal:', err.message);
+        }
+        break;
+
+      case 'error':
+        mainWindow.webContents.send('scan:error', msg.payload);
+        break;
+
+      case 'done':
+        // Auto-tuning adaptativo no processo principal (precisa de DB)
+        try {
+          _tuneAdaptiveParams();
+        } catch (_) { /* ignorar falhas de tuning */ }
+        mainWindow.webContents.send('scan:done', msg.payload);
+        break;
+
+      case 'cacheOHLCV':
+        // Cache de candles no DB a partir do processo principal
+        try {
+          db.cacheOHLCV(msg.payload.key, msg.payload.candles);
+        } catch (_) { /* ignorar */ }
+        break;
+
+      case 'backtestResult':
+        // Tratado via Promise no handler, não reencaminhar
+        break;
+
+      case 'updateResult':
+        // Tratado via Promise no handler
+        break;
+    }
+  });
+
+  scannerWorker.on('error', (err) => {
+    console.error('[Worker] Erro fatal:', err);
+    scannerWorker = null;
+  });
+
+  scannerWorker.on('exit', (code) => {
+    if (code !== 0) console.error('[Worker] Terminou com código', code);
+    scannerWorker = null;
+  });
+
+  return scannerWorker;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Auto-tuning adaptativo (replicado do Scanner, mas no main)
+// ═══════════════════════════════════════════════════════════
+function _tuneAdaptiveParams() {
+  const ADAPTIVE_WINDOW = 50;
+  const EDGE_MIN = 0.10;
+  const EDGE_MAX = 0.30;
+  const WINDOW_MIN = 100;
+  const WINDOW_MAX = 200;
+
+  const closed = db.getClosedTrades(ADAPTIVE_WINDOW);
+  if (closed.length < ADAPTIVE_WINDOW) return;
+
+  const sorted = [...closed].sort((a, b) => a.edge - b.edge);
+  const quartiles = [[], [], [], []];
+  sorted.forEach((t, i) => quartiles[Math.min(3, Math.floor(i / sorted.length * 4))].push(t));
+
+  let bestQ = 0;
+  let bestExpectancy = -Infinity;
+  quartiles.forEach((bucket, idx) => {
+    if (bucket.length === 0) return;
+    const wins = bucket.filter(t => (t.resultado_pct || 0) > 0).length;
+    const avg = bucket.reduce((a, t) => a + (t.resultado_pct || 0), 0) / bucket.length;
+    const winRate = wins / bucket.length;
+    const expectancy = winRate * avg - (1 - winRate) * Math.abs(avg);
+    if (expectancy > bestExpectancy) {
+      bestExpectancy = expectancy;
+      bestQ = idx;
+    }
+  });
+
+  const current = db.getAdaptiveParams();
+  const step = 0.02;
+  const targetEdge = bestQ === 0
+    ? current.edge_threshold - step
+    : bestQ === 3
+      ? current.edge_threshold + step
+      : current.edge_threshold;
+  const newEdge = Math.max(EDGE_MIN, Math.min(EDGE_MAX, targetEdge));
+  if (newEdge !== current.edge_threshold) {
+    db.setAdaptiveParam('edge_threshold', newEdge);
+  }
+
+  const newWindow = bestQ === 3
+    ? Math.min(WINDOW_MAX, current.markov_window + 10)
+    : bestQ === 0
+      ? Math.max(WINDOW_MIN, current.markov_window - 10)
+      : current.markov_window;
+  if (newWindow !== current.markov_window) {
+    db.setAdaptiveParam('markov_window', newWindow);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Resolução de parâmetros (UI > SQLite)
+// ═══════════════════════════════════════════════════════════
+function resolveParams(uiParams) {
+  const dbParams = db.getAdaptiveParams();
+
+  const uiEdge = uiParams?.edge_threshold ?? uiParams?.edgeThreshold;
+  const uiWindow = uiParams?.markov_window ?? uiParams?.markovWindow;
+  const uiVolume = uiParams?.volume_mult ?? uiParams?.volumeMult;
+  const uiHorizon = uiParams?.horizon_days ?? uiParams?.horizonDays;
+  const uiUseVolFilter = uiParams?.useVolFilter;
+  const uiUseLatestClosed = uiParams?.useLatestClosed ?? uiParams?.use_latest_closed;
+  const uiTimeframe = uiParams?.timeframe;
+
+  return {
+    edge_threshold: uiEdge != null ? Number(uiEdge) : Number(dbParams.edge_threshold),
+    markov_window: uiWindow != null ? Number(uiWindow) : Number(dbParams.markov_window),
+    volume_mult: uiVolume != null ? Number(uiVolume) : Number(dbParams.volume_mult),
+    horizon_days: uiHorizon != null ? Number(uiHorizon) : Number(dbParams.horizon_days),
+    useVolFilter: uiUseVolFilter !== undefined ? Boolean(uiUseVolFilter) : true,
+    useLatestClosed: uiUseLatestClosed === true,
+    timeframe: uiTimeframe || '1d'
+  };
+}
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) {
@@ -73,26 +219,133 @@ app.whenReady().then(async () => {
   try {
     db = new Database(app.getPath('userData'));
     await db.init();
-    scanner = new Scanner(db);
 
+    // ═══════════════════════════════════════════════════════
+    //  SCAN — Execução via Worker Thread
+    // ═══════════════════════════════════════════════════════
     ipcMain.handle('scan:start', async (_event, payload) => {
       if (!mainWindow) return { ok: false, error: 'window-unavailable' };
       const runId = `run_${Date.now()}`;
       const tickers = Array.isArray(payload?.tickers) ? payload.tickers : [];
-      scanner.run({ tickers, ...payload?.params }, runId, {
-        onProgress: (p) => mainWindow.webContents.send('scan:progress', p),
-        onRow: (r) => mainWindow.webContents.send('scan:row', r),
-        onError: (e) => mainWindow.webContents.send('scan:error', e),
-        onDone: (d) => mainWindow.webContents.send('scan:done', d)
+      const params = resolveParams(payload?.params);
+      const timeframe = payload?.params?.timeframe || params.timeframe || '1d';
+
+      const worker = getScannerWorker();
+      worker.postMessage({
+        action: 'scan',
+        runId,
+        tickers,
+        params,
+        timeframe
       });
+
       return { ok: true, runId };
     });
 
+    // ═══════════════════════════════════════════════════════
+    //  CANCEL — Encaminhar para Worker
+    // ═══════════════════════════════════════════════════════
     ipcMain.handle('scan:cancel', async (_event, payload) => {
-      if (scanner) scanner.cancel(payload?.runId);
+      const worker = getScannerWorker();
+      worker.postMessage({ action: 'cancel', runId: payload?.runId });
       return { ok: true };
     });
 
+    // ═══════════════════════════════════════════════════════
+    //  BACKTEST — Execução via Worker Thread
+    // ═══════════════════════════════════════════════════════
+    ipcMain.handle('scan:backtest', async (_event, payload) => {
+      const tickers = (payload && payload.tickers) || [];
+      const startDate = (payload && payload.startDate) || '';
+      const endDate = (payload && payload.endDate) || '';
+      const params = resolveParams(payload?.params || {});
+      const timeframe = payload?.params?.timeframe || params.timeframe || '1d';
+
+      // Pré-carregar candles do cache DB para o worker
+      const cachedCandles = {};
+      for (const t of tickers) {
+        const cacheKey = `${t.ticker}_${timeframe}`;
+        try {
+          const cached = db.getCachedOHLCV(cacheKey);
+          if (cached) cachedCandles[cacheKey] = cached;
+        } catch (_) { /* sem cache disponível */ }
+      }
+
+      const requestId = `bt_${Date.now()}`;
+
+      return new Promise((resolve) => {
+        const worker = getScannerWorker();
+        const timeout = setTimeout(() => {
+          worker.removeListener('message', handler);
+          resolve({ ok: false, error: 'Worker timeout (10 min)' });
+        }, 600000);
+
+        const handler = (msg) => {
+          if (msg.type === 'backtestResult' && msg.payload.requestId === requestId) {
+            clearTimeout(timeout);
+            worker.removeListener('message', handler);
+            resolve({ ok: true, results: msg.payload.results });
+          }
+        };
+
+        worker.on('message', handler);
+        worker.postMessage({
+          action: 'backtest',
+          requestId,
+          tickers,
+          params,
+          timeframe,
+          startDate,
+          endDate,
+          cachedCandles
+        });
+      });
+    });
+
+    // ═══════════════════════════════════════════════════════
+    //  TRADE UPDATE — Execução via Worker Thread
+    // ═══════════════════════════════════════════════════════
+    ipcMain.handle('trade:update', async () => {
+      const activeTrades = db.getActiveTrades();
+      if (!Array.isArray(activeTrades) || activeTrades.length === 0) {
+        return { ok: true, updated: 0, closed: [], states: [], message: 'Nenhum trade ativo para monitorizar.' };
+      }
+
+      return new Promise((resolve) => {
+        const worker = getScannerWorker();
+        const timeout = setTimeout(() => {
+          worker.removeListener('message', handler);
+          resolve({ ok: false, error: 'Worker timeout' });
+        }, 120000);
+
+        const handler = (msg) => {
+          if (msg.type === 'updateResult') {
+            clearTimeout(timeout);
+            worker.removeListener('message', handler);
+
+            // Fechar trades no DB a partir do processo principal
+            if (msg.payload.closed && msg.payload.closed.length > 0) {
+              for (const c of msg.payload.closed) {
+                try {
+                  db.closeActiveTrade(c.id, c.exitPrice, c.resultado);
+                } catch (err) {
+                  console.error('[trade:update] Falha ao fechar trade:', err.message);
+                }
+              }
+            }
+
+            resolve({ ok: true, updated: msg.payload.updated, closed: msg.payload.closed, states: msg.payload.states, message: msg.payload.message });
+          }
+        };
+
+        worker.on('message', handler);
+        worker.postMessage({ action: 'updateTrades', activeTrades });
+      });
+    });
+
+    // ═══════════════════════════════════════════════════════
+    //  Restantes handlers (sem alterações)
+    // ═══════════════════════════════════════════════════════
     ipcMain.handle('ticker:search', async (_event, payload) => {
       const query = (payload && payload.query) || '';
       const limit = (payload && payload.limit) || 5;
@@ -136,10 +389,7 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('ticker:list', async () => {
       const custom = db.getCustomTickers();
-      return {
-        ok: true,
-        custom
-      };
+      return { ok: true, custom };
     });
 
     ipcMain.handle('ticker:clear', async () => {
@@ -158,20 +408,6 @@ app.whenReady().then(async () => {
       return { ok: true };
     });
 
-    ipcMain.handle('scan:backtest', async (_event, payload) => {
-      const tickers = (payload && payload.tickers) || [];
-      const startDate = (payload && payload.startDate) || '';
-      const endDate = (payload && payload.endDate) || '';
-      if (!scanner) return { ok: false, error: 'scanner-not-initialized' };
-      try {
-        const runId = Math.random().toString(36).substring(7);
-        const results = await scanner.runBacktest({ tickers, startDate, endDate }, runId);
-        return { ok: true, results };
-      } catch (err) {
-        return { ok: false, error: err.message || String(err) };
-      }
-    });
-
     ipcMain.handle('trade:add', async (_event, payload) => {
       if (!payload) return { ok: false, error: 'missing-payload' };
       try {
@@ -187,16 +423,6 @@ app.whenReady().then(async () => {
         const active = db.getActiveTrades();
         const closed = db.getClosedActiveTrades(50);
         return { ok: true, active, closed };
-      } catch (err) {
-        return { ok: false, error: err.message || String(err) };
-      }
-    });
-
-    ipcMain.handle('trade:update', async () => {
-      if (!scanner) return { ok: false, error: 'scanner-not-initialized' };
-      try {
-        const result = await scanner.updateActiveTrades();
-        return { ok: true, ...result };
       } catch (err) {
         return { ok: false, error: err.message || String(err) };
       }
@@ -302,5 +528,8 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
+  if (scannerWorker && !scannerWorker.isTerminated) {
+    scannerWorker.terminate();
+  }
   if (db) db.close();
 });
