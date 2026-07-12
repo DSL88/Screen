@@ -108,6 +108,7 @@ class Scanner {
           candles = await fetchWithRetry(t.ticker, timeframe, 3);
           this.db.cacheOHLCV(`${t.ticker}_${timeframe}`, candles);
         } catch (e) {
+          hooks.onError({ ticker: t.ticker, message: `Falha ao obter dados: ${e.message || e}`, runId });
           candles = null;
         }
 
@@ -429,13 +430,14 @@ class Scanner {
       return { updated: 0, closed: [], states: [], message: 'Nenhum trade ativo para monitorizar.' };
     }
 
+    const limit = pLimit(CONCURRENCY);
     const closed = [];
     const states = [];
 
-    for (const trade of active) {
+    const tasks = active.map(trade => limit(async () => {
       try {
         const candles = await fetchWithRetry(trade.ticker, '1d', 2);
-        if (!candles || candles.length === 0) continue;
+        if (!candles || candles.length === 0) return;
 
         const last = candles[candles.length - 1];
         let hit = null;
@@ -469,7 +471,7 @@ class Scanner {
             motivo_fecho: hit.reason,
             data_lancamento: last.date
           });
-          continue;
+          return;
         }
 
         // ── Análise de proximidade + inversão ────────────────
@@ -515,7 +517,9 @@ class Scanner {
       } catch (err) {
         console.warn(`[scanner] updateActiveTrades: erro ao processar ${trade.ticker}: ${err.message || err}`);
       }
-    }
+    }));
+
+    await Promise.all(tasks);
 
     const alerts = states.filter(s => s.status !== 'manter').length;
     return {
