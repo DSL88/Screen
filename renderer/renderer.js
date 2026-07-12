@@ -23,6 +23,7 @@
   let running = false;
   let totalProcessed = 0;
   let totalEmitted = 0;
+  let scanErrors = []; // Agregação de erros durante o scan
 
   const modalAdd = document.getElementById('modal-add');
   const modalTicker = document.getElementById('modal-ticker');
@@ -767,6 +768,7 @@
     setRunning(true);
     totalProcessed = 0;
     totalEmitted = 0;
+    scanErrors = []; // Reset erros do scan anterior
     clearTable();
     progressWrap.hidden = false;
     progressFill.style.width = '0%';
@@ -812,7 +814,17 @@
   });
 
   window.api.on('scan:error', (e) => {
-    console.warn('Scanner error:', e);
+    // Agregar erro para resumo final
+    scanErrors.push(e);
+
+    // Erros esperados (dados insuficientes, delistados) → log discreto
+    // Erros inesperados (rede, timeout) → warn para debugging
+    const isExpected = /insuficientes|delisted|No data found/i.test(e.message || '');
+    if (isExpected) {
+      console.log(`[Scanner] ${e.ticker}: ${e.message}`);
+    } else {
+      console.warn('Scanner error:', e);
+    }
   });
 
   window.api.on('scan:done', (d) => {
@@ -820,7 +832,22 @@
     totalProcessed = d.totalProcessed;
     progressFill.style.width = '100%';
     progressText.textContent = `${d.totalProcessed} / ${d.totalProcessed}`;
-    status.textContent = `Concluído em ${(d.elapsedMs / 1000).toFixed(1)}s — ${d.totalSignals} sinais.`;
+
+    // Construir mensagem de resumo com erros
+    let summaryMsg = `Concluído em ${(d.elapsedMs / 1000).toFixed(1)}s — ${d.totalSignals} sinais.`;
+    if (scanErrors.length > 0) {
+      const expectedCount = scanErrors.filter(e => /insuficientes|delisted|No data found/i.test(e.message || '')).length;
+      const unexpectedCount = scanErrors.length - expectedCount;
+      if (expectedCount > 0) {
+        summaryMsg += ` (${expectedCount} tickers com dados insuficientes/delistados`;
+        if (unexpectedCount > 0) summaryMsg += `, ${unexpectedCount} erros inesperados`;
+        summaryMsg += ')';
+      } else if (unexpectedCount > 0) {
+        summaryMsg += ` (${unexpectedCount} erros inesperados)`;
+      }
+    }
+
+    status.textContent = summaryMsg;
     footerSummary.textContent = `${d.totalSignals} sinais emitidos · ${d.totalProcessed} tickers processados`;
     if (d.totalSignals === 0) {
       body.innerHTML = '<tr class="empty"><td colspan="11">Nenhum ativo cumpriu os critérios (Edge ≥ 15%, Volume ≥ 1.2× SMA20, direção válida).</td></tr>';
