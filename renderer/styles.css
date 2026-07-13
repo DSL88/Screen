@@ -12,20 +12,21 @@
   --surface-3:    #212636;
 
   /* ── Borders ── */
-  --border:       rgba(255, 255, 255, 0.06);
-  --border-strong: rgba(255, 255, 255, 0.10);
-  --border-hover: rgba(255, 255, 255, 0.16);
+  --border:       rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --border-hover: rgba(255, 255, 255, 0.18);
 
   /* ── Text ── */
-  --text:         #f0f1f5;
-  --text-dim:     #9ba1b0;
-  --text-mute:    #5c6370;
+  --text:         #f3f4f8;
+  --text-dim:     #a3a9b8;
+  --text-mute:    #6b7384;
 
   /* ── Accent (Blue-Indigo) ── */
   --accent:       #6366f1;
+  --accent-2:     #a78bfa;
   --accent-hover: #818cf8;
-  --accent-soft:  rgba(99, 102, 241, 0.12);
-  --accent-glow:  rgba(99, 102, 241, 0.25);
+  --accent-soft:  rgba(99, 102, 241, 0.14);
+  --accent-glow:  rgba(99, 102, 241, 0.28);
 
   /* ── Bull (Emerald) ── */
   --bull:         #34d399;
@@ -39,18 +40,18 @@
 
   /* ── Warning (Amber) ── */
   --warn:         #fbbf24;
-  --warn-soft:    rgba(251, 191, 36, 0.10);
+  --warn-soft:    rgba(251, 191, 36, 0.12);
 
   /* ── Glass ── */
-  --glass:        rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass:        rgba(255, 255, 255, 0.04);
+  --glass-border: rgba(255, 255, 255, 0.10);
   --glass-blur:   16px;
 
   /* ── Shadows ── */
-  --shadow-sm:    0 2px 8px rgba(0, 0, 0, 0.25);
-  --shadow-md:    0 8px 32px rgba(0, 0, 0, 0.35);
-  --shadow-lg:    0 24px 64px rgba(0, 0, 0, 0.5);
-  --shadow-glow:  0 0 40px rgba(99, 102, 241, 0.08);
+  --shadow-sm:    0 2px 10px rgba(0, 0, 0, 0.28);
+  --shadow-md:    0 10px 36px rgba(0, 0, 0, 0.38);
+  --shadow-lg:    0 32px 80px rgba(0, 0, 0, 0.58);
+  --shadow-glow:  0 0 48px rgba(99, 102, 241, 0.10);
 
   /* ── Geometry ── */
   --radius:       12px;
@@ -87,6 +88,13 @@ html, body {
   text-rendering: optimizeLegibility;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   user-select: none;
+}
+body {
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(99, 102, 241, 0.08) 0%, transparent 60%),
+    radial-gradient(80% 60% at 100% 110%, rgba(167, 139, 250, 0.05) 0%, transparent 65%),
+    var(--bg);
+  background-attachment: fixed;
 }
 
 /* ============== SCROLLBAR ============== */
@@ -1801,6 +1809,27 @@ tr.removing .portfolio-row-remove { opacity: 0.4; }
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
+.alerta-badge::before {
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.alerta-badge-stop::before {
+  content: "\26A0\FE0E";
+  font-size: 12px;
+}
+.alerta-badge-tp::before {
+  content: "\2726";
+  font-size: 11px;
+}
+.alerta-badge-inversao::before {
+  content: "\21BB\FE0E";
+  font-size: 12px;
+}
+.alerta-badge-manter::before {
+  content: "\2713";
+  font-size: 11px;
+}
 .alerta-badge-stop {
   background: var(--warn-soft);
   color: var(--warn);
@@ -1822,6 +1851,9 @@ tr.removing .portfolio-row-remove { opacity: 0.4; }
   border: 1px solid var(--border);
   font-weight: 500;
 }
+.alerta-badge-manter::before {
+  color: var(--bull);
+}
 
 .alerta-dist {
   font-family: var(--mono);
@@ -1839,6 +1871,52 @@ tr.removing .portfolio-row-remove { opacity: 0.4; }
 }
 .btn-reanalisar:hover {
   box-shadow: 0 4px 20px var(--accent-glow), 0 0 40px rgba(99, 102, 241, 0.15);
+}
+.btn-reanalisar::before {
+  content: "";
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><line x1='16.5' y1='16.5' x2='21' y2='21'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><line x1='16.5' y1='16.5' x2='21' y2='21'/></svg>") center / contain no-repeat;
+}
+
+/* CSS icon helpers — replace native emojis with consistent vector glyphs */
+#btn-clear-trades::before {
+  content: "";
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='3 6 5 6 21 6'/><path d='M19 6l-1.4 14a2 2 0 0 1-2 2H8.4a2 2 0 0 1-2-2L5 6'/><path d='M10 11v6'/><path d='M14 11v6'/><path d='M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='3 6 5 6 21 6'/><path d='M19 6l-1.4 14a2 2 0 0 1-2 2H8.4a2 2 0 0 1-2-2L5 6'/><path d='M10 11v6'/><path d='M14 11v6'/><path d='M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2'/></svg>") center / contain no-repeat;
+}
+
+/* CSS-drawn magnifier for the search modal empty state */
+.modal-search-empty-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.85;
+  filter: none;
+}
+.modal-search-empty-icon::before {
+  content: "";
+  display: block;
+  width: 26px;
+  height: 26px;
+  background-color: var(--text-mute);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><line x1='16.5' y1='16.5' x2='21' y2='21'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><line x1='16.5' y1='16.5' x2='21' y2='21'/></svg>") center / contain no-repeat;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -2178,10 +2256,7 @@ tr.removing .portfolio-row-remove { opacity: 0.4; }
   color: var(--text-mute);
 }
 .modal-search-empty-icon {
-  font-size: 36px;
-  margin-bottom: 14px;
-  opacity: 0.5;
-  filter: grayscale(0.3);
+  /* Replaced by CSS-drawn magnifier — defined earlier in the file */
 }
 .modal-search-empty-title {
   font-size: 15px;
@@ -2420,6 +2495,41 @@ tr.removing .portfolio-row-remove { opacity: 0.4; }
   border-color: var(--border-strong);
 }
 
+/* Hide native number spinners for a cleaner quant look */
+input[type="number"].param-input::-webkit-inner-spin-button,
+input[type="number"].param-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"].param-input {
+  -moz-appearance: textfield;
+}
+
+/* Custom select — replace native dropdown arrow with a themed SVG */
+select.param-input {
+  width: auto;
+  min-width: 112px;
+  text-align: left;
+  padding: 5px 24px 5px 8px;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7384' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 10px 10px;
+}
+select.param-input:hover {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a3a9b8' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+}
+select.param-input:focus {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+}
+select.param-input option {
+  background: var(--bg-elev);
+  color: var(--text);
+}
+
 /* ═══════════════════════════════════════════════════════════
    BACKTEST MODAL
    ═══════════════════════════════════════════════════════════ */
@@ -2491,8 +2601,8 @@ tr.removing .portfolio-row-remove { opacity: 0.4; }
   left: 0;
   right: 0;
   height: 2px;
-  background: linear-gradient(90deg, var(--accent), #a78bfa);
-  opacity: 0;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  opacity: 0.4;
   transition: opacity var(--duration) var(--ease);
 }
 .metric-card:hover {
@@ -2503,6 +2613,28 @@ tr.removing .portfolio-row-remove { opacity: 0.4; }
 .metric-card:hover::before {
   opacity: 1;
 }
+
+/* Color-coded KPI semantics (set via JS from renderer.js) */
+.metric-card.is-good::before {
+  background: linear-gradient(90deg, var(--bull), #10b981);
+  opacity: 0.85;
+}
+.metric-card.is-bad::before {
+  background: linear-gradient(90deg, var(--bear), #f43f5e);
+  opacity: 0.85;
+}
+.metric-card.is-warn::before {
+  background: linear-gradient(90deg, var(--warn), #f59e0b);
+  opacity: 0.85;
+}
+.metric-card.is-neutral::before {
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  opacity: 0.4;
+}
+.metric-card:hover.is-good::before,
+.metric-card:hover.is-bad::before,
+.metric-card:hover.is-warn::before { opacity: 1; }
+
 .metric-val {
   font-family: var(--mono);
   font-size: 16px;
@@ -2511,6 +2643,19 @@ tr.removing .portfolio-row-remove { opacity: 0.4; }
   font-feature-settings: "tnum";
   position: relative;
   z-index: 1;
+  transition: color var(--duration) var(--ease), text-shadow var(--duration) var(--ease);
+}
+.metric-card.is-good .metric-val {
+  color: var(--bull);
+  text-shadow: 0 0 18px var(--bull-soft);
+}
+.metric-card.is-bad .metric-val {
+  color: var(--bear);
+  text-shadow: 0 0 18px var(--bear-soft);
+}
+.metric-card.is-warn .metric-val {
+  color: var(--warn);
+  text-shadow: 0 0 18px var(--warn-soft);
 }
 .metric-lbl {
   font-size: 9px;
