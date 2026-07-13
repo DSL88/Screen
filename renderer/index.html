@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=3" />
+  <link rel="stylesheet" href="styles.css?v=4" />
 </head>
 <body>
   <div class="app">
@@ -167,13 +167,13 @@
           </div>
           <div class="topbar-actions">
             <button class="btn-secondary btn-danger-ghost" id="btn-clear-trades" disabled>
-              <span>🗑️ Apagar tudo</span>
+              <span>Apagar tudo</span>
             </button>
             <button class="btn-secondary" id="btn-sync-trades">
               <span>Sincronizar Posições</span>
             </button>
             <button class="btn-primary btn-reanalisar" id="btn-reanalisar">
-              <span>🔍 Reanalisar Posições Ativas</span>
+              <span>Reanalisar Posições Ativas</span>
             </button>
           </div>
         </header>
@@ -248,7 +248,7 @@
       <div class="modal-body modal-body-search">
         <div class="modal-search-results" id="modal-search-results">
           <div class="modal-search-empty">
-            <div class="modal-search-empty-icon">🔍</div>
+            <div class="modal-search-empty-icon" aria-hidden="true"></div>
             <div class="modal-search-empty-title">Começa a escrever para pesquisar</div>
             <div class="modal-search-empty-text">
               Procura por <strong>tickers</strong> (AAPL, NVDA, GALP.LS) ou por <strong>índices/países</strong> (Portugal, Alemanha, FTSE, DAX, Nikkei).

@@ -404,7 +404,7 @@
   function renderSearchModalEmpty() {
     modalSearchResults.innerHTML = `
       <div class="modal-search-empty">
-        <div class="modal-search-empty-icon">🔍</div>
+        <div class="modal-search-empty-icon" aria-hidden="true"></div>
         <div class="modal-search-empty-title">Começa a escrever para pesquisar</div>
         <div class="modal-search-empty-text">
           Procura por <strong>tickers</strong> (AAPL, NVDA, GALP.LS) ou por <strong>índices/países</strong> (Portugal, Alemanha, FTSE, DAX, Nikkei).
@@ -1019,18 +1019,39 @@
       }
       
       const r = res.results;
-      
-      if (metricTrades) metricTrades.textContent = r.totalTrades;
-      if (metricWinrate) metricWinrate.textContent = (r.winRate * 100).toFixed(1) + '%';
+
+      // Helper: color a KPI card based on semantic value
+      const colorCard = (el, kind) => {
+        if (!el) return;
+        const card = el.closest('.metric-card');
+        if (!card) return;
+        card.classList.remove('is-good', 'is-bad', 'is-warn', 'is-neutral');
+        card.classList.add(kind);
+      };
+
+      if (metricTrades) {
+        metricTrades.textContent = r.totalTrades;
+        colorCard(metricTrades, 'is-neutral');
+      }
+      if (metricWinrate) {
+        metricWinrate.textContent = (r.winRate * 100).toFixed(1) + '%';
+        colorCard(metricWinrate, r.winRate >= 0.5 ? 'is-good' : 'is-bad');
+      }
       if (metricNetreturn) {
         metricNetreturn.textContent = (r.netReturn).toFixed(2) + '%';
-        metricNetreturn.style.color = r.netReturn >= 0 ? '#10b981' : '#ef4444';
+        colorCard(metricNetreturn, r.netReturn >= 0 ? 'is-good' : 'is-bad');
       }
-      if (metricSharpe) metricSharpe.textContent = r.sharpeRatio.toFixed(2);
-      if (metricDrawdown) metricDrawdown.textContent = (r.maxDrawdown * 100).toFixed(1) + '%';
+      if (metricSharpe) {
+        metricSharpe.textContent = r.sharpeRatio.toFixed(2);
+        colorCard(metricSharpe, r.sharpeRatio >= 1 ? 'is-good' : (r.sharpeRatio >= 0 ? 'is-warn' : 'is-bad'));
+      }
+      if (metricDrawdown) {
+        metricDrawdown.textContent = (r.maxDrawdown * 100).toFixed(1) + '%';
+        colorCard(metricDrawdown, 'is-warn');
+      }
       if (metricExpectancy) {
         metricExpectancy.textContent = (r.expectancy * 100).toFixed(2) + '%';
-        metricExpectancy.style.color = r.expectancy >= 0 ? '#10b981' : '#ef4444';
+        colorCard(metricExpectancy, r.expectancy >= 0 ? 'is-good' : 'is-bad');
       }
       
       if (backtestTradesBody) {
@@ -1223,16 +1244,16 @@
 
     switch (state.status) {
       case 'alerta_stop':
-        return `<span class="alerta-badge alerta-badge-stop">⚠️ Próximo do Stop!</span><span class="alerta-dist">dist: ${fmt(distStop)}</span>`;
+        return `<span class="alerta-badge alerta-badge-stop">Próximo do Stop!</span><span class="alerta-dist">dist: ${fmt(distStop)}</span>`;
       case 'alerta_tp':
-        return `<span class="alerta-badge alerta-badge-tp">🚀 Quase no Alvo!</span><span class="alerta-dist">dist: ${fmt(distTp)}</span>`;
+        return `<span class="alerta-badge alerta-badge-tp">Quase no Alvo!</span><span class="alerta-dist">dist: ${fmt(distTp)}</span>`;
       case 'alerta_inversao':
-        return `<span class="alerta-badge alerta-badge-inversao">🚨 Inversão de Tendência!</span><span class="alerta-dist">Markov → ${escapeHtml(state.current_direction || '?')}</span>`;
+        return `<span class="alerta-badge alerta-badge-inversao">Inversão de Tendência!</span><span class="alerta-dist">Markov → ${escapeHtml(state.current_direction || '?')}</span>`;
       case 'fechado':
-        return '<span class="alerta-badge alerta-badge-manter">FECHADO</span>';
+        return '<span class="alerta-badge alerta-badge-manter">Fechado</span>';
       case 'manter':
       default:
-        return `<span class="alerta-badge alerta-badge-manter">✓ A manter</span><span class="alerta-dist">SL: ${fmt(distStop)} · TP: ${fmt(distTp)}</span>`;
+        return `<span class="alerta-badge alerta-badge-manter">A manter</span><span class="alerta-dist">SL: ${fmt(distStop)} · TP: ${fmt(distTp)}</span>`;
     }
   }
 
@@ -1463,7 +1484,7 @@
     }
     btnReanalisar.disabled = true;
     const originalLabel = btnReanalisar.querySelector('span').textContent;
-    btnReanalisar.querySelector('span').textContent = '🔍 A analisar...';
+    btnReanalisar.querySelector('span').textContent = 'A analisar...';
 
     try {
       // Reutiliza o mesmo endpoint trade:update para não duplicar IPC
