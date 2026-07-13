@@ -96,24 +96,72 @@
   }
 
   function renderWatchlist(highlightTicker) {
-    const items = watchlistEl.querySelectorAll('.watchlist-item');
-    items.forEach(el => el.remove());
+    // Save watchlistEmpty before clearing
+    const wlEmpty = document.getElementById('watchlist-empty');
 
-    for (const t of watchlist) {
-      const item = document.createElement('div');
-      item.className = 'watchlist-item';
-      item.dataset.ticker = t.ticker;
-      if (highlightTicker && t.ticker === highlightTicker) {
-        item.classList.add('just-added');
+    // Clear everything inside the watchlist container
+    watchlistEl.innerHTML = '';
+
+    if (watchlist.length === 0) {
+      if (wlEmpty) {
+        wlEmpty.style.display = 'block';
+        watchlistEl.appendChild(wlEmpty);
       }
-      item.innerHTML = `
-        <span class="wl-symbol">${escapeHtml(t.ticker)}</span>
-        <span class="wl-name" title="${escapeHtml(t.name || '')}">${escapeHtml(t.name || '')}</span>
-        <button class="wl-remove" title="Remover">×</button>
-      `;
-      item.querySelector('.wl-remove').addEventListener('click', () => removeTicker(t.ticker));
-      watchlistEl.appendChild(item);
+      updateWatchlistCount();
+      return;
     }
+
+    // Group watchlist by indexId
+    const groups = {};
+    for (const t of watchlist) {
+      const idxId = t.indexId || 'CUSTOM';
+      const idxName = t.indexName || 'Outros Ativos / Manuais';
+      if (!groups[idxId]) {
+        groups[idxId] = {
+          name: idxName,
+          items: []
+        };
+      }
+      groups[idxId].items.push(t);
+    }
+
+    // Sort group keys: predefined indices first (alphabetically by name), CUSTOM at the bottom
+    const sortedGroupKeys = Object.keys(groups).sort((a, b) => {
+      if (a === 'CUSTOM') return 1;
+      if (b === 'CUSTOM') return -1;
+      return groups[a].name.localeCompare(groups[b].name);
+    });
+
+    for (const key of sortedGroupKeys) {
+      const g = groups[key];
+      
+      // Create and append the Group Header
+      const header = document.createElement('div');
+      header.className = 'watchlist-group-header';
+      header.innerHTML = `
+        <span class="wl-group-title">${escapeHtml(g.name)}</span>
+        <span class="wl-group-count">${g.items.length}</span>
+      `;
+      watchlistEl.appendChild(header);
+
+      // Create and append the Group Items
+      for (const t of g.items) {
+        const item = document.createElement('div');
+        item.className = 'watchlist-item';
+        item.dataset.ticker = t.ticker;
+        if (highlightTicker && t.ticker === highlightTicker) {
+          item.classList.add('just-added');
+        }
+        item.innerHTML = `
+          <span class="wl-symbol">${escapeHtml(t.ticker)}</span>
+          <span class="wl-name" title="${escapeHtml(t.name || '')}">${escapeHtml(t.name || '')}</span>
+          <button class="wl-remove" title="Remover">×</button>
+        `;
+        item.querySelector('.wl-remove').addEventListener('click', () => removeTicker(t.ticker));
+        watchlistEl.appendChild(item);
+      }
+    }
+
     updateWatchlistCount();
 
     if (highlightTicker) {
@@ -566,11 +614,9 @@
     try {
       const res = await window.api.listTickers();
       if (res && res.ok) {
-        watchlist = (res.custom || []).map(t => ({ ...t, index: 'CUSTOM' }));
+        watchlist = res.custom || [];
         renderWatchlist();
       }
-
-      await loadShortcuts();
 
       const paramsRes = await window.api.getParams();
       if (paramsRes && paramsRes.ok) {
@@ -1032,242 +1078,7 @@
     });
   }
 
-  // ═══════════════════════════════════════════════════════════
-  //  ATALHOS DE MERCADO (pesquisa livre via Yahoo)
-  // ═══════════════════════════════════════════════════════════
-  const shortcutSearchInput = document.getElementById('ticker-search-input');
-  const shortcutSearchBtn = document.getElementById('btn-shortcuts-search');
-  const shortcutResultsEl = document.getElementById('shortcuts-results');
-  const shortcutGridEl = document.getElementById('shortcuts-grid');
-  const shortcutEmptyEl = document.getElementById('shortcuts-empty');
 
-  let shortcuts = [];
-  let shortcutSearchSeq = 0;
-  let lastShortcutTickers = [];
-
-  function renderShortcuts() {
-    if (!shortcutGridEl) return;
-    const existing = shortcutGridEl.querySelectorAll('.shortcut-chip');
-    existing.forEach(el => el.remove());
-
-    if (shortcuts.length === 0) {
-      if (shortcutEmptyEl) shortcutEmptyEl.style.display = 'block';
-      return;
-    }
-    if (shortcutEmptyEl) shortcutEmptyEl.style.display = 'none';
-
-    for (const s of shortcuts) {
-      const chip = document.createElement('div');
-      chip.className = 'shortcut-chip';
-      chip.dataset.ticker = s.ticker;
-      chip.title = `Clica para adicionar ${s.ticker} à watchlist. Botão × remove o atalho.`;
-      chip.innerHTML = `
-        <span class="shortcut-chip-symbol">${escapeHtml(s.ticker)}</span>
-        <span class="shortcut-chip-name">${escapeHtml(s.nome || '')}</span>
-        ${s.mercado ? `<span class="shortcut-chip-market">${escapeHtml(s.mercado)}</span>` : ''}
-        <button class="shortcut-chip-remove" title="Remover atalho">×</button>
-      `;
-      chip.addEventListener('click', (e) => {
-        if (e.target.classList.contains('shortcut-chip-remove')) return;
-        addTicker({
-          ticker: s.ticker,
-          name: s.nome || s.ticker,
-          exchange: s.mercado || '',
-          type: s.tipo || ''
-        });
-      });
-      chip.querySelector('.shortcut-chip-remove').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await removeShortcut(s.ticker);
-      });
-      shortcutGridEl.appendChild(chip);
-    }
-  }
-
-  async function loadShortcuts() {
-    try {
-      const res = await window.api.listShortcuts();
-      if (res && res.ok) {
-        shortcuts = res.shortcuts || [];
-        renderShortcuts();
-      }
-    } catch (err) {
-      console.warn('loadShortcuts failed:', err);
-    }
-  }
-
-  async function addShortcut(trade) {
-    try {
-      const res = await window.api.addShortcut({
-        ticker: trade.ticker,
-        nome: trade.nome || trade.ticker,
-        mercado: trade.mercado || trade.exchange || '',
-        tipo: trade.tipo || trade.type || ''
-      });
-      if (!res || !res.ok) {
-        status.textContent = 'Erro ao guardar atalho: ' + (res ? res.error : 'desconhecido');
-        return;
-      }
-      if (res.bulkCount) {
-        status.textContent = `${res.bulkCount} atalhos de mercado adicionados em lote.`;
-      } else {
-        status.textContent = `Atalho ${trade.ticker} guardado.`;
-      }
-      await loadShortcuts();
-    } catch (err) {
-      status.textContent = 'Erro: ' + (err.message || String(err));
-    }
-  }
-
-  async function removeShortcut(ticker) {
-    try {
-      const res = await window.api.removeShortcut(ticker);
-      if (res && res.ok) {
-        await loadShortcuts();
-      }
-    } catch (err) {
-      console.warn('removeShortcut failed:', err);
-    }
-  }
-
-  function renderShortcutResults(tickers) {
-    if (!shortcutResultsEl) return;
-    if (!tickers || tickers.length === 0) {
-      shortcutResultsEl.innerHTML = '<div class="shortcuts-empty-results">Sem resultados para esta pesquisa.</div>';
-      shortcutResultsEl.hidden = false;
-      return;
-    }
-
-    shortcutResultsEl.innerHTML = '';
-    const addedTickers = new Set(shortcuts.map(s => s.ticker));
-
-    for (const t of tickers) {
-      const isAdded = addedTickers.has(t.ticker);
-      const div = document.createElement('div');
-      div.className = 'shortcut-result' + (isAdded ? ' is-added' : '');
-      div.innerHTML = `
-        <span class="shortcut-result-symbol">${escapeHtml(t.ticker)}</span>
-        <div class="shortcut-result-info">
-          <div class="shortcut-result-name">${escapeHtml(t.name || '')}</div>
-          <div class="shortcut-result-meta">${escapeHtml(t.exchange || t.type || '')}</div>
-        </div>
-        <button class="shortcut-result-add">${isAdded ? 'Adicionado' : '➕ Adicionar'}</button>
-      `;
-      if (!isAdded) {
-        const btn = div.querySelector('.shortcut-result-add');
-        btn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          btn.disabled = true;
-          btn.textContent = 'A guardar...';
-          await addShortcut({
-            ticker: t.ticker,
-            nome: t.name || t.ticker,
-            mercado: t.exchange || '',
-            tipo: t.type || ''
-          });
-          renderShortcutResults(lastShortcutTickers);
-        });
-      }
-      shortcutResultsEl.appendChild(div);
-    }
-    shortcutResultsEl.hidden = false;
-  }
-
-  function renderShortcutLoading() {
-    if (!shortcutResultsEl) return;
-    shortcutResultsEl.innerHTML = '<div class="shortcuts-loading">A pesquisar no Yahoo...</div>';
-    shortcutResultsEl.hidden = false;
-  }
-
-  function renderShortcutError(msg) {
-    if (!shortcutResultsEl) return;
-    shortcutResultsEl.innerHTML = `<div class="shortcuts-error">${escapeHtml(msg)}</div>`;
-    shortcutResultsEl.hidden = false;
-  }
-
-  async function doShortcutSearch() {
-    if (!shortcutSearchInput || !shortcutResultsEl) return;
-    const query = shortcutSearchInput.value.trim();
-    if (query.length === 0) {
-      shortcutResultsEl.hidden = true;
-      shortcutResultsEl.innerHTML = '';
-      return;
-    }
-    const seq = ++shortcutSearchSeq;
-    let isLoading = true;
-    renderShortcutLoading();
-    if (shortcutSearchBtn) shortcutSearchBtn.disabled = true;
-    if (typeof status !== 'undefined' && status) {
-      status.textContent = `A pesquisar "${query}"...`;
-    }
-    try {
-      const res = await window.api.searchTicker(query, 5);
-      if (seq !== shortcutSearchSeq) return;
-      const tickers = (res && Array.isArray(res.tickers)) ? res.tickers : [];
-      if (!res || res.ok === false) {
-        lastShortcutTickers = [];
-        renderShortcutError(res && res.error ? res.error : 'Erro desconhecido');
-        if (typeof status !== 'undefined' && status) {
-          status.textContent = 'Erro na pesquisa: ' + (res && res.error ? res.error : 'desconhecido');
-        }
-        return;
-      }
-      lastShortcutTickers = tickers;
-      renderShortcutResults(lastShortcutTickers);
-      if (typeof status !== 'undefined' && status) {
-        const n = lastShortcutTickers.length;
-        status.textContent = n > 0
-          ? `${n} resultado(s) para "${query}".`
-          : `Sem resultados para "${query}".`;
-      }
-    } catch (err) {
-      if (seq === shortcutSearchSeq) {
-        lastShortcutTickers = [];
-        renderShortcutError(err && err.message ? err.message : String(err));
-        if (typeof status !== 'undefined' && status) {
-          status.textContent = 'Erro: ' + (err && err.message ? err.message : String(err));
-        }
-      }
-    } finally {
-      isLoading = false;
-      if (seq === shortcutSearchSeq) {
-        if (shortcutSearchBtn) shortcutSearchBtn.disabled = false;
-        if (shortcutResultsEl) {
-          const hasLoading = shortcutResultsEl.querySelector('.shortcuts-loading');
-          if (hasLoading) {
-            shortcutResultsEl.innerHTML = '<div class="shortcuts-empty-results">Pesquisa interrompida. Tenta novamente.</div>';
-          }
-        }
-      }
-    }
-  }
-
-  if (shortcutSearchBtn) {
-    shortcutSearchBtn.addEventListener('click', doShortcutSearch);
-  }
-  if (shortcutSearchInput) {
-    shortcutSearchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        doShortcutSearch();
-      } else if (e.key === 'Escape') {
-        shortcutResultsEl.hidden = true;
-      }
-    });
-    shortcutSearchInput.addEventListener('input', () => {
-      if (shortcutSearchInput.value.trim().length === 0) {
-        shortcutResultsEl.hidden = true;
-      }
-    });
-  }
-  document.addEventListener('click', (e) => {
-    if (!shortcutResultsEl) return;
-    if (shortcutResultsEl.hidden) return;
-    if (e.target === shortcutSearchInput) return;
-    if (e.target === shortcutSearchBtn) return;
-    if (shortcutResultsEl.contains(e.target)) return;
-    shortcutResultsEl.hidden = true;
-  });
 
   registerParamChangeListeners();
   loadInitial();

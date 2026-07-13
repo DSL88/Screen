@@ -3,9 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self';" />
   <title>Markov Stock Scanner</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=3" />
 </head>
 <body>
   <div class="app">
@@ -134,7 +137,7 @@
         <header class="topbar mylist-topbar">
           <div class="topbar-info">
             <h1>My List</h1>
-            <p>Atalhos de mercado e watchlist pessoal.</p>
+            <p>Watchlist pessoal organizada por índices de mercado.</p>
           </div>
         </header>
 
@@ -148,32 +151,7 @@
               </div>
               <div class="watchlist" id="watchlist">
                 <div class="watchlist-empty" id="watchlist-empty">
-                  Procura um ticker acima ou usa os atalhos de mercado.
-                </div>
-              </div>
-            </div>
-
-            <div class="panel shortcuts-panel mylist-panel">
-              <div class="panel-title">Atalhos de Mercado</div>
-              <div class="shortcuts-search-wrap">
-                <div class="shortcuts-search-row">
-                  <input
-                    type="text"
-                    id="ticker-search-input"
-                    class="shortcuts-search-input"
-                    placeholder="Pesquisar atalhos Yahoo (ex: EURUSD=X, AAPL)..."
-                    autocomplete="off"
-                    spellcheck="false"
-                  />
-                  <button id="btn-shortcuts-search" class="shortcuts-search-btn">Pesquisar</button>
-                </div>
-                <div id="shortcuts-results" class="shortcuts-results" hidden></div>
-              </div>
-              <div class="shortcuts-grid-container" style="flex: 1; min-height: 0; overflow-y: auto;">
-                <div id="shortcuts-grid" class="shortcuts-grid">
-                  <div id="shortcuts-empty" class="shortcuts-empty">
-                    Nenhum atalho adicionado. Pesquisa ativos acima para criar atalhos rápidos.
-                  </div>
+                  Procura um ticker acima para adicionar à watchlist.
                 </div>
               </div>
             </div>
