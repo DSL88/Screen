@@ -172,6 +172,8 @@ const MARKET_EXCHANGES = {
   SMI: 'SIX Swiss Exchange',
   BEL20: 'Euronext Brussels',
   OMXS30: 'Nasdaq Stockholm',
+  FTSEMIB: 'Borsa Italiana Milano',
+  OMXC20: 'Nasdaq Copenhagen',
   FTSE100: 'London Stock Exchange',
   NIKKEI30: 'Tokyo Stock Exchange',
   HANGSENG30: 'Hong Kong Stock Exchange'

@@ -135,6 +135,66 @@ const SMI = [
   { ticker: 'ZURN.SW', name: 'Zurich Insurance Group AG' }
 ];
 
+const FTSEMIB = [
+  { ticker: 'A2A.MI',    name: 'A2A S.p.A.' },
+  { ticker: 'AMP.MI',    name: 'Amplifon S.p.A.' },
+  { ticker: 'AZM.MI',    name: 'Azimut Holding S.p.A.' },
+  { ticker: 'BAMI.MI',   name: 'Banco BPM S.p.A.' },
+  { ticker: 'BPE.MI',    name: 'Bper Banca S.p.A.' },
+  { ticker: 'BZU.MI',    name: 'Buzzi Unicem S.p.A.' },
+  { ticker: 'CNHI.MI',   name: 'CNH Industrial N.V.' },
+  { ticker: 'CTR.MI',    name: 'Cairo Communication S.p.A.' },
+  { ticker: 'ENEL.MI',   name: 'Enel S.p.A.' },
+  { ticker: 'ENI.MI',    name: 'Eni S.p.A.' },
+  { ticker: 'EXOR.MI',   name: 'Exor N.V.' },
+  { ticker: 'G.MI',      name: 'Assicurazioni Generali S.p.A.' },
+  { ticker: 'HER.MI',    name: 'Hera S.p.A.' },
+  { ticker: 'INW.MI',    name: 'INWIT S.p.A.' },
+  { ticker: 'IPG.MI',    name: 'Interpump Group S.p.A.' },
+  { ticker: 'ISP.MI',    name: 'Intesa Sanpaolo S.p.A.' },
+  { ticker: 'ITC.MI',    name: 'Italgas S.p.A.' },
+  { ticker: 'LDO.MI',    name: 'Leonardo S.p.A.' },
+  { ticker: 'MB.MI',     name: 'Mediobanca S.p.A.' },
+  { ticker: 'MONC.MI',   name: 'Moncler S.p.A.' },
+  { ticker: 'NEXI.MI',   name: 'Nexi S.p.A.' },
+  { ticker: 'PRY.MI',    name: 'Prysmian S.p.A.' },
+  { ticker: 'PST.MI',    name: 'Poste Italiane S.p.A.' },
+  { ticker: 'RACE.MI',   name: 'Ferrari N.V.' },
+  { ticker: 'REC.MI',    name: 'Recordati Industria Chimica e Farmaceutica S.p.A.' },
+  { ticker: 'SPM.MI',    name: 'Saipem S.p.A.' },
+  { ticker: 'SRA.MI',    name: 'Snam S.p.A.' },
+  { ticker: 'STLAM.MI',  name: 'Stellantis N.V.' },
+  { ticker: 'TEN.MI',    name: 'Tenaris S.p.A.' },
+  { ticker: 'TIT.MI',    name: 'Telecom Italia S.p.A. (TIM)' },
+  { ticker: 'UCG.MI',    name: 'UniCredit S.p.A.' },
+  { ticker: 'UNI.MI',    name: 'UnipolSai Assicurazioni S.p.A.' }
+];
+
+const OMXC20 = [
+  { ticker: 'AMBU-B.CO', name: 'Ambu A/S' },
+  { ticker: 'BAVA.CO',   name: 'Bavarian Nordic A/S' },
+  { ticker: 'CARL-B.CO', name: 'Carlsberg A/S' },
+  { ticker: 'COLOB.CO',  name: 'Coloplast A/S' },
+  { ticker: 'DANSKE.CO', name: 'Danske Bank A/S' },
+  { ticker: 'DEMANT.CO', name: 'Demant A/S' },
+  { ticker: 'DSV.CO',    name: 'DSV A/S' },
+  { ticker: 'GN.CO',     name: 'GN Store Nord A/S' },
+  { ticker: 'ISS.CO',    name: 'ISS A/S' },
+  { ticker: 'JYSK.CO',   name: 'Jyske Bank A/S' },
+  { ticker: 'LUN.CO',    name: 'H. Lundbeck A/S' },
+  { ticker: 'MAERSK-A.CO', name: 'A.P. Moller-Maersk A/S (Class A)' },
+  { ticker: 'MAERSK-B.CO', name: 'A.P. Moller-Maersk A/S (Class B)' },
+  { ticker: 'NETC.CO',   name: 'Netcompany Group A/S' },
+  { ticker: 'NOVO-B.CO', name: 'Novo Nordisk A/S' },
+  { ticker: 'NZYM-B.CO', name: 'Novozymes A/S' },
+  { ticker: 'ORSTED.CO', name: 'Orsted A/S' },
+  { ticker: 'PNDORA.CO', name: 'Pandora A/S' },
+  { ticker: 'RBREW.CO', name: 'Royal Unibrew A/S' },
+  { ticker: 'ROCKB.CO', name: 'Rockwool A/S' },
+  { ticker: 'TRYG.CO',   name: 'Tryg A/S' },
+  { ticker: 'VWS.CO',    name: 'Vestas Wind Systems A/S' }
+];
+
 const BEL20 = [
   { ticker: 'ABI.BR', name: 'Anheuser-Busch InBev SA' },
   { ticker: 'ACKB.BR', name: 'Ackermans & van Haaren NV' },
@@ -913,7 +973,8 @@ const SP500 = [
 const INDICES = {
   PSI, IBEX35, SP500,
   DAX40, CAC40, AEX25, SMI, BEL20, OMXS30,
-  FTSE100, NIKKEI30, HANGSENG30
+  FTSE100, NIKKEI30, HANGSENG30,
+  FTSEMIB, OMXC20
 };
 
 const WORLD_INDICES = [
@@ -929,7 +990,8 @@ const WORLD_INDICES = [
   { id: 'SMI',        name: 'Suíça — SMI',               country: 'Suíça',      countryEn: 'Switzerland',      flag: 'CH', aliases: ['smi', 'zurich', 'swiss market'],             hasComponents: true  },
   { id: 'BEL20',      name: 'Bélgica — BEL 20',          country: 'Bélgica',    countryEn: 'Belgium',          flag: 'BE', aliases: ['bel', 'bel20', 'brussels'],                    hasComponents: true  },
   { id: 'OMXS30',     name: 'Suécia — OMX Stockholm 30', country: 'Suécia',     countryEn: 'Sweden',           flag: 'SE', aliases: ['omx', 'omxs30', 'stockholm'],                  hasComponents: true  },
-  { id: 'FTSEMIB',    name: 'Itália — FTSE MIB',         country: 'Itália',     countryEn: 'Italy',            flag: 'IT', aliases: ['mib', 'ftsemib', 'milan'],                     hasComponents: false },
+  { id: 'OMXC20',     name: 'Dinamarca — OMX Copenhagen 20', country: 'Dinamarca', countryEn: 'Denmark',     flag: 'DK', aliases: ['dinamarca', 'copenhagen', 'omxc20', 'denmark'], hasComponents: true  },
+  { id: 'FTSEMIB',    name: 'Itália — FTSE MIB',         country: 'Itália',     countryEn: 'Italy',            flag: 'IT', aliases: ['mib', 'ftsemib', 'milan'],                     hasComponents: true  },
   { id: 'NIKKEI30',   name: 'Japão — Nikkei 225 (Top 30)', country: 'Japão',    countryEn: 'Japan',            flag: 'JP', aliases: ['nikkei', 'nikkei225', 'tokyo', 'japan'],      hasComponents: true  },
   { id: 'TOPIX',      name: 'Japão — TOPIX',             country: 'Japão',      countryEn: 'Japan',            flag: 'JP', aliases: ['topix', 'tokyo'],                              hasComponents: false },
   { id: 'HANGSENG30', name: 'Hong Kong — Hang Seng (Top 30)', country: 'Hong Kong', countryEn: 'Hong Kong', flag: 'HK', aliases: ['hang', 'hangseng', 'hsi'],                      hasComponents: true  },
@@ -1003,6 +1065,7 @@ function getTickersForIndices(indices) {
 module.exports = {
   PSI, IBEX35, SP500, DAX40, CAC40, AEX25, SMI, BEL20, OMXS30,
   FTSE100, NIKKEI30, HANGSENG30,
+  FTSEMIB, OMXC20,
   INDICES, WORLD_INDICES,
   searchWorldIndices, getIndexById, getTickersForIndices
 };
