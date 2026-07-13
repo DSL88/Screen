@@ -3,6 +3,24 @@ const { Worker } = require('worker_threads');
 const path = require('path');
 const Database = require('./src/db/database');
 const yahooClient = require('./src/data/yahooClient');
+const tickerLists = require('./src/data/tickerLists');
+
+// Pre-calculate mapping from ticker to index ID for fast lookup
+const tickerToIndexMap = {};
+const indexNames = {};
+
+for (const [indexId, list] of Object.entries(tickerLists.INDICES || {})) {
+  for (const item of list) {
+    if (item.ticker) {
+      tickerToIndexMap[item.ticker.toUpperCase().trim()] = indexId;
+    }
+  }
+}
+
+for (const idx of tickerLists.WORLD_INDICES || []) {
+  indexNames[idx.id] = idx.name;
+}
+
 
 let mainWindow = null;
 let db = null;
@@ -24,15 +42,32 @@ function getScannerWorker() {
         mainWindow.webContents.send('scan:progress', msg.payload);
         break;
 
-      case 'row':
-        // Inserir sinal no DB a partir do processo principal
+      case 'row': {
+        // ── Guard clause: validar campos NOT NULL antes do INSERT ──
+        const p = msg.payload;
+        if (p.p_stay == null || !Number.isFinite(p.p_stay)) {
+          console.error(`[Worker] Insert bloqueado: p_stay inválido (${p.p_stay}) para ${p.ticker}`);
+          break;
+        }
+        if (p.edge == null || !Number.isFinite(p.edge)) {
+          console.error(`[Worker] Insert bloqueado: edge inválido (${p.edge}) para ${p.ticker}`);
+          break;
+        }
+        if (p.preco_entrada == null || !Number.isFinite(p.preco_entrada) || p.preco_entrada <= 0) {
+          console.error(`[Worker] Insert bloqueado: preco_entrada inválido (${p.preco_entrada}) para ${p.ticker}`);
+          break;
+        }
+
         try {
-          const id = db.insertSignal(msg.payload);
-          mainWindow.webContents.send('scan:row', { id, ...msg.payload });
+          const id = db.insertSignal(p);
+          // Enviar ao renderer com os campos camelCase
+          const rendererData = p._renderer || {};
+          mainWindow.webContents.send('scan:row', { id, ...rendererData });
         } catch (err) {
-          console.error('[Worker] Falha ao inserir sinal:', err.message);
+          console.error(`[Worker] Falha ao inserir sinal (${p.ticker}):`, err.message);
         }
         break;
+      }
 
       case 'error':
         mainWindow.webContents.send('scan:error', msg.payload);
@@ -389,7 +424,17 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('ticker:list', async () => {
       const custom = db.getCustomTickers();
-      return { ok: true, custom };
+      const enrichedCustom = custom.map(t => {
+        const symbolUpper = String(t.ticker || '').toUpperCase().trim();
+        const indexId = tickerToIndexMap[symbolUpper] || 'CUSTOM';
+        const indexName = indexNames[indexId] || 'Outros Ativos / Manuais';
+        return {
+          ...t,
+          indexId,
+          indexName
+        };
+      });
+      return { ok: true, custom: enrichedCustom };
     });
 
     ipcMain.handle('ticker:clear', async () => {

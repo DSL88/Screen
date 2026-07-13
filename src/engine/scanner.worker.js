@@ -14,6 +14,7 @@ const { fetchWithRetry } = require('../data/yahooClient');
 const { analyzeSeries, shouldEmit } = require('../quant/markovEngine');
 
 const CONCURRENCY = 5;
+const MIN_CANDLES_WARMUP = 200;
 const cancelRequested = new Set();
 
 // ═══════════════════════════════════════════════════════════
@@ -85,7 +86,10 @@ async function handleScan({ runId, tickers, params, timeframe }) {
   const limit = pLimit(CONCURRENCY);
   let processed = 0;
   let emitted = 0;
-  const signalData = [];
+  const signalsToSend = [];
+
+  // Mínimo dinâmico: markovWindow + margem para warm-up dos indicadores
+  const minCandles = Math.max(MIN_CANDLES_WARMUP, (params.markov_window || 150) + 60);
 
   send({ type: 'progress', payload: { processed: 0, total: list.length, runId } });
 
@@ -104,10 +108,25 @@ async function handleScan({ runId, tickers, params, timeframe }) {
         candles = null;
       }
 
-      if (!candles || candles.length < 60) return;
+      // ── Validação rigorosa: mínimo de velas para warm-up ─────
+      if (!candles || candles.length < minCandles) {
+        send({ type: 'error', payload: {
+          ticker: t.ticker,
+          message: `Dados insuficientes: ${candles?.length || 0} velas (mínimo: ${minCandles})`,
+          runId
+        }});
+        return;
+      }
 
       const analysisCandles = pickAnalysisCandles(candles, params);
-      if (!analysisCandles || analysisCandles.length < 60) return;
+      if (!analysisCandles || analysisCandles.length < minCandles) {
+        send({ type: 'error', payload: {
+          ticker: t.ticker,
+          message: `Velas fechadas insuficientes: ${analysisCandles?.length || 0} (mínimo: ${minCandles})`,
+          runId
+        }});
+        return;
+      }
 
       const result = analyzeSeries(analysisCandles, {
         markovWindow: params.markov_window,
@@ -119,38 +138,61 @@ async function handleScan({ runId, tickers, params, timeframe }) {
       const emit = shouldEmit(result, params.edge_threshold, params.useVolFilter);
 
       if (emit) {
+        // ── Guard clause: validar campos NOT NULL antes de enviar ──
+        const pStay = result.pStay;
+        const edge = result.edge;
+        const precoEntrada = result.close;
+        const atr14 = result.atr;
+        const direcao = result.direction;
+
+        if (pStay == null || !Number.isFinite(pStay)) {
+          send({ type: 'error', payload: { ticker: t.ticker, message: `Sinal ignorado: pStay inválido (${pStay})`, runId } });
+          return;
+        }
+        if (edge == null || !Number.isFinite(edge)) {
+          send({ type: 'error', payload: { ticker: t.ticker, message: `Sinal ignorado: edge inválido (${edge})`, runId } });
+          return;
+        }
+        if (precoEntrada == null || !Number.isFinite(precoEntrada) || precoEntrada <= 0) {
+          send({ type: 'error', payload: { ticker: t.ticker, message: `Sinal ignorado: preço inválido (${precoEntrada})`, runId } });
+          return;
+        }
+        if (!direcao || (direcao !== 'COMPRA' && direcao !== 'VENDA')) {
+          send({ type: 'error', payload: { ticker: t.ticker, message: `Sinal ignorado: direção inválida (${direcao})`, runId } });
+          return;
+        }
+
         emitted++;
-        signalData.push({
-          ticker: t.ticker,
-          name: t.name,
-          index: t.index,
-          signal: {
+        signalsToSend.push({
+          // ── Campos para DB (snake_case, alinhados com insertSignal) ──
+          dbPayload: {
             ticker: t.ticker,
             date: result.date,
-            preco_entrada: result.close,
-            direcao: result.direction,
-            edge: result.edge,
-            p_stay: result.pStay,
-            atr_14: result.atr,
-            stop_loss: result.stopLoss,
-            take_profit: result.takeProfit
+            preco_entrada: precoEntrada,
+            direcao: direcao,
+            edge: edge,
+            p_stay: pStay,
+            atr_14: atr14 ?? 0,
+            stop_loss: result.stopLoss ?? null,
+            take_profit: result.takeProfit ?? null
           },
-          row: {
+          // ── Campos para renderer (camelCase) ──
+          rendererPayload: {
             ticker: t.ticker,
             name: t.name,
             index: t.index,
-            direction: result.direction,
-            edge: result.edge,
+            direction: direcao,
+            edge: edge,
             pBull: result.pBull,
             pBear: result.pBear,
-            pStay: result.pStay,
+            pStay: pStay,
             rsi: result.rsi,
             adx: result.adx,
             bbPct: result.bbPct,
             volumeValid: result.volumeValid,
             date: result.date,
-            close: result.close,
-            atr: result.atr,
+            close: precoEntrada,
+            atr: atr14,
             stopLoss: result.stopLoss,
             takeProfit: result.takeProfit,
             currentState: result.currentState
@@ -164,9 +206,9 @@ async function handleScan({ runId, tickers, params, timeframe }) {
 
   await Promise.all(tasks);
 
-  // Enviar sinais ao processo principal para inserção no DB
-  for (const s of signalData) {
-    send({ type: 'row', payload: { ...s.row, runId } });
+  // Enviar sinais ao processo principal
+  for (const s of signalsToSend) {
+    send({ type: 'row', payload: { ...s.dbPayload, _renderer: s.rendererPayload, runId } });
   }
 
   const elapsedMs = Date.now() - startedAt;
