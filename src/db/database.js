@@ -66,6 +66,18 @@ class DB {
         PRIMARY KEY (ticker, date)
       );
 
+      CREATE TABLE IF NOT EXISTS historical_prices (
+        ticker        TEXT NOT NULL,
+        date          TEXT NOT NULL,
+        open          REAL NOT NULL,
+        high          REAL NOT NULL,
+        low           REAL NOT NULL,
+        close         REAL NOT NULL,
+        volume        INTEGER NOT NULL,
+        PRIMARY KEY (ticker, date)
+      );
+      CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date);
+
       CREATE TABLE IF NOT EXISTS custom_tickers (
         ticker     TEXT PRIMARY KEY,
         name       TEXT,
@@ -340,6 +352,59 @@ class DB {
   removeShortcut(ticker) {
     return this.db.prepare('DELETE FROM market_shortcuts WHERE ticker = ?')
       .run(String(ticker).toUpperCase().trim());
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  HISTORICAL PRICES — Cache permanente de OHLCV
+  // ═══════════════════════════════════════════════════════════
+
+  saveHistoricalCandles(candles) {
+    if (!Array.isArray(candles) || candles.length === 0) return { changes: 0 };
+
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const tx = this.db.transaction((rows) => {
+      let changes = 0;
+      for (const c of rows) {
+        const r = stmt.run(
+          c.ticker,
+          c.date,
+          c.open,
+          c.high,
+          c.low,
+          c.close,
+          c.volume
+        );
+        changes += r.changes || 0;
+      }
+      return changes;
+    });
+
+    return { changes: tx(candles) };
+  }
+
+  getLocalHistoricalPrices(ticker) {
+    const rows = this.db.prepare(`
+      SELECT date, open, high, low, close, volume
+      FROM historical_prices
+      WHERE ticker = ?
+      ORDER BY date ASC
+    `).all(ticker);
+
+    return rows.map(r => ({ ticker, ...r }));
+  }
+
+  getLastStoredDate(ticker) {
+    const row = this.db.prepare(`
+      SELECT MAX(date) as last_date
+      FROM historical_prices
+      WHERE ticker = ?
+    `).get(ticker);
+
+    return row && row.last_date ? row.last_date : null;
   }
 
   close() {

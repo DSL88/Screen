@@ -88,6 +88,72 @@ function getScannerWorker() {
         } catch (_) { /* ignorar */ }
         break;
 
+      case 'getLastStoredDate': {
+        // Worker pede a última data guardada para um ticker
+        const requestId = msg.requestId;
+        try {
+          const lastDate = db.getLastStoredDate(msg.payload.ticker);
+          scannerWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: true,
+            data: lastDate
+          });
+        } catch (err) {
+          scannerWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: false,
+            error: err.message
+          });
+        }
+        break;
+      }
+
+      case 'getLocalHistoricalPrices': {
+        // Worker pede o histórico local completo para um ticker
+        const requestId = msg.requestId;
+        try {
+          const prices = db.getLocalHistoricalPrices(msg.payload.ticker);
+          scannerWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: true,
+            data: prices
+          });
+        } catch (err) {
+          scannerWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: false,
+            error: err.message
+          });
+        }
+        break;
+      }
+
+      case 'saveHistoricalCandles': {
+        // Worker envia velas para guardar na BD
+        const requestId = msg.requestId;
+        try {
+          const result = db.saveHistoricalCandles(msg.payload.candles);
+          scannerWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: true,
+            data: result
+          });
+        } catch (err) {
+          scannerWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: false,
+            error: err.message
+          });
+        }
+        break;
+      }
+
       case 'backtestResult':
         // Tratado via Promise no handler, não reencaminhar
         break;
