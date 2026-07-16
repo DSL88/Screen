@@ -101,18 +101,43 @@ async function handleScan({ runId, tickers, params, timeframe }) {
     try {
       let candles;
       try {
+        console.log(`[Scanner] ${t.ticker}: A obter dados...`);
         candles = await fetchWithRetry(t.ticker, timeframe, 3);
+        console.log(`[Scanner] ${t.ticker}: ${candles?.length || 0} velas obtidas com sucesso`);
         send({ type: 'cacheOHLCV', payload: { key: `${t.ticker}_${timeframe}`, candles } });
       } catch (e) {
-        send({ type: 'error', payload: { ticker: t.ticker, message: `Falha ao obter dados: ${e.message || e}`, runId } });
+        const errorMsg = e.message || String(e);
+        console.error(`[Scanner] ${t.ticker}: Falha ao obter dados - ${errorMsg}`);
+        
+        // Detetar tipo de erro para mensagem mais específica
+        let detailedMessage = `Falha ao obter dados: ${errorMsg}`;
+        if (errorMsg.includes('No data found') || errorMsg.includes('No candles returned')) {
+          detailedMessage = `Símbolo não encontrado ou delistado: ${t.ticker}. Verificar se o símbolo está correto.`;
+        } else if (errorMsg.includes('Rate Limit') || errorMsg.includes('429')) {
+          detailedMessage = `Rate limit do Yahoo Finance. Aguardar antes de tentar novamente.`;
+        } else if (errorMsg.includes('null/empty')) {
+          detailedMessage = `Dados corrompidos ou incompletos para ${t.ticker}.`;
+        }
+        
+        send({ type: 'error', payload: { ticker: t.ticker, message: detailedMessage, runId } });
         candles = null;
       }
 
-      // ── Validação rigorosa: mínimo de velas para warm-up ─────
+      // ─ Validação rigorosa: mínimo de velas para warm-up ─────
       if (!candles || candles.length < minCandles) {
+        const candleCount = candles?.length || 0;
+        console.warn(`[Scanner] ${t.ticker}: Dados insuficientes - ${candleCount} velas (mínimo: ${minCandles})`);
+        
+        let detailedMessage = `Dados insuficientes: ${candleCount} velas (mínimo: ${minCandles})`;
+        if (candleCount === 0) {
+          detailedMessage = `Nenhuma vela disponível para ${t.ticker}. O símbolo pode estar delistado ou a API falhou.`;
+        } else if (candleCount < 60) {
+          detailedMessage = `Muito poucas velas (${candleCount}) para ${t.ticker}. Necessário mínimo ${minCandles} para análise Markov.`;
+        }
+        
         send({ type: 'error', payload: {
           ticker: t.ticker,
-          message: `Dados insuficientes: ${candles?.length || 0} velas (mínimo: ${minCandles})`,
+          message: detailedMessage,
           runId
         }});
         return;
@@ -120,9 +145,12 @@ async function handleScan({ runId, tickers, params, timeframe }) {
 
       const analysisCandles = pickAnalysisCandles(candles, params);
       if (!analysisCandles || analysisCandles.length < minCandles) {
+        const count = analysisCandles?.length || 0;
+        console.warn(`[Scanner] ${t.ticker}: Velas fechadas insuficientes - ${count} (mínimo: ${minCandles})`);
+        
         send({ type: 'error', payload: {
           ticker: t.ticker,
-          message: `Velas fechadas insuficientes: ${analysisCandles?.length || 0} (mínimo: ${minCandles})`,
+          message: `Velas fechadas insuficientes: ${count} (mínimo: ${minCandles}). Algumas velas foram descartadas por estarem em formação.`,
           runId
         }});
         return;
@@ -206,6 +234,14 @@ async function handleScan({ runId, tickers, params, timeframe }) {
 
   await Promise.all(tasks);
 
+  // Estatísticas finais
+  const failedCount = list.length - processed;
+  const successRate = list.length > 0 ? ((processed - failedCount) / list.length * 100).toFixed(1) : 0;
+  
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log(`  SCAN CONCLUÍDO: ${processed}/${list.length} processados | ${emitted} sinais | ${failedCount} falhas (${successRate}% sucesso)`);
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
   // Enviar sinais ao processo principal
   for (const s of signalsToSend) {
     send({ type: 'row', payload: { ...s.dbPayload, _renderer: s.rendererPayload, runId } });
@@ -218,7 +254,9 @@ async function handleScan({ runId, tickers, params, timeframe }) {
       runId,
       totalSignals: emitted,
       totalProcessed: processed,
-      elapsedMs
+      elapsedMs,
+      failedCount,
+      successRate: parseFloat(successRate)
     }
   });
 }

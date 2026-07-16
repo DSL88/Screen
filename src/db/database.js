@@ -299,6 +299,10 @@ class DB {
     return this.db.prepare("DELETE FROM active_trades WHERE status = 'aberto'").run();
   }
 
+  clearClosedTrades() {
+    return this.db.prepare("DELETE FROM active_trades WHERE status = 'fechado'").run();
+  }
+
   addShortcut(tickerOrArray, nome, mercado, tipo = '') {
     if (Array.isArray(tickerOrArray)) {
       const stmt = this.db.prepare(`

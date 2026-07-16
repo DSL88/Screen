@@ -1403,6 +1403,36 @@ body {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
+
+/* ─ Sortable Headers ── */
+.results-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--duration) var(--ease);
+  position: relative;
+}
+
+.results-table th.sortable:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.results-table th.sortable.sort-active {
+  color: var(--accent);
+}
+
+.results-table th .sort-indicator {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.5;
+  transition: opacity var(--duration) var(--ease);
+}
+
+.results-table th.sortable:hover .sort-indicator,
+.results-table th.sortable.sort-active .sort-indicator {
+  opacity: 1;
+}
 .results-table th.col-num,
 .results-table td.col-num,
 .results-table th.col-idx,
