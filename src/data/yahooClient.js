@@ -132,15 +132,17 @@ function processQuotes(quotes, ticker) {
   return deduped;
 }
 
-async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3) {
-  const period1 = new Date();
+async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3, customPeriod1 = null) {
+  const period1 = customPeriod1 || new Date();
 
-  if (timeframe === '1wk') {
-    period1.setDate(period1.getDate() - (365 * 5));
-  } else if (timeframe === '1h' || timeframe === '4h') {
-    period1.setDate(period1.getDate() - 180);
-  } else {
-    period1.setDate(period1.getDate() - (365 * 1.5));
+  if (!customPeriod1) {
+    if (timeframe === '1wk') {
+      period1.setDate(period1.getDate() - (365 * 5));
+    } else if (timeframe === '1h' || timeframe === '4h') {
+      period1.setDate(period1.getDate() - 180);
+    } else {
+      period1.setDate(period1.getDate() - (365 * 1.5));
+    }
   }
 
   // Normalizar o ticker para o formato correto do Yahoo Finance

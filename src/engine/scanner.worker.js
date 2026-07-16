@@ -18,6 +18,69 @@ const MIN_CANDLES_WARMUP = 200;
 const cancelRequested = new Set();
 
 // ═══════════════════════════════════════════════════════════
+//  DB Request-Response — Comunicação com Main Process
+// ══════════════════════════════════════════════════════════
+
+const dbRequests = new Map();
+let dbSeq = 0;
+
+function requestDB(type, payload) {
+  return new Promise((resolve, reject) => {
+    const requestId = `db_${++dbSeq}_${Date.now()}`;
+    dbRequests.set(requestId, { resolve, reject });
+    
+    parentPort.postMessage({
+      type,
+      requestId,
+      payload
+    });
+    
+    // Timeout de segurança
+    setTimeout(() => {
+      if (dbRequests.has(requestId)) {
+        dbRequests.delete(requestId);
+        reject(new Error('DB request timeout'));
+      }
+    }, 30000);
+  });
+}
+
+parentPort.on('message', async (msg) => {
+  // Respostas do DB vindas do main process
+  if (msg.type === 'dbResponse') {
+    const req = dbRequests.get(msg.requestId);
+    if (req) {
+      dbRequests.delete(msg.requestId);
+      if (msg.ok) {
+        req.resolve(msg.data);
+      } else {
+        req.reject(new Error(msg.error || 'DB error'));
+      }
+    }
+    return;
+  }
+  
+  try {
+    switch (msg.action) {
+      case 'scan':
+        await handleScan(msg);
+        break;
+      case 'backtest':
+        await handleBacktest(msg);
+        break;
+      case 'updateTrades':
+        await handleUpdateTrades(msg);
+        break;
+      case 'cancel':
+        if (msg.runId) cancelRequested.add(msg.runId);
+        break;
+    }
+  } catch (err) {
+    send({ type: 'error', payload: { ticker: '_worker', message: err.message || String(err), runId: msg.runId } });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 //  Helpers puros (extraídos do Scanner, sem dependência DB)
 // ═══════════════════════════════════════════════════════════
 
@@ -76,9 +139,104 @@ function classifyPosition(trade, currentPrice, currentDirection) {
   return 'manter';
 }
 
-// ═══════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
 //  SCAN — Varrimento principal
 // ═══════════════════════════════════════════════════════════
+
+// ── Helper: Obter candles com cache inteligente ────────────
+//  1. Verifica cache local (historical_prices)
+//  2. Se vazio ou desatualizado, faz fetch apenas do delta
+//  3. Guarda novas velas na BD
+//  4. Retorna série completa para análise
+async function getCandlesWithCache(ticker, timeframe) {
+  const today = new Date().toISOString().slice(0, 10);
+  
+  try {
+    // Passo 1: Verificar última data guardada localmente
+    let lastStoredDate = null;
+    try {
+      lastStoredDate = await requestDB('getLastStoredDate', { ticker });
+    } catch (err) {
+      console.warn(`[Scanner] ${ticker}: Falha ao consultar cache local - ${err.message}`);
+    }
+    
+    // Passo 2: Se temos dados locais e estão atualizados (última vela é hoje ou ontem)
+    if (lastStoredDate) {
+      const lastDate = new Date(lastStoredDate);
+      const todayDate = new Date(today);
+      const daysDiff = Math.floor((todayDate - lastDate) / (1000 * 60 * 60 * 24));
+      
+      if (daysDiff <= 1) {
+        // Dados estão atualizados, usar cache local
+        console.log(`[Scanner] ${ticker}: Cache local atualizado (${lastStoredDate}), a usar...`);
+        try {
+          const localCandles = await requestDB('getLocalHistoricalPrices', { ticker });
+          if (localCandles && localCandles.length > 0) {
+            return localCandles;
+          }
+        } catch (err) {
+          console.warn(`[Scanner] ${ticker}: Falha ao ler cache local - ${err.message}`);
+        }
+      } else {
+        // Dados desatualizados, fetch apenas do delta
+        console.log(`[Scanner] ${ticker}: Cache desatualizado (${daysDiff} dias), a buscar delta...`);
+        
+        try {
+          // Fetch do período em falta (últimos dias + margem de segurança)
+          const fetchDays = Math.max(daysDiff + 5, 30); // Mínimo 30 dias para garantir
+          const period1 = new Date();
+          period1.setDate(period1.getDate() - fetchDays);
+          
+          const result = await fetchWithRetry(ticker, timeframe, 3, period1);
+          if (result && result.length > 0) {
+            // Guardar novas velas na BD
+            try {
+              await requestDB('saveHistoricalCandles', { candles: result });
+              console.log(`[Scanner] ${ticker}: ${result.length} velas novas guardadas`);
+            } catch (err) {
+              console.warn(`[Scanner] ${ticker}: Falha ao guardar velas - ${err.message}`);
+            }
+            
+            // Obter série completa atualizada
+            try {
+              const fullSeries = await requestDB('getLocalHistoricalPrices', { ticker });
+              if (fullSeries && fullSeries.length > 0) {
+                return fullSeries;
+              }
+            } catch (err) {
+              console.warn(`[Scanner] ${ticker}: Falha ao ler série completa - ${err.message}`);
+            }
+            
+            // Fallback: usar apenas as velas fetchadas
+            return result;
+          }
+        } catch (err) {
+          console.warn(`[Scanner] ${ticker}: Falha ao fetch delta - ${err.message}`);
+        }
+      }
+    }
+    
+    // Passo 3: Sem dados locais ou falha no delta → fetch completo
+    console.log(`[Scanner] ${ticker}: Sem cache válido, a descarregar histórico completo...`);
+    const fullHistory = await fetchWithRetry(ticker, timeframe, 3);
+    
+    if (fullHistory && fullHistory.length > 0) {
+      // Guardar tudo na BD
+      try {
+        await requestDB('saveHistoricalCandles', { candles: fullHistory });
+        console.log(`[Scanner] ${ticker}: ${fullHistory.length} velas guardadas no histórico permanente`);
+      } catch (err) {
+        console.warn(`[Scanner] ${ticker}: Falha ao guardar histórico - ${err.message}`);
+      }
+    }
+    
+    return fullHistory;
+  } catch (err) {
+    console.error(`[Scanner] ${ticker}: Erro crítico no cache - ${err.message}`);
+    // Fallback: tentar fetch direto sem cache
+    return await fetchWithRetry(ticker, timeframe, 3);
+  }
+}
 
 async function handleScan({ runId, tickers, params, timeframe }) {
   const startedAt = Date.now();
@@ -101,9 +259,9 @@ async function handleScan({ runId, tickers, params, timeframe }) {
     try {
       let candles;
       try {
-        console.log(`[Scanner] ${t.ticker}: A obter dados...`);
-        candles = await fetchWithRetry(t.ticker, timeframe, 3);
-        console.log(`[Scanner] ${t.ticker}: ${candles?.length || 0} velas obtidas com sucesso`);
+        console.log(`[Scanner] ${t.ticker}: A obter dados com cache inteligente...`);
+        candles = await getCandlesWithCache(t.ticker, timeframe);
+        console.log(`[Scanner] ${t.ticker}: ${candles?.length || 0} velas disponíveis para análise`);
         send({ type: 'cacheOHLCV', payload: { key: `${t.ticker}_${timeframe}`, candles } });
       } catch (e) {
         const errorMsg = e.message || String(e);
@@ -533,24 +691,3 @@ async function handleUpdateTrades({ activeTrades }) {
 function send(msg) {
   parentPort.postMessage(msg);
 }
-
-parentPort.on('message', async (msg) => {
-  try {
-    switch (msg.action) {
-      case 'scan':
-        await handleScan(msg);
-        break;
-      case 'backtest':
-        await handleBacktest(msg);
-        break;
-      case 'updateTrades':
-        await handleUpdateTrades(msg);
-        break;
-      case 'cancel':
-        if (msg.runId) cancelRequested.add(msg.runId);
-        break;
-    }
-  } catch (err) {
-    send({ type: 'error', payload: { ticker: '_worker', message: err.message || String(err), runId: msg.runId } });
-  }
-});
