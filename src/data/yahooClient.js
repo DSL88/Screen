@@ -19,6 +19,42 @@ function isNum(v) {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Normalização de símbolos para Yahoo Finance
+//  - Converte '.' para '-' (ex: BF.B → BF-B)
+//  - Mantém sufixos de exchange (.LS, .PA, .DE, etc.)
+//  - Remove espaços e caracteres inválidos
+// ══════════════════════════════════════════════════════════
+function normalizeTicker(ticker) {
+  if (!ticker || typeof ticker !== 'string') return ticker;
+  
+  const trimmed = ticker.trim();
+  
+  // Mapeamento de formatos conhecidos que precisam de conversão
+  const knownConversions = {
+    'BF.B': 'BF-B',
+    'BRK.A': 'BRK-A',
+    'BRK.B': 'BRK-B',
+  };
+  
+  if (knownConversions[trimmed]) {
+    return knownConversions[trimmed];
+  }
+  
+  // Para símbolos europeus com '.', manter o formato original
+  // Yahoo Finance aceita tanto '.' como '-' para a maioria dos casos
+  // Mas alguns símbolos específicos precisam de '-'
+  const parts = trimmed.split('.');
+  if (parts.length === 2 && parts[1].length <= 3) {
+    // Provavelmente um símbolo com sufixo de exchange (ex: AAPL.US, SONC.LS)
+    // Manter como está, Yahoo Finance aceita
+    return trimmed;
+  }
+  
+  // Para outros casos, tentar com '-' em vez de '.'
+  return trimmed.replace(/\./g, '-');
+}
+
 function processQuote(q, ticker) {
   if (!q) return null;
 
@@ -107,53 +143,93 @@ async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3) {
     period1.setDate(period1.getDate() - (365 * 1.5));
   }
 
-  for (let i = 0; i < attempts; i++) {
-    try {
-      await sleep(1500 + Math.random() * 1000);
+  // Normalizar o ticker para o formato correto do Yahoo Finance
+  const normalizedTicker = normalizeTicker(ticker);
+  const tickerVariants = [normalizedTicker];
+  
+  // Se o ticker normalizado é diferente do original, tentar ambos
+  if (normalizedTicker !== ticker) {
+    tickerVariants.unshift(ticker); // Tentar original primeiro
+  }
+  
+  // Para símbolos com '.', tentar também com '-'
+  if (ticker.includes('.') && !normalizedTicker.includes('-')) {
+    const dashVariant = ticker.replace(/\./g, '-');
+    if (!tickerVariants.includes(dashVariant)) {
+      tickerVariants.push(dashVariant);
+    }
+  }
 
-      const result = await yahooFinance.chart(
-        ticker,
-        { period1, interval: timeframe },
-        {
-          fetchOptions: {
-            headers: { 'User-Agent': USER_AGENT }
+  for (let i = 0; i < attempts; i++) {
+    for (const tickerVariant of tickerVariants) {
+      try {
+        await sleep(1500 + Math.random() * 1000);
+
+        const result = await yahooFinance.chart(
+          tickerVariant,
+          { period1, interval: timeframe },
+          {
+            fetchOptions: {
+              headers: { 'User-Agent': USER_AGENT }
+            }
+          }
+        );
+
+        const quotes = result && result.quotes;
+        if (!Array.isArray(quotes) || quotes.length === 0) {
+          // Se este variante não funcionou, tentar o próximo
+          if (tickerVariants.indexOf(tickerVariant) < tickerVariants.length - 1) {
+            console.warn(`[yahooClient] ${ticker}: variante "${tickerVariant}" sem dados, a tentar próximo...`);
+            continue;
+          }
+          throw new Error(`No candles returned for ${ticker} (tentadas variantes: ${tickerVariants.join(', ')})`);
+        }
+
+        const candles = processQuotes(quotes, ticker);
+
+        if (candles.length < MIN_CANDLES) {
+          const droppedNull = quotes.length - candles.length;
+          const warn = `[yahooClient] AVISO: ${ticker} produziu apenas ${candles.length} velas válidas ` +
+            `(${droppedNull} removidas por nulos). Warm-up incompleto (mínimo ${MIN_CANDLES}).`;
+          if (candles.length === 0) {
+            throw new Error(`All candles null/empty for ${ticker} após sanitização`);
+          }
+          console.warn(warn);
+          if (candles.length < WARMUP_TARGET) {
+            console.warn(`[yahooClient] ${ticker}: série abaixo do warm-up ideal (${WARMUP_TARGET}). A usar ${candles.length} velas.`);
           }
         }
-      );
 
-      const quotes = result && result.quotes;
-      if (!Array.isArray(quotes) || quotes.length === 0) {
-        throw new Error(`No candles returned for ${ticker}`);
-      }
-
-      const candles = processQuotes(quotes, ticker);
-
-      if (candles.length < MIN_CANDLES) {
-        const droppedNull = quotes.length - candles.length;
-        const warn = `[yahooClient] AVISO: ${ticker} produziu apenas ${candles.length} velas válidas ` +
-          `(${droppedNull} removidas por nulos). Warm-up incompleto (mínimo ${MIN_CANDLES}).`;
-        if (candles.length === 0) {
-          throw new Error(`All candles null/empty for ${ticker} após sanitização`);
+        // Se chegou aqui com sucesso, retornar
+        if (tickerVariant !== ticker) {
+          console.log(`[yahooClient] ${ticker}: a usar variante "${tickerVariant}" com sucesso`);
         }
-        console.warn(warn);
-        if (candles.length < WARMUP_TARGET) {
-          console.warn(`[yahooClient] ${ticker}: série abaixo do warm-up ideal (${WARMUP_TARGET}). A usar ${candles.length} velas.`);
-        }
-      }
-
-      return candles;
-    } catch (err) {
-      const code = err && err.code;
-      const isRateLimit = code === 429 || /rate|429|too many/i.test(String(err.message || ''));
-      if (i === attempts - 1) {
+        return candles;
+      } catch (err) {
+        const code = err && err.code;
+        const isRateLimit = code === 429 || /rate|429|too many/i.test(String(err.message || ''));
+        
+        // Se é rate limit, não adianta tentar outros variantes
         if (isRateLimit) {
-          throw new Error('Yahoo Finance Rate Limit (429): Demasiados pedidos. Por favor, aguarde alguns minutos.');
+          if (i === attempts - 1) {
+            throw new Error('Yahoo Finance Rate Limit (429): Demasiados pedidos. Por favor, aguarde alguns minutos.');
+          }
+          await sleep(5000);
+          break; // Break do loop de variantes, continuar para próxima tentativa
         }
-        throw err;
-      }
-      if (isRateLimit) {
-        await sleep(5000);
-      } else {
+        
+        // Se não é rate limit e ainda há variantes para tentar, continuar
+        if (tickerVariants.indexOf(tickerVariant) < tickerVariants.length - 1) {
+          console.warn(`[yahooClient] ${ticker}: erro com variante "${tickerVariant}": ${err.message || err}`);
+          continue;
+        }
+        
+        // Se é a última variante e última tentativa, lançar erro
+        if (i === attempts - 1 && tickerVariants.indexOf(tickerVariant) === tickerVariants.length - 1) {
+          throw err;
+        }
+        
+        // Caso contrário, esperar e tentar novamente
         const backoff = 500 * Math.pow(2, i);
         const jitter = Math.floor(Math.random() * 250);
         await sleep(backoff + jitter);
@@ -324,4 +400,4 @@ async function searchTickers(query, limit = 8) {
   throw new Error('Falha na pesquisa Yahoo: ' + msg);
 }
 
-module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers };
+module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker };

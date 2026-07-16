@@ -24,6 +24,8 @@
   let totalProcessed = 0;
   let totalEmitted = 0;
   let scanErrors = []; // Agregação de erros durante o scan
+  let scannerRows = []; // Armazenar dados das rows para ordenação
+  let currentSort = { column: null, direction: 'asc' }; // Estado de ordenação atual
 
   const modalAdd = document.getElementById('modal-add');
   const modalTicker = document.getElementById('modal-ticker');
@@ -716,15 +718,29 @@
 
   function clearTable() {
     body.innerHTML = '<tr class="empty"><td colspan="11">A processar...</td></tr>';
+    scannerRows = []; // Limpar dados armazenados
+    currentSort = { column: null, direction: 'asc' }; // Reset ordenação
+    updateSortIndicator();
   }
 
   function appendRow(r) {
     const empty = body.querySelector('tr.empty');
     if (empty) empty.remove();
+    
+    // Armazenar dados para ordenação
+    scannerRows.push(r);
+    
+    // Se não há ordenação ativa, adicionar diretamente ao DOM
+    if (!currentSort.column) {
+      renderRowToDOM(r, body.children.length);
+    }
+  }
+  
+  function renderRowToDOM(r, index) {
     const tr = document.createElement('tr');
     tr.className = 'flash-in';
     tr.innerHTML = `
-      <td class="col-idx">${body.children.length + 1}</td>
+      <td class="col-idx">${index}</td>
       <td class="col-ticker ticker">${escapeHtml(r.ticker)}</td>
       <td class="col-name name">${escapeHtml(r.name || '')}</td>
       <td class="col-dir"><span class="dir-badge dir-${r.direction}">${r.direction}</span></td>
@@ -748,6 +764,70 @@
         take_profit: parseFloat(btn.dataset.tp)
       });
     });
+  }
+  
+  function renderAllRows() {
+    body.innerHTML = '';
+    if (scannerRows.length === 0) {
+      body.innerHTML = '<tr class="empty"><td colspan="11">Aguardando execução do scanner...</td></tr>';
+      return;
+    }
+    
+    scannerRows.forEach((r, index) => {
+      renderRowToDOM(r, index + 1);
+    });
+  }
+  
+  function sortByDirection() {
+    // Alternar direção
+    if (currentSort.column === 'direction') {
+      currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+      currentSort.column = 'direction';
+      currentSort.direction = 'asc';
+    }
+    
+    // Ordenar dados: primeiro por direção, depois por edge (decrescente)
+    scannerRows.sort((a, b) => {
+      const dirA = a.direction || '';
+      const dirB = b.direction || '';
+      
+      // COMPRA antes de VENDA em ordem ascendente
+      const order = { 'COMPRA': 0, 'VENDA': 1 };
+      const valA = order[dirA] !== undefined ? order[dirA] : 2;
+      const valB = order[dirB] !== undefined ? order[dirB] : 2;
+      
+      // Primeiro critério: direção
+      if (valA !== valB) {
+        return currentSort.direction === 'asc' ? valA - valB : valB - valA;
+      }
+      
+      // Segundo critério: edge (sempre decrescente - maior edge primeiro)
+      const edgeA = a.edge || 0;
+      const edgeB = b.edge || 0;
+      return edgeB - edgeA;
+    });
+    
+    // Re-renderizar tabela
+    renderAllRows();
+    updateSortIndicator();
+  }
+  
+  function updateSortIndicator() {
+    const indicator = document.getElementById('sort-indicator-direction');
+    const header = document.getElementById('sort-direction');
+    
+    if (!indicator || !header) return;
+    
+    // Remover classe active de todos os headers
+    document.querySelectorAll('.sortable').forEach(th => th.classList.remove('sort-active'));
+    
+    if (currentSort.column === 'direction') {
+      header.classList.add('sort-active');
+      indicator.textContent = currentSort.direction === 'asc' ? '↑' : '↓';
+    } else {
+      indicator.textContent = '';
+    }
   }
 
   if (searchInput) {
@@ -803,6 +883,13 @@
   }
 
   btnClearAll.addEventListener('click', clearAll);
+
+  // Ordenação por direção
+  const sortDirectionHeader = document.getElementById('sort-direction');
+  if (sortDirectionHeader) {
+    sortDirectionHeader.addEventListener('click', sortByDirection);
+    sortDirectionHeader.style.cursor = 'pointer';
+  }
 
   btn.addEventListener('click', async () => {
     if (running) return;
@@ -1531,6 +1618,117 @@
   const portfolioTab = document.querySelector('.tab-btn[data-tab="portfolio"]');
   if (portfolioTab) {
     portfolioTab.addEventListener('click', loadPortfolio);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  HISTÓRICO DE TRADES
+  // ═══════════════════════════════════════════════════════════
+  const historyBody = document.getElementById('history-body');
+  const historyStatus = document.getElementById('history-status');
+  const historySummary = document.getElementById('history-summary');
+  const btnClearHistory = document.getElementById('btn-clear-history');
+
+  function renderHistoryRow(trade) {
+    const tr = document.createElement('tr');
+    const dirClass = trade.direcao === 'COMPRA' ? 'dir-COMPRA' : 'dir-VENDA';
+    const resultColor = (trade.resultado_pct || 0) >= 0 ? 'var(--bull)' : 'var(--bear)';
+    const resultText = trade.resultado_pct != null ? (trade.resultado_pct * 100).toFixed(2) + '%' : '—';
+    const motivoLabel = trade.motivo_fecho === 'stop_loss' ? 'Stop Loss' : trade.motivo_fecho === 'take_profit' ? 'Take Profit' : (trade.motivo_fecho || 'manual');
+    
+    tr.innerHTML = `
+      <td class="col-ticker ticker">${escapeHtml(trade.ticker)}</td>
+      <td class="col-name name">${escapeHtml(trade.nome || '')}</td>
+      <td class="col-dir"><span class="dir-badge ${dirClass}">${escapeHtml(trade.direcao)}</span></td>
+      <td class="col-num">${trade.preco_entrada != null ? trade.preco_entrada.toFixed(2) : '—'}</td>
+      <td class="col-num">${trade.preco_fecho != null ? trade.preco_fecho.toFixed(2) : '—'}</td>
+      <td class="col-num" style="color: ${resultColor}; font-weight: 600;">${resultText}</td>
+      <td class="col-motivo"><span class="dir-badge" style="background: var(--surface-2); border-color: var(--border-strong); color: var(--text-dim); padding: 2px 8px; font-size: 10px;">${escapeHtml(motivoLabel)}</span></td>
+      <td class="col-data" style="font-family: var(--mono); font-size: 11px; color: var(--text-dim);">${escapeHtml(trade.data_entrada || '')}</td>
+      <td class="col-data" style="font-family: var(--mono); font-size: 11px; color: var(--text-dim);">${escapeHtml(trade.fechado_em || '')}</td>
+    `;
+    return tr;
+  }
+
+  async function loadHistory() {
+    try {
+      const res = await window.api.listTrades();
+      if (!res || !res.ok) {
+        historyBody.innerHTML = '<tr class="empty"><td colspan="9">Erro ao carregar histórico.</td></tr>';
+        return;
+      }
+
+      const closed = res.closed || [];
+      historyBody.innerHTML = '';
+      
+      if (closed.length === 0) {
+        historyBody.innerHTML = '<tr class="empty"><td colspan="9">Nenhum trade no histórico. As operações fechadas aparecerão aqui.</td></tr>';
+        if (btnClearHistory) btnClearHistory.disabled = true;
+      } else {
+        // Ordenar por data de fecho (mais recente primeiro)
+        const sorted = [...closed].sort((a, b) => {
+          const dateA = a.fechado_em || a.data_entrada || '';
+          const dateB = b.fechado_em || b.data_entrada || '';
+          return dateB.localeCompare(dateA);
+        });
+        
+        sorted.forEach(t => historyBody.appendChild(renderHistoryRow(t)));
+        if (btnClearHistory) btnClearHistory.disabled = false;
+      }
+
+      historySummary.textContent = `${closed.length} trade${closed.length !== 1 ? 's' : ''} no histórico`;
+      historyStatus.textContent = closed.length > 0
+        ? `${closed.length} operações fechadas registadas.`
+        : 'Registo completo de todas as operações fechadas.';
+    } catch (err) {
+      historyStatus.textContent = 'Erro: ' + (err.message || String(err));
+    }
+  }
+
+  async function clearHistory() {
+    const res = await window.api.listTrades();
+    const closed = (res && res.closed) || [];
+    
+    if (closed.length === 0) {
+      historyStatus.textContent = 'O histórico já está vazio.';
+      return;
+    }
+    
+    const count = closed.length;
+    const ok = await openConfirmModal({
+      title: 'Limpar Histórico',
+      message: `Tens a certeza que queres apagar <strong>todos os ${count} trades</strong> do histórico? Esta ação não pode ser revertida.`,
+      confirmLabel: 'Sim, limpar tudo',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    
+    if (!ok) return;
+
+    if (btnClearHistory) btnClearHistory.disabled = true;
+    
+    try {
+      const clearRes = await window.api.clearClosedTrades();
+      if (!clearRes || !clearRes.ok) {
+        historyStatus.textContent = 'Erro ao limpar histórico: ' + (clearRes && clearRes.error ? clearRes.error : 'desconhecido');
+        await loadHistory();
+        return;
+      }
+      
+      historyStatus.textContent = `Histórico limpo (${count} ${count === 1 ? 'trade removido' : 'trades removidos'}).`;
+      await loadHistory();
+    } catch (err) {
+      historyStatus.textContent = 'Erro: ' + (err.message || String(err));
+      await loadHistory();
+    }
+  }
+
+  if (btnClearHistory) {
+    btnClearHistory.addEventListener('click', clearHistory);
+  }
+
+  const historyTab = document.querySelector('.tab-btn[data-tab="history"]');
+  if (historyTab) {
+    historyTab.addEventListener('click', loadHistory);
   }
 
   // ═══════════════════════════════════════════════════════════

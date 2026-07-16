@@ -501,6 +501,15 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('trade:clearClosed', async () => {
+      try {
+        const result = db.clearClosedTrades();
+        return { ok: true, changes: result && typeof result.changes === 'number' ? result.changes : 0 };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     ipcMain.handle('shortcut:add', async (_event, payload) => {
       if (!payload || !payload.ticker) return { ok: false, error: 'missing-ticker' };
       try {
