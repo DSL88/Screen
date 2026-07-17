@@ -149,8 +149,6 @@ function classifyPosition(trade, currentPrice, currentDirection) {
 //  3. Guarda novas velas na BD
 //  4. Retorna série completa para análise
 async function getCandlesWithCache(ticker, timeframe) {
-  const today = new Date().toISOString().slice(0, 10);
-  
   try {
     // Passo 1: Verificar última data guardada localmente
     let lastStoredDate = null;
@@ -159,82 +157,60 @@ async function getCandlesWithCache(ticker, timeframe) {
     } catch (err) {
       console.warn(`[Scanner] ${ticker}: Falha ao consultar cache local - ${err.message}`);
     }
-    
-    // Passo 2: Se temos dados locais e estão atualizados (última vela é hoje ou ontem)
+
     if (lastStoredDate) {
-      const lastDate = new Date(lastStoredDate);
-      const todayDate = new Date(today);
-      const daysDiff = Math.floor((todayDate - lastDate) / (1000 * 60 * 60 * 24));
-      
-      if (daysDiff <= 1) {
-        // Dados estão atualizados, usar cache local
-        console.log(`[Scanner] ${ticker}: Cache local atualizado (${lastStoredDate}), a usar...`);
-        try {
-          const localCandles = await requestDB('getLocalHistoricalPrices', { ticker });
-          if (localCandles && localCandles.length > 0) {
-            return localCandles;
-          }
-        } catch (err) {
-          console.warn(`[Scanner] ${ticker}: Falha ao ler cache local - ${err.message}`);
-        }
-      } else {
-        // Dados desatualizados, fetch apenas do delta
-        console.log(`[Scanner] ${ticker}: Cache desatualizado (${daysDiff} dias), a buscar delta...`);
-        
-        try {
-          // Fetch do período em falta (últimos dias + margem de segurança)
-          const fetchDays = Math.max(daysDiff + 5, 30); // Mínimo 30 dias para garantir
-          const period1 = new Date();
-          period1.setDate(period1.getDate() - fetchDays);
-          
-          const result = await fetchWithRetry(ticker, timeframe, 3, period1);
-          if (result && result.length > 0) {
-            // Guardar novas velas na BD
-            try {
-              await requestDB('saveHistoricalCandles', { candles: result });
-              console.log(`[Scanner] ${ticker}: ${result.length} velas novas guardadas`);
-            } catch (err) {
-              console.warn(`[Scanner] ${ticker}: Falha ao guardar velas - ${err.message}`);
-            }
-            
-            // Obter série completa atualizada
-            try {
-              const fullSeries = await requestDB('getLocalHistoricalPrices', { ticker });
-              if (fullSeries && fullSeries.length > 0) {
-                return fullSeries;
-              }
-            } catch (err) {
-              console.warn(`[Scanner] ${ticker}: Falha ao ler série completa - ${err.message}`);
-            }
-            
-            // Fallback: usar apenas as velas fetchadas
-            return result;
-          }
-        } catch (err) {
-          console.warn(`[Scanner] ${ticker}: Falha ao fetch delta - ${err.message}`);
-        }
-      }
-    }
-    
-    // Passo 3: Sem dados locais ou falha no delta → fetch completo
-    console.log(`[Scanner] ${ticker}: Sem cache válido, a descarregar histórico completo...`);
-    const fullHistory = await fetchWithRetry(ticker, timeframe, 3);
-    
-    if (fullHistory && fullHistory.length > 0) {
-      // Guardar tudo na BD
+      // Dados locais existem → fetch incremental desde a última data
+      // O INSERT OR REPLACE reescreve a última vela e adiciona as novas
+      console.log(`[Scanner] ${ticker}: Dados locais até ${lastStoredDate} → fetch incremental`);
+      send({ type: 'sync-status', payload: { ticker, status: 'syncing', lastDate: lastStoredDate } });
+
       try {
-        await requestDB('saveHistoricalCandles', { candles: fullHistory });
-        console.log(`[Scanner] ${ticker}: ${fullHistory.length} velas guardadas no histórico permanente`);
+        const period1 = new Date(lastStoredDate);
+        const newCandles = await fetchWithRetry(ticker, timeframe, 3, period1);
+
+        if (newCandles && newCandles.length > 0) {
+          // Guardar na tabela permanente
+          await requestDB('saveHistoricalCandles', { candles: newCandles });
+          // Guardar também no cache temporário para compatibilidade
+          send({ type: 'cacheOHLCV', payload: { key: `${ticker}_${timeframe}`, candles: newCandles } });
+          console.log(`[Scanner] ${ticker}: +${newCandles.length} velas sincronizadas`);
+          send({ type: 'sync-status', payload: { ticker, status: 'downloaded-new', newDataCount: newCandles.length, lastDate: lastStoredDate } });
+        } else {
+          console.log(`[Scanner] ${ticker}: Sem dados novos`);
+          send({ type: 'sync-status', payload: { ticker, status: 'up-to-date', lastDate: lastStoredDate } });
+        }
       } catch (err) {
-        console.warn(`[Scanner] ${ticker}: Falha ao guardar histórico - ${err.message}`);
+        console.warn(`[Scanner] ${ticker}: Falha no fetch incremental: ${err.message}. A usar dados locais.`);
+        send({ type: 'sync-status', payload: { ticker, status: 'up-to-date', lastDate: lastStoredDate, warning: true } });
+      }
+
+      // Carregar série consolidada da SQLite (sempre, mesmo se fetch falhou)
+      const fullSeries = await requestDB('getLocalHistoricalPrices', { ticker });
+      if (fullSeries && fullSeries.length > 0) {
+        return fullSeries;
       }
     }
-    
-    return fullHistory;
+
+    // Sem dados locais → download completo (1.5 anos) e guardar como seed
+    console.log(`[Scanner] ${ticker}: Sem dados locais → download completo`);
+    send({ type: 'sync-status', payload: { ticker, status: 'syncing', lastDate: null } });
+
+    try {
+      const fullHistory = await fetchWithRetry(ticker, timeframe, 3);
+      if (fullHistory && fullHistory.length > 0) {
+        await requestDB('saveHistoricalCandles', { candles: fullHistory });
+        send({ type: 'cacheOHLCV', payload: { key: `${ticker}_${timeframe}`, candles: fullHistory } });
+        console.log(`[Scanner] ${ticker}: ${fullHistory.length} velas guardadas (seed inicial)`);
+        send({ type: 'sync-status', payload: { ticker, status: 'downloaded-new', newDataCount: fullHistory.length, lastDate: null } });
+      }
+      return fullHistory;
+    } catch (err) {
+      console.error(`[Scanner] ${ticker}: Sem dados locais e API falhou: ${err.message}`);
+      throw new Error(`Sem dados locais e falha na API: ${err.message}`);
+    }
   } catch (err) {
-    console.error(`[Scanner] ${ticker}: Erro crítico no cache - ${err.message}`);
-    // Fallback: tentar fetch direto sem cache
-    return await fetchWithRetry(ticker, timeframe, 3);
+    console.error(`[Scanner] ${ticker}: Erro crítico - ${err.message}`);
+    throw err;
   }
 }
 
