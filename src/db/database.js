@@ -78,6 +78,14 @@ class DB {
       );
       CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date);
 
+      CREATE TABLE IF NOT EXISTS stocks (
+        ticker      TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        country     TEXT NOT NULL,
+        index_name  TEXT NOT NULL,
+        created_at  TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
       CREATE TABLE IF NOT EXISTS custom_tickers (
         ticker     TEXT PRIMARY KEY,
         name       TEXT,
@@ -128,6 +136,20 @@ class DB {
     }
     if (!have.has('close_reason')) {
       this.db.exec('ALTER TABLE historical_signals ADD COLUMN close_reason TEXT');
+    }
+
+    // Migration: ensure stocks table exists for older databases
+    const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='stocks'").get();
+    if (!tables) {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS stocks (
+          ticker      TEXT PRIMARY KEY,
+          name        TEXT NOT NULL,
+          country     TEXT NOT NULL,
+          index_name  TEXT NOT NULL,
+          created_at  TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
     }
   }
 
@@ -405,6 +427,65 @@ class DB {
     `).get(ticker);
 
     return row && row.last_date ? row.last_date : null;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  STOCKS — Metadata for imported assets
+  // ═══════════════════════════════════════════════════════════
+
+  getStockByTicker(ticker) {
+    return this.db.prepare(
+      'SELECT ticker, name, country, index_name FROM stocks WHERE ticker = ?'
+    ).get(ticker);
+  }
+
+  upsertStock(stock) {
+    this.db.prepare(`
+      INSERT INTO stocks (ticker, name, country, index_name)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(ticker) DO UPDATE SET
+        name = excluded.name,
+        country = excluded.country,
+        index_name = excluded.index_name
+    `).run(stock.ticker, stock.name, stock.country, stock.indexName);
+  }
+
+  saveHistoricalCandlesFromImport(ticker, candles) {
+    if (!Array.isArray(candles) || candles.length === 0) return { changes: 0 };
+
+    // Sort by date ASC before inserting
+    const sorted = [...candles].sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
+
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const tx = this.db.transaction((rows) => {
+      let changes = 0;
+      for (const c of rows) {
+        const r = stmt.run(
+          ticker,
+          c.date,
+          c.open,
+          c.high,
+          c.low,
+          c.close,
+          c.volume
+        );
+        changes += r.changes || 0;
+      }
+      return changes;
+    });
+
+    return { changes: tx(sorted) };
+  }
+
+  hasHistoricalData(ticker) {
+    const row = this.db.prepare(
+      'SELECT COUNT(*) as cnt FROM historical_prices WHERE ticker = ?'
+    ).get(ticker);
+    return row && row.cnt > 0;
   }
 
   close() {

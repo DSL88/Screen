@@ -884,13 +884,34 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+.watchlist-group-header:hover {
+  background: var(--surface-2);
 }
 .watchlist-group-header:first-of-type {
   margin-top: 0;
 }
+.watchlist-group-header.is-collapsed {
+  border-bottom-color: transparent;
+}
+.wl-group-chevron {
+  display: inline-block;
+  width: 14px;
+  font-size: 10px;
+  color: var(--text-dim);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.watchlist-group-header.is-collapsed .wl-group-chevron {
+  transform: rotate(-90deg);
+}
 .wl-group-title {
   color: var(--accent-hover);
   text-shadow: 0 0 10px var(--accent-soft);
+  flex: 1;
 }
 .wl-group-count {
   font-family: var(--mono);
@@ -900,6 +921,15 @@ body {
   padding: 1px 6px;
   border-radius: 4px;
   font-weight: 600;
+}
+.watchlist-group-items {
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+}
+.watchlist-group-items.is-hidden {
+  max-height: 0 !important;
+  opacity: 0;
+  pointer-events: none;
 }
 .watchlist-empty {
   padding: 20px 8px;
@@ -956,6 +986,26 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.wl-history-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--text-mute);
+  opacity: 0.3;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+.wl-history-badge svg {
+  width: 12px;
+  height: 12px;
+}
+.wl-history-badge.has-data {
+  color: var(--bull);
+  opacity: 1;
 }
 .wl-remove {
   background: none;
@@ -2788,4 +2838,139 @@ select.param-input option {
 .mono-num {
   font-family: var(--mono);
   font-feature-settings: "tnum";
+}
+
+/* ═══════════════════════════════════════════════════════════
+   IMPORT MODAL
+   ═══════════════════════════════════════════════════════════ */
+
+.modal-import-dialog {
+  max-width: 560px;
+}
+
+.file-upload-area {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--surface);
+}
+
+.file-upload-area:hover,
+.file-upload-area.dragover {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.file-upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-upload-icon {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  position: relative;
+  margin-bottom: 4px;
+}
+
+.file-upload-icon::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 16px;
+  background: var(--text-dim);
+  box-shadow: -4px 4px 0 var(--text-dim), 4px 4px 0 var(--text-dim);
+}
+
+.file-upload-text {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.file-upload-hint {
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text-dim);
+}
+
+.file-upload-selected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.file-upload-filename {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--accent);
+  word-break: break-all;
+}
+
+.file-upload-remove {
+  background: none;
+  border: none;
+  color: var(--bear);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: opacity 0.2s;
+}
+
+.file-upload-remove:hover {
+  opacity: 0.7;
+}
+
+.import-progress-wrap {
+  margin-top: 16px;
+}
+
+.import-progress-bar {
+  height: 4px;
+  background: var(--surface-2);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.import-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--bull));
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.3s ease;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.import-progress-text {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+
+.form-success {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(52, 211, 153, 0.1);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  border-radius: var(--radius);
+  color: var(--bull);
+  font-size: 13px;
+  font-weight: 500;
 }

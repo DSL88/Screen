@@ -143,6 +143,11 @@
             <h1>My List</h1>
             <p>Watchlist pessoal organizada por índices de mercado.</p>
           </div>
+          <div class="topbar-actions">
+            <button class="btn-secondary" id="btn-open-import">
+              <span>Importar Dados Históricos</span>
+            </button>
+          </div>
         </header>
 
         <section class="mylist-content">
@@ -457,6 +462,108 @@
       <div class="modal-footer">
         <button class="btn-secondary" id="modal-investir-cancel">Cancelar</button>
         <button class="btn-primary" id="modal-investir-confirm">Confirmar Investimento</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-import" hidden>
+    <div class="modal modal-import-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-import-title">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-import-title">Importar Dados Históricos</div>
+        <button class="modal-close" id="modal-import-close" aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-intro-text">Importa dados OHLCV de um ficheiro CSV ou XLSX para um ativo.</p>
+
+        <div class="form-group">
+          <label class="form-label" for="import-ticker">Código da Ação (Ticker)</label>
+          <input
+            type="text"
+            id="import-ticker"
+            class="form-input"
+            placeholder="JMT.LS, GALP.LS, AAPL..."
+            autocomplete="off"
+            spellcheck="false"
+            maxlength="15"
+          />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="import-name">Nome da Empresa</label>
+          <input
+            type="text"
+            id="import-name"
+            class="form-input"
+            placeholder="Jerónimo Martins, Galp Energia..."
+          />
+        </div>
+
+        <div class="form-row-group">
+          <div class="form-group">
+            <label class="form-label" for="import-country">País</label>
+            <select id="import-country" class="form-input">
+              <option value="">Selecionar...</option>
+              <option value="Portugal">Portugal</option>
+              <option value="Espanha">Espanha</option>
+              <option value="EUA">EUA</option>
+              <option value="Alemanha">Alemanha</option>
+              <option value="França">França</option>
+              <option value="Itália">Itália</option>
+              <option value="Holanda">Holanda</option>
+              <option value="Brasil">Brasil</option>
+              <option value="UK">UK</option>
+              <option value="Outro">Outro</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="import-index">Índice</label>
+            <select id="import-index" class="form-input">
+              <option value="">Selecionar...</option>
+              <option value="PSI">PSI</option>
+              <option value="IBEX35">IBEX35</option>
+              <option value="SP500">SP500</option>
+              <option value="DAX">DAX</option>
+              <option value="CAC40">CAC40</option>
+              <option value="FTSE100">FTSE100</option>
+              <option value="NASDAQ">NASDAQ</option>
+              <option value="Outro">Outro</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Ficheiro de Dados (CSV ou XLSX)</label>
+          <div class="file-upload-area" id="file-upload-area">
+            <input type="file" id="import-file" accept=".csv,.xlsx" hidden />
+            <div class="file-upload-placeholder" id="file-upload-placeholder">
+              <span class="file-upload-icon"></span>
+              <span class="file-upload-text">Clica ou arrasta um ficheiro .csv ou .xlsx</span>
+              <span class="file-upload-hint">Colunas esperadas: date, open, high, low, close, volume</span>
+            </div>
+            <div class="file-upload-selected" id="file-upload-selected" hidden>
+              <span class="file-upload-filename" id="file-upload-filename"></span>
+              <button type="button" class="file-upload-remove" id="file-upload-remove" aria-label="Remover ficheiro">×</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="import-progress-wrap" id="import-progress-wrap" hidden>
+          <div class="import-progress-bar">
+            <div class="import-progress-fill" id="import-progress-fill"></div>
+          </div>
+          <span class="import-progress-text" id="import-progress-text">A importar...</span>
+        </div>
+
+        <div class="form-error" id="import-error" hidden></div>
+        <div class="form-success" id="import-success" hidden></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="import-cancel">Cancelar</button>
+        <button class="btn-primary" id="import-submit" disabled>
+          <span class="btn-label">Importar</span>
+          <span class="spinner" id="import-spinner" hidden></span>
+        </button>
       </div>
     </div>
   </div>
