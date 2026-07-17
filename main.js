@@ -1,9 +1,12 @@
 const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const { Worker } = require('worker_threads');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const Database = require('./src/db/database');
 const yahooClient = require('./src/data/yahooClient');
 const tickerLists = require('./src/data/tickerLists');
+const { parseFile } = require('./src/importer/historicalImporter');
 
 // Pre-calculate mapping from ticker to index ID for fast lookup
 const tickerToIndexMap = {};
@@ -623,6 +626,82 @@ app.whenReady().then(async () => {
       try {
         db.removeShortcut(payload.ticker);
         return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    // ═══════════════════════════════════════════════════════
+    //  IMPORT BULK — Import historical data from CSV/XLSX
+    // ═══════════════════════════════════════════════════════
+    ipcMain.handle('import:bulk', async (_event, payload) => {
+      if (!payload || !payload.ticker || (!payload.filePath && !payload.fileData)) {
+        return { ok: false, error: 'missing-ticker-or-file' };
+      }
+
+      let tmpPath = null;
+
+      try {
+        let filePath = payload.filePath;
+
+        // If fileData (binary array) was sent instead of a path, write to temp file
+        if (!filePath && payload.fileData && payload.fileName) {
+          const ext = path.extname(payload.fileName).toLowerCase();
+          tmpPath = path.join(os.tmpdir(), `bulk-import-${Date.now()}${ext}`);
+          fs.writeFileSync(tmpPath, Buffer.from(payload.fileData));
+          filePath = tmpPath;
+        }
+
+        if (!filePath) {
+          return { ok: false, error: 'missing-ticker-or-file' };
+        }
+
+        // 1. Parse the file
+        const parseResult = parseFile(filePath);
+        if (!parseResult.ok) {
+          return { ok: false, error: parseResult.error };
+        }
+
+        // 2. Upsert stock metadata (creates if not exists, updates if exists)
+        db.upsertStock({
+          ticker: payload.ticker.toUpperCase().trim(),
+          name: payload.name || payload.ticker,
+          country: payload.country || '',
+          indexName: payload.indexName || ''
+        });
+
+        // 3. Save historical candles
+        const result = db.saveHistoricalCandlesFromImport(
+          payload.ticker.toUpperCase().trim(),
+          parseResult.candles
+        );
+
+        return {
+          ok: true,
+          count: result.changes,
+          ticker: payload.ticker.toUpperCase().trim(),
+          message: `${result.changes} velas importadas para ${payload.ticker.toUpperCase().trim()}`
+        };
+      } catch (err) {
+        console.error('[import:bulk] Error:', err.message);
+        return { ok: false, error: err.message || String(err) };
+      } finally {
+        // Clean up temp file
+        if (tmpPath) {
+          try { fs.unlinkSync(tmpPath); } catch (_) { /* ignore */ }
+        }
+      }
+    });
+
+    // ═══════════════════════════════════════════════════════
+    //  HISTORY CHECK — Verify if ticker has imported data
+    // ═══════════════════════════════════════════════════════
+    ipcMain.handle('history:check', async (_event, payload) => {
+      const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
+      if (!ticker) return { ok: false, error: 'missing-ticker' };
+      try {
+        const hasData = db.hasHistoricalData(ticker);
+        return { ok: true, ticker, hasData };
       } catch (err) {
         return { ok: false, error: err.message || String(err) };
       }

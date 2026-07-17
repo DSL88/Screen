@@ -97,11 +97,12 @@
     if (btnClearAll) btnClearAll.disabled = watchlist.length === 0;
   }
 
+  // Track collapsed state per index group
+  const collapsedGroups = new Set();
+
   function renderWatchlist(highlightTicker) {
-    // Save watchlistEmpty before clearing
     const wlEmpty = document.getElementById('watchlist-empty');
 
-    // Clear everything inside the watchlist container
     watchlistEl.innerHTML = '';
 
     if (watchlist.length === 0) {
@@ -113,7 +114,6 @@
       return;
     }
 
-    // Group watchlist by indexId
     const groups = {};
     for (const t of watchlist) {
       const idxId = t.indexId || 'CUSTOM';
@@ -127,7 +127,6 @@
       groups[idxId].items.push(t);
     }
 
-    // Sort group keys: predefined indices first (alphabetically by name), CUSTOM at the bottom
     const sortedGroupKeys = Object.keys(groups).sort((a, b) => {
       if (a === 'CUSTOM') return 1;
       if (b === 'CUSTOM') return -1;
@@ -136,17 +135,29 @@
 
     for (const key of sortedGroupKeys) {
       const g = groups[key];
-      
-      // Create and append the Group Header
+      const isCollapsed = collapsedGroups.has(key);
+
       const header = document.createElement('div');
-      header.className = 'watchlist-group-header';
+      header.className = 'watchlist-group-header' + (isCollapsed ? ' is-collapsed' : '');
+      header.dataset.groupId = key;
       header.innerHTML = `
+        <span class="wl-group-chevron">${isCollapsed ? '▸' : '▾'}</span>
         <span class="wl-group-title">${escapeHtml(g.name)}</span>
         <span class="wl-group-count">${g.items.length}</span>
       `;
+      header.addEventListener('click', () => {
+        if (collapsedGroups.has(key)) {
+          collapsedGroups.delete(key);
+        } else {
+          collapsedGroups.add(key);
+        }
+        renderWatchlist();
+      });
       watchlistEl.appendChild(header);
 
-      // Create and append the Group Items
+      const itemsContainer = document.createElement('div');
+      itemsContainer.className = 'watchlist-group-items' + (isCollapsed ? ' is-hidden' : '');
+
       for (const t of g.items) {
         const item = document.createElement('div');
         item.className = 'watchlist-item';
@@ -157,11 +168,15 @@
         item.innerHTML = `
           <span class="wl-symbol">${escapeHtml(t.ticker)}</span>
           <span class="wl-name" title="${escapeHtml(t.name || '')}">${escapeHtml(t.name || '')}</span>
+          <span class="wl-history-badge" data-ticker="${escapeHtml(t.ticker)}" title="Dados históricos importados">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </span>
           <button class="wl-remove" title="Remover">×</button>
         `;
         item.querySelector('.wl-remove').addEventListener('click', () => removeTicker(t.ticker));
-        watchlistEl.appendChild(item);
+        itemsContainer.appendChild(item);
       }
+      watchlistEl.appendChild(itemsContainer);
     }
 
     updateWatchlistCount();
@@ -172,6 +187,21 @@
         newItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         setTimeout(() => newItem.classList.remove('just-added'), 1600);
       }
+    }
+
+    checkHistoryBadges();
+  }
+
+  async function checkHistoryBadges() {
+    const badges = document.querySelectorAll('.wl-history-badge');
+    for (const badge of badges) {
+      const ticker = badge.dataset.ticker;
+      try {
+        const res = await window.api.checkHistory(ticker);
+        if (res && res.ok && res.hasData) {
+          badge.classList.add('has-data');
+        }
+      } catch (_) { /* silently ignore */ }
     }
   }
 
@@ -1760,4 +1790,214 @@
       closeConfirmModal(true);
     }
   });
+
+  // ═══════════════════════════════════════════════════════════
+  //  MODAL IMPORTAR DADOS HISTÓRICOS
+  // ═══════════════════════════════════════════════════════════
+  const modalImport = document.getElementById('modal-import');
+  const modalImportClose = document.getElementById('modal-import-close');
+  const modalImportCancel = document.getElementById('import-cancel');
+  const modalImportSubmit = document.getElementById('import-submit');
+  const importTicker = document.getElementById('import-ticker');
+  const importName = document.getElementById('import-name');
+  const importCountry = document.getElementById('import-country');
+  const importIndex = document.getElementById('import-index');
+  const importFileInput = document.getElementById('import-file');
+  const fileUploadArea = document.getElementById('file-upload-area');
+  const fileUploadPlaceholder = document.getElementById('file-upload-placeholder');
+  const fileUploadSelected = document.getElementById('file-upload-selected');
+  const fileUploadFilename = document.getElementById('file-upload-filename');
+  const fileUploadRemove = document.getElementById('file-upload-remove');
+  const importProgressWrap = document.getElementById('import-progress-wrap');
+  const importProgressFill = document.getElementById('import-progress-fill');
+  const importProgressText = document.getElementById('import-progress-text');
+  const importError = document.getElementById('import-error');
+  const importSuccess = document.getElementById('import-success');
+  const importSpinner = document.getElementById('import-spinner');
+  const btnOpenImport = document.getElementById('btn-open-import');
+
+  let selectedFile = null;
+
+  function openImportModal() {
+    if (!modalImport) return;
+    modalImport.hidden = false;
+    resetImportForm();
+    setTimeout(() => importTicker?.focus(), 50);
+  }
+
+  function closeImportModal() {
+    if (!modalImport) return;
+    modalImport.hidden = true;
+    resetImportForm();
+  }
+
+  function resetImportForm() {
+    if (importTicker) importTicker.value = '';
+    if (importName) importName.value = '';
+    if (importCountry) importCountry.value = '';
+    if (importIndex) importIndex.value = '';
+    selectedFile = null;
+    if (importFileInput) importFileInput.value = '';
+    if (fileUploadPlaceholder) fileUploadPlaceholder.hidden = false;
+    if (fileUploadSelected) fileUploadSelected.hidden = true;
+    if (importProgressWrap) importProgressWrap.hidden = true;
+    if (importProgressFill) importProgressFill.style.width = '0%';
+    if (importProgressText) importProgressText.textContent = 'A importar...';
+    if (importError) { importError.textContent = ''; importError.hidden = true; }
+    if (importSuccess) { importSuccess.textContent = ''; importSuccess.hidden = true; }
+    if (modalImportSubmit) modalImportSubmit.disabled = true;
+    if (importSpinner) importSpinner.hidden = true;
+    if (modalImportSubmit) {
+      const label = modalImportSubmit.querySelector('.btn-label');
+      if (label) label.textContent = 'Importar';
+    }
+  }
+
+  function validateImportForm() {
+    const ticker = importTicker?.value.trim();
+    const hasFile = selectedFile !== null;
+    if (modalImportSubmit) {
+      modalImportSubmit.disabled = !ticker || !hasFile;
+    }
+  }
+
+  function handleFileSelect(file) {
+    if (!file) return;
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['csv', 'xlsx'].includes(ext)) {
+      if (importError) {
+        importError.textContent = 'Formato não suportado. Usa .csv ou .xlsx';
+        importError.hidden = false;
+      }
+      return;
+    }
+    selectedFile = file;
+    if (importError) importError.hidden = true;
+    if (fileUploadPlaceholder) fileUploadPlaceholder.hidden = true;
+    if (fileUploadSelected) fileUploadSelected.hidden = false;
+    if (fileUploadFilename) fileUploadFilename.textContent = file.name;
+    validateImportForm();
+  }
+
+  if (btnOpenImport) btnOpenImport.addEventListener('click', openImportModal);
+  if (modalImportClose) modalImportClose.addEventListener('click', closeImportModal);
+  if (modalImportCancel) modalImportCancel.addEventListener('click', closeImportModal);
+  if (modalImport) {
+    modalImport.addEventListener('click', (e) => {
+      if (e.target === modalImport) closeImportModal();
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modalImport && !modalImport.hidden) {
+      closeImportModal();
+    }
+  });
+
+  if (importTicker) {
+    importTicker.addEventListener('input', () => {
+      let v = importTicker.value.toUpperCase().replace(/[^A-Z0-9.\-^]/g, '');
+      if (v !== importTicker.value) importTicker.value = v;
+      validateImportForm();
+    });
+  }
+
+  if (fileUploadArea) {
+    fileUploadArea.addEventListener('click', () => importFileInput?.click());
+    fileUploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      fileUploadArea.classList.add('dragover');
+    });
+    fileUploadArea.addEventListener('dragleave', () => {
+      fileUploadArea.classList.remove('dragover');
+    });
+    fileUploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      fileUploadArea.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) {
+        handleFileSelect(e.dataTransfer.files[0]);
+      }
+    });
+  }
+
+  if (importFileInput) {
+    importFileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        handleFileSelect(e.target.files[0]);
+      }
+    });
+  }
+
+  if (fileUploadRemove) {
+    fileUploadRemove.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectedFile = null;
+      if (importFileInput) importFileInput.value = '';
+      if (fileUploadPlaceholder) fileUploadPlaceholder.hidden = false;
+      if (fileUploadSelected) fileUploadSelected.hidden = true;
+      validateImportForm();
+    });
+  }
+
+  async function submitImport() {
+    if (!selectedFile || !importTicker?.value.trim()) return;
+
+    if (importError) { importError.textContent = ''; importError.hidden = true; }
+    if (importSuccess) { importSuccess.textContent = ''; importSuccess.hidden = true; }
+    if (modalImportSubmit) modalImportSubmit.disabled = true;
+    if (importSpinner) importSpinner.hidden = false;
+    if (modalImportSubmit) {
+      const label = modalImportSubmit.querySelector('.btn-label');
+      if (label) label.textContent = 'A importar...';
+    }
+
+    if (importProgressWrap) importProgressWrap.hidden = false;
+    if (importProgressFill) importProgressFill.style.width = '30%';
+    if (importProgressText) importProgressText.textContent = 'A ler ficheiro...';
+
+    try {
+      const arrayBuffer = await selectedFile.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+
+      if (importProgressFill) importProgressFill.style.width = '60%';
+      if (importProgressText) importProgressText.textContent = 'A processar dados...';
+
+      const res = await window.api.importBulk({
+        ticker: importTicker.value.trim().toUpperCase(),
+        name: importName?.value.trim() || importTicker.value.trim(),
+        country: importCountry?.value || '',
+        indexName: importIndex?.value || '',
+        fileData: Array.from(uint8Array),
+        fileName: selectedFile.name
+      });
+
+      if (importProgressFill) importProgressFill.style.width = '100%';
+
+      if (!res || !res.ok) {
+        throw new Error(res ? res.error : 'Erro desconhecido');
+      }
+
+      if (importProgressText) importProgressText.textContent = 'Concluído!';
+      if (importSuccess) {
+        importSuccess.textContent = res.message || `${res.count} velas importadas com sucesso.`;
+        importSuccess.hidden = false;
+      }
+
+      setTimeout(() => closeImportModal(), 2500);
+
+    } catch (err) {
+      if (importProgressWrap) importProgressWrap.hidden = true;
+      if (importError) {
+        importError.textContent = 'Erro na importação: ' + (err.message || String(err));
+        importError.hidden = false;
+      }
+      if (modalImportSubmit) modalImportSubmit.disabled = false;
+      if (importSpinner) importSpinner.hidden = true;
+      if (modalImportSubmit) {
+        const label = modalImportSubmit.querySelector('.btn-label');
+        if (label) label.textContent = 'Importar';
+      }
+    }
+  }
+
+  if (modalImportSubmit) modalImportSubmit.addEventListener('click', submitImport);
 })();

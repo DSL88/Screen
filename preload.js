@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('api', {
   addShortcut: (s) => ipcRenderer.invoke('shortcut:add', s),
   listShortcuts: () => ipcRenderer.invoke('shortcut:list'),
   removeShortcut: (ticker) => ipcRenderer.invoke('shortcut:remove', { ticker }),
+  importBulk: (data) => ipcRenderer.invoke('import:bulk', data),
+  checkHistory: (ticker) => ipcRenderer.invoke('history:check', { ticker }),
   on: (channel, callback) => {
     if (!ALLOWED_EVENTS.has(channel)) {
       throw new Error(`Channel "${channel}" is not allowed`);
