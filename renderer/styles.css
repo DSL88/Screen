@@ -1787,10 +1787,6 @@ tr.removing .portfolio-row-remove { opacity: 0.4; }
   border: 1px solid var(--border);
 }
 
-.portfolio-closed-section {
-  padding-bottom: 24px;
-}
-
 /* ── Portfolio Alerts ── */
 .portfolio-table th.col-alerta,
 .portfolio-table td.col-alerta {

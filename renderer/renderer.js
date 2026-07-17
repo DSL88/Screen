@@ -1284,8 +1284,6 @@
   //  PORTFOLIO / MONITORIZAÇÃO
   // ═══════════════════════════════════════════════════════════
   const portfolioBody = document.getElementById('portfolio-body');
-  const portfolioClosedBody = document.getElementById('portfolio-closed-body');
-  const portfolioClosedSection = document.getElementById('portfolio-closed-section');
   const portfolioStatus = document.getElementById('portfolio-status');
   const btnSyncTrades = document.getElementById('btn-sync-trades');
   const btnReanalisar = document.getElementById('btn-reanalisar');
@@ -1391,25 +1389,6 @@
     return tr;
   }
 
-  function renderClosedPortfolioRow(trade) {
-    const tr = document.createElement('tr');
-    const dirClass = trade.direcao === 'COMPRA' ? 'dir-COMPRA' : 'dir-VENDA';
-    const resultColor = (trade.resultado_pct || 0) >= 0 ? 'var(--bull)' : 'var(--bear)';
-    const resultText = trade.resultado_pct != null ? (trade.resultado_pct * 100).toFixed(2) + '%' : '—';
-    const motivoLabel = trade.motivo_fecho === 'stop_loss' ? 'Stop Loss' : trade.motivo_fecho === 'take_profit' ? 'Take Profit' : (trade.motivo_fecho || 'manual');
-    tr.innerHTML = `
-      <td class="col-ticker ticker">${escapeHtml(trade.ticker)}</td>
-      <td class="col-name name">${escapeHtml(trade.nome || '')}</td>
-      <td class="col-dir"><span class="dir-badge ${dirClass}">${escapeHtml(trade.direcao)}</span></td>
-      <td class="col-num">${trade.preco_entrada != null ? trade.preco_entrada.toFixed(2) : '—'}</td>
-      <td class="col-num">${trade.preco_fecho != null ? trade.preco_fecho.toFixed(2) : '—'}</td>
-      <td class="col-num" style="color: ${resultColor}; font-weight: 600;">${resultText}</td>
-      <td class="col-motivo"><span class="dir-badge" style="background: var(--surface-2); border-color: var(--border-strong); color: var(--text-dim); padding: 2px 8px; font-size: 10px;">${escapeHtml(motivoLabel)}</span></td>
-      <td class="col-data" style="font-family: var(--mono); font-size: 11px; color: var(--text-dim);">${escapeHtml(trade.fechado_em || trade.data_entrada || '')}</td>
-    `;
-    return tr;
-  }
-
   function renderPortfolioTable() {
     portfolioBody.innerHTML = '';
     if (lastActiveTrades.length === 0) {
@@ -1433,17 +1412,8 @@
       }
 
       lastActiveTrades = res.active || [];
-      const closed = res.closed || [];
 
       renderPortfolioTable();
-
-      portfolioClosedBody.innerHTML = '';
-      if (closed.length > 0) {
-        portfolioClosedSection.hidden = false;
-        closed.forEach(t => portfolioClosedBody.appendChild(renderClosedPortfolioRow(t)));
-      } else {
-        portfolioClosedSection.hidden = true;
-      }
 
       const hasStates = Object.keys(lastStatesByTicker).length > 0;
       portfolioStatus.textContent = lastActiveTrades.length > 0
