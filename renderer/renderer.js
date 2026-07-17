@@ -1978,7 +1978,8 @@
 
       if (importProgressText) importProgressText.textContent = 'Concluído!';
       if (importSuccess) {
-        importSuccess.textContent = res.message || `${res.count} velas importadas com sucesso.`;
+        const fmt = d => { const p = d.split('-'); return `${p[2]}/${p[1]}/${p[0]}`; };
+        importSuccess.innerHTML = `✓ <strong>${escapeHtml(res.ticker)}</strong> — ${res.count} velas importadas<br><span style="opacity:0.7;font-size:11px;">Período: ${fmt(res.firstDate)} → ${fmt(res.lastDate)}</span>`;
         importSuccess.hidden = false;
       }
 
@@ -2000,4 +2001,34 @@
   }
 
   if (modalImportSubmit) modalImportSubmit.addEventListener('click', submitImport);
+
+  window.api.on('import-success', (s) => {
+    if (importProgressFill) importProgressFill.style.width = '100%';
+    if (importProgressText) importProgressText.textContent = 'Concluído!';
+    if (importSuccess) {
+      const fmt = d => { const p = d.split('-'); return `${p[2]}/${p[1]}/${p[0]}`; };
+      importSuccess.innerHTML = `✓ <strong>${escapeHtml(s.ticker)}</strong> — ${s.totalCandles} velas importadas<br><span style="opacity:0.7;font-size:11px;">Período: ${fmt(s.startDate)} → ${fmt(s.endDate)}</span>`;
+      importSuccess.hidden = false;
+    }
+    if (modalImportSubmit) {
+      modalImportSubmit.disabled = false;
+      const label = modalImportSubmit.querySelector('.btn-label');
+      if (label) label.textContent = 'Importar';
+    }
+    if (importSpinner) importSpinner.hidden = true;
+    setTimeout(() => closeImportModal(), 3000);
+  });
+
+  window.api.on('scanner-sync-status', (s) => {
+    const statusLine = document.getElementById('status-line');
+    if (!statusLine) return;
+    const labels = {
+      'syncing': `A sincronizar ${s.ticker}...`,
+      'up-to-date': s.warning
+        ? `${s.ticker} — API indisponível, a usar dados locais`
+        : `${s.ticker} — dados atualizados`,
+      'downloaded-new': `${s.ticker} — +${s.newDataCount} velas novas`
+    };
+    statusLine.textContent = labels[s.status] || s.status;
+  });
 })();

@@ -4,7 +4,9 @@ const ALLOWED_EVENTS = new Set([
   'scan:progress',
   'scan:row',
   'scan:done',
-  'scan:error'
+  'scan:error',
+  'import-success',
+  'scanner-sync-status'
 ]);
 
 contextBridge.exposeInMainWorld('api', {

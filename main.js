@@ -84,6 +84,10 @@ function getScannerWorker() {
         mainWindow.webContents.send('scan:done', msg.payload);
         break;
 
+      case 'sync-status':
+        mainWindow.webContents.send('scanner-sync-status', msg.payload);
+        break;
+
       case 'cacheOHLCV':
         // Cache de candles no DB a partir do processo principal
         try {
@@ -676,10 +680,24 @@ app.whenReady().then(async () => {
           parseResult.candles
         );
 
+        const firstDate = parseResult.candles[0].date;
+        const lastDate = parseResult.candles[parseResult.candles.length - 1].date;
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('import-success', {
+            ticker: payload.ticker.toUpperCase().trim(),
+            totalCandles: result.changes,
+            startDate: firstDate,
+            endDate: lastDate
+          });
+        }
+
         return {
           ok: true,
           count: result.changes,
           ticker: payload.ticker.toUpperCase().trim(),
+          firstDate,
+          lastDate,
           message: `${result.changes} velas importadas para ${payload.ticker.toUpperCase().trim()}`
         };
       } catch (err) {
