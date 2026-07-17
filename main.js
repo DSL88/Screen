@@ -683,12 +683,15 @@ app.whenReady().then(async () => {
         const firstDate = parseResult.candles[0].date;
         const lastDate = parseResult.candles[parseResult.candles.length - 1].date;
 
+        const newSummary = db.getHistoricalSummary(payload.ticker.toUpperCase().trim());
+
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('import-success', {
             ticker: payload.ticker.toUpperCase().trim(),
             totalCandles: result.changes,
             startDate: firstDate,
-            endDate: lastDate
+            endDate: lastDate,
+            summary: newSummary
           });
         }
 
@@ -698,6 +701,7 @@ app.whenReady().then(async () => {
           ticker: payload.ticker.toUpperCase().trim(),
           firstDate,
           lastDate,
+          summary: newSummary,
           message: `${result.changes} velas importadas para ${payload.ticker.toUpperCase().trim()}`
         };
       } catch (err) {
@@ -720,6 +724,78 @@ app.whenReady().then(async () => {
       try {
         const hasData = db.hasHistoricalData(ticker);
         return { ok: true, ticker, hasData };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('ticker:getDetail', async (_event, payload) => {
+      const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
+      if (!ticker) return { ok: false, error: 'missing-ticker' };
+      try {
+        const stock = db.getStockByTicker(ticker);
+        const summary = db.getHistoricalSummary(ticker);
+        const customTicker = db.db.prepare(
+          'SELECT ticker, name, exchange, type FROM custom_tickers WHERE ticker = ?'
+        ).get(ticker);
+        return {
+          ok: true,
+          ticker,
+          stock: stock || null,
+          summary,
+          custom: customTicker || null
+        };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('ticker:syncYahoo', async (_event, payload) => {
+      const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
+      if (!ticker) return { ok: false, error: 'missing-ticker' };
+      try {
+        const lastDate = db.getLastStoredDate(ticker);
+        const customPeriod1 = lastDate ? new Date(lastDate + 'T00:00:00Z') : null;
+
+        let candles;
+        try {
+          candles = await yahooClient.fetchWithRetry(ticker, '1d', 3, customPeriod1);
+        } catch (fetchErr) {
+          if (lastDate) {
+            return {
+              ok: false,
+              error: fetchErr.message || String(fetchErr),
+              hasLocalData: true,
+              ticker,
+              warning: 'Falha na sincronização online. A usar histórico local desatualizado.'
+            };
+          }
+          throw fetchErr;
+        }
+
+        if (!candles || candles.length === 0) {
+          return { ok: true, ticker, newCandles: 0, message: 'Dados já atualizados.' };
+        }
+
+        const result = db.saveHistoricalCandlesFromImport(ticker, candles);
+        db.cacheOHLCV(ticker, candles);
+
+        const newSummary = db.getHistoricalSummary(ticker);
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('ticker:synced', {
+            ticker,
+            newCandles: result.changes,
+            summary: newSummary
+          });
+        }
+
+        return {
+          ok: true,
+          ticker,
+          newCandles: result.changes,
+          summary: newSummary
+        };
       } catch (err) {
         return { ok: false, error: err.message || String(err) };
       }
