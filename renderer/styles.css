@@ -2841,17 +2841,153 @@ select.param-input option {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   IMPORT MODAL
+   ASSET DETAIL MODAL
    ═══════════════════════════════════════════════════════════ */
 
-.modal-import-dialog {
-  max-width: 560px;
+.modal-asset-detail {
+  max-width: 580px;
+}
+
+.asset-detail-ticker {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--accent);
+  letter-spacing: 0.01em;
+}
+
+.asset-detail-name {
+  font-size: 13px;
+  color: var(--text-dim);
+  font-weight: 400;
+  margin-left: 8px;
+}
+
+.asset-detail-meta {
+  display: flex;
+  gap: 12px;
+}
+
+.asset-detail-meta-row {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.asset-detail-meta-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-mute);
+}
+
+.asset-detail-meta-value {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.asset-detail-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-mute);
+  margin-bottom: 10px;
+}
+
+.asset-detail-history {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.asset-detail-history-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+
+.asset-detail-history-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.asset-detail-history-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-mute);
+}
+
+.asset-detail-history-value {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-feature-settings: "tnum";
+}
+
+.asset-detail-history-candles {
+  color: var(--accent);
+}
+
+.asset-detail-actions-section {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.asset-detail-sync-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.asset-detail-sync-status {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.asset-detail-sync-status.is-success {
+  background: var(--bull-soft);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  color: var(--bull);
+}
+
+.asset-detail-sync-status.is-error {
+  background: var(--warn-soft);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  color: var(--warn);
+}
+
+.asset-detail-import-section {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.asset-detail-import-progress {
+  margin-top: 12px;
 }
 
 .file-upload-area {
   border: 2px dashed var(--border);
   border-radius: var(--radius);
-  padding: 24px;
+  padding: 20px;
   text-align: center;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -2873,8 +3009,8 @@ select.param-input option {
 
 .file-upload-icon {
   display: block;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border: 2px solid var(--border);
   border-radius: 8px;
   position: relative;
@@ -2888,19 +3024,19 @@ select.param-input option {
   left: 50%;
   transform: translate(-50%, -50%);
   width: 2px;
-  height: 16px;
+  height: 14px;
   background: var(--text-dim);
   box-shadow: -4px 4px 0 var(--text-dim), 4px 4px 0 var(--text-dim);
 }
 
 .file-upload-text {
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
 }
 
 .file-upload-hint {
-  font-size: 12px;
+  font-size: 11px;
   font-family: var(--mono);
   color: var(--text-dim);
 }
@@ -2937,10 +3073,6 @@ select.param-input option {
   opacity: 0.7;
 }
 
-.import-progress-wrap {
-  margin-top: 16px;
-}
-
 .import-progress-bar {
   height: 4px;
   background: var(--surface-2);
@@ -2973,4 +3105,15 @@ select.param-input option {
   color: var(--bull);
   font-size: 13px;
   font-weight: 500;
+}
+
+.form-success[hidden] { display: none; }
+
+.watchlist-item.is-clickable {
+  cursor: pointer;
+}
+
+.watchlist-item.is-clickable:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-soft);
 }

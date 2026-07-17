@@ -160,7 +160,7 @@
 
       for (const t of g.items) {
         const item = document.createElement('div');
-        item.className = 'watchlist-item';
+        item.className = 'watchlist-item is-clickable';
         item.dataset.ticker = t.ticker;
         if (highlightTicker && t.ticker === highlightTicker) {
           item.classList.add('just-added');
@@ -173,7 +173,11 @@
           </span>
           <button class="wl-remove" title="Remover">×</button>
         `;
-        item.querySelector('.wl-remove').addEventListener('click', () => removeTicker(t.ticker));
+        item.querySelector('.wl-remove').addEventListener('click', (e) => {
+          e.stopPropagation();
+          removeTicker(t.ticker);
+        });
+        item.addEventListener('click', () => openAssetDetailModal(t.ticker));
         itemsContainer.appendChild(item);
       }
       watchlistEl.appendChild(itemsContainer);
@@ -1792,231 +1796,293 @@
   });
 
   // ═══════════════════════════════════════════════════════════
-  //  MODAL IMPORTAR DADOS HISTÓRICOS
+  //  ASSET DETAIL MODAL (Contextual per-ticker)
   // ═══════════════════════════════════════════════════════════
-  const modalImport = document.getElementById('modal-import');
-  const modalImportClose = document.getElementById('modal-import-close');
-  const modalImportCancel = document.getElementById('import-cancel');
-  const modalImportSubmit = document.getElementById('import-submit');
-  const importTicker = document.getElementById('import-ticker');
-  const importName = document.getElementById('import-name');
-  const importCountry = document.getElementById('import-country');
-  const importIndex = document.getElementById('import-index');
-  const importFileInput = document.getElementById('import-file');
-  const fileUploadArea = document.getElementById('file-upload-area');
-  const fileUploadPlaceholder = document.getElementById('file-upload-placeholder');
-  const fileUploadSelected = document.getElementById('file-upload-selected');
-  const fileUploadFilename = document.getElementById('file-upload-filename');
-  const fileUploadRemove = document.getElementById('file-upload-remove');
-  const importProgressWrap = document.getElementById('import-progress-wrap');
-  const importProgressFill = document.getElementById('import-progress-fill');
-  const importProgressText = document.getElementById('import-progress-text');
-  const importError = document.getElementById('import-error');
-  const importSuccess = document.getElementById('import-success');
-  const importSpinner = document.getElementById('import-spinner');
-  const btnOpenImport = document.getElementById('btn-open-import');
+  const modalAssetDetail = document.getElementById('modal-asset-detail');
+  const assetDetailClose = document.getElementById('asset-detail-close');
+  const assetDetailTickerEl = document.getElementById('asset-detail-ticker');
+  const assetDetailNameEl = document.getElementById('asset-detail-name');
+  const assetDetailCountryEl = document.getElementById('asset-detail-country');
+  const assetDetailIndexEl = document.getElementById('asset-detail-index');
+  const assetDetailFirstDate = document.getElementById('asset-detail-first-date');
+  const assetDetailLastDate = document.getElementById('asset-detail-last-date');
+  const assetDetailTotalCandles = document.getElementById('asset-detail-total-candles');
+  const assetDetailSyncBtn = document.getElementById('asset-detail-sync-yahoo');
+  const assetDetailSyncSpinner = document.getElementById('asset-detail-sync-spinner');
+  const assetDetailSyncStatus = document.getElementById('asset-detail-sync-status');
+  const assetFileUploadArea = document.getElementById('asset-file-upload-area');
+  const assetFileInput = document.getElementById('asset-import-file');
+  const assetFilePlaceholder = document.getElementById('asset-file-upload-placeholder');
+  const assetFileSelected = document.getElementById('asset-file-upload-selected');
+  const assetFileFilename = document.getElementById('asset-file-upload-filename');
+  const assetFileRemove = document.getElementById('asset-file-upload-remove');
+  const assetImportProgressWrap = document.getElementById('asset-import-progress-wrap');
+  const assetImportProgressFill = document.getElementById('asset-import-progress-fill');
+  const assetImportProgressText = document.getElementById('asset-import-progress-text');
+  const assetImportError = document.getElementById('asset-import-error');
+  const assetImportSuccess = document.getElementById('asset-import-success');
 
-  let selectedFile = null;
+  let currentAssetTicker = null;
+  let assetSelectedFile = null;
 
-  function openImportModal() {
-    if (!modalImport) return;
-    modalImport.hidden = false;
-    resetImportForm();
-    setTimeout(() => importTicker?.focus(), 50);
+  function fmtDate(d) {
+    if (!d) return '—';
+    const p = d.split('-');
+    return `${p[2]}/${p[1]}/${p[0]}`;
   }
 
-  function closeImportModal() {
-    if (!modalImport) return;
-    modalImport.hidden = true;
-    resetImportForm();
-  }
-
-  function resetImportForm() {
-    if (importTicker) importTicker.value = '';
-    if (importName) importName.value = '';
-    if (importCountry) importCountry.value = '';
-    if (importIndex) importIndex.value = '';
-    selectedFile = null;
-    if (importFileInput) importFileInput.value = '';
-    if (fileUploadPlaceholder) fileUploadPlaceholder.hidden = false;
-    if (fileUploadSelected) fileUploadSelected.hidden = true;
-    if (importProgressWrap) importProgressWrap.hidden = true;
-    if (importProgressFill) importProgressFill.style.width = '0%';
-    if (importProgressText) importProgressText.textContent = 'A importar...';
-    if (importError) { importError.textContent = ''; importError.hidden = true; }
-    if (importSuccess) { importSuccess.textContent = ''; importSuccess.hidden = true; }
-    if (modalImportSubmit) modalImportSubmit.disabled = true;
-    if (importSpinner) importSpinner.hidden = true;
-    if (modalImportSubmit) {
-      const label = modalImportSubmit.querySelector('.btn-label');
-      if (label) label.textContent = 'Importar';
-    }
-  }
-
-  function validateImportForm() {
-    const ticker = importTicker?.value.trim();
-    const hasFile = selectedFile !== null;
-    if (modalImportSubmit) {
-      modalImportSubmit.disabled = !ticker || !hasFile;
-    }
-  }
-
-  function handleFileSelect(file) {
-    if (!file) return;
-    const ext = file.name.split('.').pop().toLowerCase();
-    if (!['csv', 'xlsx'].includes(ext)) {
-      if (importError) {
-        importError.textContent = 'Formato não suportado. Usa .csv ou .xlsx';
-        importError.hidden = false;
-      }
+  function updateAssetHistoryUI(summary) {
+    if (!summary || !summary.hasData) {
+      assetDetailFirstDate.textContent = '—';
+      assetDetailLastDate.textContent = '—';
+      assetDetailTotalCandles.textContent = '0';
       return;
     }
-    selectedFile = file;
-    if (importError) importError.hidden = true;
-    if (fileUploadPlaceholder) fileUploadPlaceholder.hidden = true;
-    if (fileUploadSelected) fileUploadSelected.hidden = false;
-    if (fileUploadFilename) fileUploadFilename.textContent = file.name;
-    validateImportForm();
+    assetDetailFirstDate.textContent = fmtDate(summary.firstDate);
+    assetDetailLastDate.textContent = fmtDate(summary.lastDate);
+    assetDetailTotalCandles.textContent = summary.totalCandles.toLocaleString('pt-PT');
   }
 
-  if (btnOpenImport) btnOpenImport.addEventListener('click', openImportModal);
-  if (modalImportClose) modalImportClose.addEventListener('click', closeImportModal);
-  if (modalImportCancel) modalImportCancel.addEventListener('click', closeImportModal);
-  if (modalImport) {
-    modalImport.addEventListener('click', (e) => {
-      if (e.target === modalImport) closeImportModal();
+  async function openAssetDetailModal(ticker) {
+    if (!modalAssetDetail) return;
+    currentAssetTicker = ticker;
+    assetSelectedFile = null;
+
+    assetDetailTickerEl.textContent = ticker;
+    assetDetailNameEl.textContent = '';
+    assetDetailCountryEl.textContent = '—';
+    assetDetailIndexEl.textContent = '—';
+    assetDetailFirstDate.textContent = '—';
+    assetDetailLastDate.textContent = '—';
+    assetDetailTotalCandles.textContent = '—';
+
+    if (assetDetailSyncStatus) {
+      assetDetailSyncStatus.hidden = true;
+      assetDetailSyncStatus.className = 'asset-detail-sync-status';
+    }
+    if (assetImportError) { assetImportError.textContent = ''; assetImportError.hidden = true; }
+    if (assetImportSuccess) { assetImportSuccess.textContent = ''; assetImportSuccess.hidden = true; }
+    if (assetImportProgressWrap) assetImportProgressWrap.hidden = true;
+    if (assetFileInput) assetFileInput.value = '';
+    if (assetFilePlaceholder) assetFilePlaceholder.hidden = false;
+    if (assetFileSelected) assetFileSelected.hidden = true;
+    if (assetDetailSyncBtn) assetDetailSyncBtn.disabled = false;
+    if (assetDetailSyncSpinner) assetDetailSyncSpinner.hidden = true;
+    if (assetDetailSyncBtn) {
+      const label = assetDetailSyncBtn.querySelector('.btn-label');
+      if (label) label.textContent = 'Sincronizar via Yahoo Finance';
+    }
+
+    modalAssetDetail.hidden = false;
+
+    try {
+      const res = await window.api.getTickerDetail(ticker);
+      if (!res || !res.ok) return;
+      if (res.stock) {
+        assetDetailNameEl.textContent = res.stock.name || '';
+        assetDetailCountryEl.textContent = res.stock.country || '—';
+        assetDetailIndexEl.textContent = res.stock.index_name || '—';
+      } else if (res.custom) {
+        assetDetailNameEl.textContent = res.custom.name || '';
+        assetDetailCountryEl.textContent = '—';
+        assetDetailIndexEl.textContent = '—';
+      }
+      updateAssetHistoryUI(res.summary);
+    } catch (_) { /* silently ignore */ }
+  }
+
+  function closeAssetDetailModal() {
+    if (!modalAssetDetail) return;
+    modalAssetDetail.hidden = true;
+    currentAssetTicker = null;
+    assetSelectedFile = null;
+  }
+
+  if (assetDetailClose) assetDetailClose.addEventListener('click', closeAssetDetailModal);
+  if (modalAssetDetail) {
+    modalAssetDetail.addEventListener('click', (e) => {
+      if (e.target === modalAssetDetail) closeAssetDetailModal();
     });
   }
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modalImport && !modalImport.hidden) {
-      closeImportModal();
+    if (e.key === 'Escape' && modalAssetDetail && !modalAssetDetail.hidden) {
+      closeAssetDetailModal();
     }
   });
 
-  if (importTicker) {
-    importTicker.addEventListener('input', () => {
-      let v = importTicker.value.toUpperCase().replace(/[^A-Z0-9.\-^]/g, '');
-      if (v !== importTicker.value) importTicker.value = v;
-      validateImportForm();
-    });
-  }
-
-  if (fileUploadArea) {
-    fileUploadArea.addEventListener('click', () => importFileInput?.click());
-    fileUploadArea.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      fileUploadArea.classList.add('dragover');
-    });
-    fileUploadArea.addEventListener('dragleave', () => {
-      fileUploadArea.classList.remove('dragover');
-    });
-    fileUploadArea.addEventListener('drop', (e) => {
-      e.preventDefault();
-      fileUploadArea.classList.remove('dragover');
-      if (e.dataTransfer.files.length > 0) {
-        handleFileSelect(e.dataTransfer.files[0]);
-      }
-    });
-  }
-
-  if (importFileInput) {
-    importFileInput.addEventListener('change', (e) => {
-      if (e.target.files.length > 0) {
-        handleFileSelect(e.target.files[0]);
-      }
-    });
-  }
-
-  if (fileUploadRemove) {
-    fileUploadRemove.addEventListener('click', (e) => {
-      e.stopPropagation();
-      selectedFile = null;
-      if (importFileInput) importFileInput.value = '';
-      if (fileUploadPlaceholder) fileUploadPlaceholder.hidden = false;
-      if (fileUploadSelected) fileUploadSelected.hidden = true;
-      validateImportForm();
-    });
-  }
-
-  async function submitImport() {
-    if (!selectedFile || !importTicker?.value.trim()) return;
-
-    if (importError) { importError.textContent = ''; importError.hidden = true; }
-    if (importSuccess) { importSuccess.textContent = ''; importSuccess.hidden = true; }
-    if (modalImportSubmit) modalImportSubmit.disabled = true;
-    if (importSpinner) importSpinner.hidden = false;
-    if (modalImportSubmit) {
-      const label = modalImportSubmit.querySelector('.btn-label');
-      if (label) label.textContent = 'A importar...';
+  async function syncAssetYahoo() {
+    if (!currentAssetTicker || !assetDetailSyncBtn) return;
+    assetDetailSyncBtn.disabled = true;
+    if (assetDetailSyncSpinner) assetDetailSyncSpinner.hidden = false;
+    if (assetDetailSyncBtn) {
+      const label = assetDetailSyncBtn.querySelector('.btn-label');
+      if (label) label.textContent = 'A sincronizar...';
+    }
+    if (assetDetailSyncStatus) {
+      assetDetailSyncStatus.hidden = true;
+      assetDetailSyncStatus.className = 'asset-detail-sync-status';
     }
 
-    if (importProgressWrap) importProgressWrap.hidden = false;
-    if (importProgressFill) importProgressFill.style.width = '30%';
-    if (importProgressText) importProgressText.textContent = 'A ler ficheiro...';
+    try {
+      const res = await window.api.syncTickerYahoo(currentAssetTicker);
+      if (!res || !res.ok) {
+        if (assetDetailSyncStatus) {
+          assetDetailSyncStatus.textContent = res && res.warning
+            ? res.warning
+            : ('Erro: ' + (res && res.error ? res.error : 'desconhecido'));
+          assetDetailSyncStatus.className = 'asset-detail-sync-status' + (res && res.hasLocalData ? ' is-error' : ' is-error');
+          assetDetailSyncStatus.hidden = false;
+        }
+        if (res && res.summary) updateAssetHistoryUI(res.summary);
+        return;
+      }
+
+      if (assetDetailSyncStatus) {
+        const msg = res.newCandles > 0
+          ? `Sincronizado! +${res.newCandles} velas novas.`
+          : 'Dados já atualizados.';
+        assetDetailSyncStatus.textContent = msg;
+        assetDetailSyncStatus.className = 'asset-detail-sync-status is-success';
+        assetDetailSyncStatus.hidden = false;
+      }
+      if (res.summary) updateAssetHistoryUI(res.summary);
+      checkHistoryBadges();
+    } catch (err) {
+      if (assetDetailSyncStatus) {
+        assetDetailSyncStatus.textContent = 'Erro: ' + (err.message || String(err));
+        assetDetailSyncStatus.className = 'asset-detail-sync-status is-error';
+        assetDetailSyncStatus.hidden = false;
+      }
+    } finally {
+      assetDetailSyncBtn.disabled = false;
+      if (assetDetailSyncSpinner) assetDetailSyncSpinner.hidden = true;
+      if (assetDetailSyncBtn) {
+        const label = assetDetailSyncBtn.querySelector('.btn-label');
+        if (label) label.textContent = 'Sincronizar via Yahoo Finance';
+      }
+    }
+  }
+
+  if (assetDetailSyncBtn) assetDetailSyncBtn.addEventListener('click', syncAssetYahoo);
+
+  function handleAssetFileSelect(file) {
+    if (!file) return;
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['csv', 'xlsx'].includes(ext)) {
+      if (assetImportError) {
+        assetImportError.textContent = 'Formato não suportado. Usa .csv ou .xlsx';
+        assetImportError.hidden = false;
+      }
+      return;
+    }
+    assetSelectedFile = file;
+    if (assetImportError) assetImportError.hidden = true;
+    if (assetImportSuccess) assetImportSuccess.hidden = true;
+    if (assetFilePlaceholder) assetFilePlaceholder.hidden = true;
+    if (assetFileSelected) assetFileSelected.hidden = false;
+    if (assetFileFilename) assetFileFilename.textContent = file.name;
+    submitAssetImport();
+  }
+
+  async function submitAssetImport() {
+    if (!assetSelectedFile || !currentAssetTicker) return;
+
+    if (assetImportError) { assetImportError.textContent = ''; assetImportError.hidden = true; }
+    if (assetImportSuccess) { assetImportSuccess.textContent = ''; assetImportSuccess.hidden = true; }
+    if (assetImportProgressWrap) assetImportProgressWrap.hidden = false;
+    if (assetImportProgressFill) assetImportProgressFill.style.width = '30%';
+    if (assetImportProgressText) assetImportProgressText.textContent = 'A ler ficheiro...';
 
     try {
-      const arrayBuffer = await selectedFile.arrayBuffer();
+      const arrayBuffer = await assetSelectedFile.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
 
-      if (importProgressFill) importProgressFill.style.width = '60%';
-      if (importProgressText) importProgressText.textContent = 'A processar dados...';
+      if (assetImportProgressFill) assetImportProgressFill.style.width = '60%';
+      if (assetImportProgressText) assetImportProgressText.textContent = 'A processar dados...';
 
       const res = await window.api.importBulk({
-        ticker: importTicker.value.trim().toUpperCase(),
-        name: importName?.value.trim() || importTicker.value.trim(),
-        country: importCountry?.value || '',
-        indexName: importIndex?.value || '',
+        ticker: currentAssetTicker,
+        name: assetDetailNameEl.textContent || currentAssetTicker,
+        country: assetDetailCountryEl.textContent === '—' ? '' : assetDetailCountryEl.textContent,
+        indexName: assetDetailIndexEl.textContent === '—' ? '' : assetDetailIndexEl.textContent,
         fileData: Array.from(uint8Array),
-        fileName: selectedFile.name
+        fileName: assetSelectedFile.name
       });
 
-      if (importProgressFill) importProgressFill.style.width = '100%';
+      if (assetImportProgressFill) assetImportProgressFill.style.width = '100%';
 
       if (!res || !res.ok) {
         throw new Error(res ? res.error : 'Erro desconhecido');
       }
 
-      if (importProgressText) importProgressText.textContent = 'Concluído!';
-      if (importSuccess) {
-        const fmt = d => { const p = d.split('-'); return `${p[2]}/${p[1]}/${p[0]}`; };
-        importSuccess.innerHTML = `✓ <strong>${escapeHtml(res.ticker)}</strong> — ${res.count} velas importadas<br><span style="opacity:0.7;font-size:11px;">Período: ${fmt(res.firstDate)} → ${fmt(res.lastDate)}</span>`;
-        importSuccess.hidden = false;
+      if (assetImportProgressText) assetImportProgressText.textContent = 'Concluído!';
+      if (res.summary) updateAssetHistoryUI(res.summary);
+      if (assetImportSuccess) {
+        assetImportSuccess.innerHTML = `✓ ${res.count} velas importadas para <strong>${escapeHtml(res.ticker)}</strong>`;
+        assetImportSuccess.hidden = false;
       }
 
-      setTimeout(() => closeImportModal(), 2500);
+      assetSelectedFile = null;
+      if (assetFileInput) assetFileInput.value = '';
+      if (assetFilePlaceholder) assetFilePlaceholder.hidden = false;
+      if (assetFileSelected) assetFileSelected.hidden = true;
 
+      checkHistoryBadges();
     } catch (err) {
-      if (importProgressWrap) importProgressWrap.hidden = true;
-      if (importError) {
-        importError.textContent = 'Erro na importação: ' + (err.message || String(err));
-        importError.hidden = false;
-      }
-      if (modalImportSubmit) modalImportSubmit.disabled = false;
-      if (importSpinner) importSpinner.hidden = true;
-      if (modalImportSubmit) {
-        const label = modalImportSubmit.querySelector('.btn-label');
-        if (label) label.textContent = 'Importar';
+      if (assetImportProgressWrap) assetImportProgressWrap.hidden = true;
+      if (assetImportError) {
+        assetImportError.textContent = 'Erro na importação: ' + (err.message || String(err));
+        assetImportError.hidden = false;
       }
     }
   }
 
-  if (modalImportSubmit) modalImportSubmit.addEventListener('click', submitImport);
+  if (assetFileUploadArea) {
+    assetFileUploadArea.addEventListener('click', () => assetFileInput?.click());
+    assetFileUploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      assetFileUploadArea.classList.add('dragover');
+    });
+    assetFileUploadArea.addEventListener('dragleave', () => {
+      assetFileUploadArea.classList.remove('dragover');
+    });
+    assetFileUploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      assetFileUploadArea.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) {
+        handleAssetFileSelect(e.dataTransfer.files[0]);
+      }
+    });
+  }
+
+  if (assetFileInput) {
+    assetFileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        handleAssetFileSelect(e.target.files[0]);
+      }
+    });
+  }
+
+  if (assetFileRemove) {
+    assetFileRemove.addEventListener('click', (e) => {
+      e.stopPropagation();
+      assetSelectedFile = null;
+      if (assetFileInput) assetFileInput.value = '';
+      if (assetFilePlaceholder) assetFilePlaceholder.hidden = false;
+      if (assetFileSelected) assetFileSelected.hidden = true;
+    });
+  }
+
+  window.api.on('ticker:synced', (s) => {
+    if (currentAssetTicker && s.ticker === currentAssetTicker && s.summary) {
+      updateAssetHistoryUI(s.summary);
+    }
+  });
 
   window.api.on('import-success', (s) => {
-    if (importProgressFill) importProgressFill.style.width = '100%';
-    if (importProgressText) importProgressText.textContent = 'Concluído!';
-    if (importSuccess) {
-      const fmt = d => { const p = d.split('-'); return `${p[2]}/${p[1]}/${p[0]}`; };
-      importSuccess.innerHTML = `✓ <strong>${escapeHtml(s.ticker)}</strong> — ${s.totalCandles} velas importadas<br><span style="opacity:0.7;font-size:11px;">Período: ${fmt(s.startDate)} → ${fmt(s.endDate)}</span>`;
-      importSuccess.hidden = false;
+    if (currentAssetTicker && s.ticker === currentAssetTicker && s.summary) {
+      updateAssetHistoryUI(s.summary);
     }
-    if (modalImportSubmit) {
-      modalImportSubmit.disabled = false;
-      const label = modalImportSubmit.querySelector('.btn-label');
-      if (label) label.textContent = 'Importar';
-    }
-    if (importSpinner) importSpinner.hidden = true;
-    setTimeout(() => closeImportModal(), 3000);
   });
 
   window.api.on('scanner-sync-status', (s) => {

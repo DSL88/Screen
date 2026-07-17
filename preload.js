@@ -6,7 +6,8 @@ const ALLOWED_EVENTS = new Set([
   'scan:done',
   'scan:error',
   'import-success',
-  'scanner-sync-status'
+  'scanner-sync-status',
+  'ticker:synced'
 ]);
 
 contextBridge.exposeInMainWorld('api', {
@@ -32,6 +33,8 @@ contextBridge.exposeInMainWorld('api', {
   removeShortcut: (ticker) => ipcRenderer.invoke('shortcut:remove', { ticker }),
   importBulk: (data) => ipcRenderer.invoke('import:bulk', data),
   checkHistory: (ticker) => ipcRenderer.invoke('history:check', { ticker }),
+  getTickerDetail: (ticker) => ipcRenderer.invoke('ticker:getDetail', { ticker }),
+  syncTickerYahoo: (ticker) => ipcRenderer.invoke('ticker:syncYahoo', { ticker }),
   on: (channel, callback) => {
     if (!ALLOWED_EVENTS.has(channel)) {
       throw new Error(`Channel "${channel}" is not allowed`);

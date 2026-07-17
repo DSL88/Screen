@@ -488,6 +488,28 @@ class DB {
     return row && row.cnt > 0;
   }
 
+  getHistoricalSummary(ticker) {
+    const row = this.db.prepare(`
+      SELECT 
+        MIN(date) as first_date,
+        MAX(date) as last_date,
+        COUNT(*) as total_candles
+      FROM historical_prices
+      WHERE ticker = ?
+    `).get(ticker);
+
+    if (!row || row.total_candles === 0) {
+      return { hasData: false, firstDate: null, lastDate: null, totalCandles: 0 };
+    }
+
+    return {
+      hasData: true,
+      firstDate: row.first_date,
+      lastDate: row.last_date,
+      totalCandles: row.total_candles
+    };
+  }
+
   close() {
     if (this.db) this.db.close();
   }
