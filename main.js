@@ -801,6 +801,17 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('ticker:deleteHistory', async (_event, payload) => {
+      const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
+      if (!ticker) return { ok: false, error: 'missing-ticker' };
+      try {
+        const result = db.deleteHistoricalPrices(ticker);
+        return { ok: true, ticker, deleted: result.changes };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     createWindow();
   } catch (err) {
     console.error('Fatal init error:', err);

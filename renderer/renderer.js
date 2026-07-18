@@ -1821,6 +1821,9 @@
   const assetImportProgressText = document.getElementById('asset-import-progress-text');
   const assetImportError = document.getElementById('asset-import-error');
   const assetImportSuccess = document.getElementById('asset-import-success');
+  const assetSummaryZone = document.getElementById('asset-summary-zone');
+  const assetUploadZone = document.getElementById('asset-upload-zone');
+  const assetDeleteBtn = document.getElementById('asset-detail-delete-history');
 
   let currentAssetTicker = null;
   let assetSelectedFile = null;
@@ -1831,16 +1834,23 @@
     return `${p[2]}/${p[1]}/${p[0]}`;
   }
 
+  function toggleModalState(hasData) {
+    if (assetSummaryZone) assetSummaryZone.style.display = hasData ? '' : 'none';
+    if (assetUploadZone) assetUploadZone.style.display = hasData ? 'none' : '';
+  }
+
   function updateAssetHistoryUI(summary) {
-    if (!summary || !summary.hasData) {
+    const hasData = summary && summary.hasData;
+    if (!hasData) {
       assetDetailFirstDate.textContent = '—';
       assetDetailLastDate.textContent = '—';
       assetDetailTotalCandles.textContent = '0';
-      return;
+    } else {
+      assetDetailFirstDate.textContent = fmtDate(summary.firstDate);
+      assetDetailLastDate.textContent = fmtDate(summary.lastDate);
+      assetDetailTotalCandles.textContent = summary.totalCandles.toLocaleString('pt-PT');
     }
-    assetDetailFirstDate.textContent = fmtDate(summary.firstDate);
-    assetDetailLastDate.textContent = fmtDate(summary.lastDate);
-    assetDetailTotalCandles.textContent = summary.totalCandles.toLocaleString('pt-PT');
+    toggleModalState(hasData);
   }
 
   async function openAssetDetailModal(ticker) {
@@ -1855,6 +1865,8 @@
     assetDetailFirstDate.textContent = '—';
     assetDetailLastDate.textContent = '—';
     assetDetailTotalCandles.textContent = '—';
+
+    toggleModalState(false);
 
     if (assetDetailSyncStatus) {
       assetDetailSyncStatus.hidden = true;
@@ -1964,6 +1976,40 @@
   }
 
   if (assetDetailSyncBtn) assetDetailSyncBtn.addEventListener('click', syncAssetYahoo);
+
+  async function deleteAssetHistory() {
+    if (!currentAssetTicker) return;
+    const ok = await openConfirmModal({
+      title: 'Apagar Histórico',
+      message: `Tens a certeza que queres apagar <strong>todo o histórico local</strong> de <strong>${escapeHtml(currentAssetTicker)}</strong>?<br><br>Esta ação não pode ser revertida. O histórico será removido da base de dados, mas o ativo permanece na watchlist.`,
+      confirmLabel: 'Sim, apagar',
+      cancelLabel: 'Cancelar',
+      danger: true
+    });
+    if (!ok) return;
+
+    try {
+      const res = await window.api.deleteTickerHistory(currentAssetTicker);
+      if (!res || !res.ok) {
+        if (assetDetailSyncStatus) {
+          assetDetailSyncStatus.textContent = 'Erro ao apagar: ' + (res && res.error ? res.error : 'desconhecido');
+          assetDetailSyncStatus.className = 'asset-detail-sync-status is-error';
+          assetDetailSyncStatus.hidden = false;
+        }
+        return;
+      }
+      updateAssetHistoryUI({ hasData: false, firstDate: null, lastDate: null, totalCandles: 0 });
+      checkHistoryBadges();
+    } catch (err) {
+      if (assetDetailSyncStatus) {
+        assetDetailSyncStatus.textContent = 'Erro: ' + (err.message || String(err));
+        assetDetailSyncStatus.className = 'asset-detail-sync-status is-error';
+        assetDetailSyncStatus.hidden = false;
+      }
+    }
+  }
+
+  if (assetDeleteBtn) assetDeleteBtn.addEventListener('click', deleteAssetHistory);
 
   function handleAssetFileSelect(file) {
     if (!file) return;
