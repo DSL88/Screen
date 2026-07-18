@@ -510,6 +510,31 @@ class DB {
     };
   }
 
+  getHistoricalSummaryBatch(tickers) {
+    if (!Array.isArray(tickers) || tickers.length === 0) return {};
+
+    const placeholders = tickers.map(() => '?').join(',');
+    const rows = this.db.prepare(`
+      SELECT 
+        ticker,
+        MAX(date) as last_date,
+        COUNT(*) as total_candles
+      FROM historical_prices
+      WHERE ticker IN (${placeholders})
+      GROUP BY ticker
+    `).all(...tickers);
+
+    const result = {};
+    for (const row of rows) {
+      result[row.ticker] = {
+        hasData: row.total_candles > 0,
+        lastDate: row.last_date || null,
+        totalCandles: row.total_candles || 0
+      };
+    }
+    return result;
+  }
+
   deleteHistoricalPrices(ticker) {
     const result = this.db.prepare(
       'DELETE FROM historical_prices WHERE ticker = ?'

@@ -987,25 +987,37 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.wl-history-badge {
+.wl-history-status {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  color: var(--text-mute);
-  opacity: 0.3;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 10px;
   flex-shrink: 0;
   transition: all 0.2s ease;
+  white-space: nowrap;
 }
-.wl-history-badge svg {
-  width: 12px;
-  height: 12px;
+.wl-history-status svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
 }
-.wl-history-badge.has-data {
+.wl-history-status-text {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-feature-settings: "tnum";
+}
+.wl-history-ok {
+  background: var(--bull-soft);
+  border: 1px solid rgba(52, 211, 153, 0.20);
   color: var(--bull);
-  opacity: 1;
+}
+.wl-history-none {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text-mute);
 }
 .wl-remove {
   background: none;
