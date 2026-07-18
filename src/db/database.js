@@ -517,6 +517,7 @@ class DB {
     const rows = this.db.prepare(`
       SELECT 
         ticker,
+        MIN(date) as first_date,
         MAX(date) as last_date,
         COUNT(*) as total_candles
       FROM historical_prices
@@ -528,6 +529,7 @@ class DB {
     for (const row of rows) {
       result[row.ticker] = {
         hasData: row.total_candles > 0,
+        firstDate: row.first_date || null,
         lastDate: row.last_date || null,
         totalCandles: row.total_candles || 0
       };

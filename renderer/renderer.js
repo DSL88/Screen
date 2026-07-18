@@ -195,30 +195,35 @@
     }
   }
 
+  function fmtShortDate(iso) {
+    if (!iso) return '-';
+    const [year, month, day] = iso.split('-');
+    return `${day}-${month}-${year}`;
+  }
+
   function renderHistoryBadgeBadge(t) {
-    if (t.temHistorico && t.ultimaData) {
-      const d = t.ultimaData.split('-');
-      const fmt = `${d[2]}/${d[1]}/${d[0]}`;
-      return `<span class="wl-history-status wl-history-ok" data-ticker="${escapeHtml(t.ticker)}" title="Histórico: ${t.totalVelas} velas · Última: ${t.ultimaData}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-        <span class="wl-history-status-text">${fmt}</span>
+    if (t.temHistorico && t.primeiroRegisto && t.ultimaData) {
+      return `<span class="wl-history-pills" data-ticker="${escapeHtml(t.ticker)}">
+        <span class="wl-pill wl-pill-first" title="Primeiro registo: ${t.primeiroRegisto}">${fmtShortDate(t.primeiroRegisto)}</span>
+        <span class="wl-pill wl-pill-last" title="Última atualização: ${t.ultimaData} · ${t.totalVelas} velas">${fmtShortDate(t.ultimaData)}</span>
       </span>`;
     }
-    return `<span class="wl-history-status wl-history-none" data-ticker="${escapeHtml(t.ticker)}" title="Sem histórico local — requer importação">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      <span class="wl-history-status-text">Sem dados</span>
+    return `<span class="wl-history-pills" data-ticker="${escapeHtml(t.ticker)}">
+      <span class="wl-pill wl-pill-empty" title="Sem histórico local">—</span>
+      <span class="wl-pill wl-pill-empty" title="Requer importação">—</span>
     </span>`;
   }
 
   async function updateWatchlistBadge(ticker, summary) {
     const item = watchlistEl.querySelector(`.watchlist-item[data-ticker="${CSS.escape(ticker)}"]`);
     if (!item) return;
-    const oldBadge = item.querySelector('.wl-history-status');
-    if (!oldBadge) return;
+    const oldPills = item.querySelector('.wl-history-pills');
+    if (!oldPills) return;
 
     const wlEntry = watchlist.find(w => w.ticker === ticker);
     if (wlEntry && summary) {
       wlEntry.temHistorico = !!summary.hasData;
+      wlEntry.primeiroRegisto = summary.firstDate || null;
       wlEntry.ultimaData = summary.lastDate || null;
       wlEntry.totalVelas = summary.totalCandles || 0;
     } else if (wlEntry) {
@@ -226,6 +231,7 @@
         const detail = await window.api.getTickerDetail(ticker);
         if (detail && detail.ok && detail.summary) {
           wlEntry.temHistorico = !!detail.summary.hasData;
+          wlEntry.primeiroRegisto = detail.summary.firstDate || null;
           wlEntry.ultimaData = detail.summary.lastDate || null;
           wlEntry.totalVelas = detail.summary.totalCandles || 0;
         }
@@ -238,7 +244,7 @@
     const temp = document.createElement('div');
     temp.innerHTML = newHtml.trim();
     const newBadge = temp.firstChild;
-    oldBadge.replaceWith(newBadge);
+    oldPills.replaceWith(newBadge);
   }
 
   function renderSuggestions(res, query) {
