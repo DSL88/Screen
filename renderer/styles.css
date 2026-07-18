@@ -987,34 +987,38 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.wl-history-status {
+.wl-history-pills {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
+}
+.wl-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 2px 7px;
   border-radius: 10px;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-}
-.wl-history-status svg {
-  width: 11px;
-  height: 11px;
-  flex-shrink: 0;
-}
-.wl-history-status-text {
   font-family: var(--mono);
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.02em;
   font-feature-settings: "tnum";
+  white-space: nowrap;
+  line-height: 1.4;
+  transition: all 0.2s ease;
 }
-.wl-history-ok {
+.wl-pill-first {
+  background: rgba(99, 102, 241, 0.10);
+  border: 1px solid rgba(99, 102, 241, 0.20);
+  color: var(--accent-hover);
+}
+.wl-pill-last {
   background: var(--bull-soft);
   border: 1px solid rgba(52, 211, 153, 0.20);
   color: var(--bull);
 }
-.wl-history-none {
+.wl-pill-empty {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);
   color: var(--text-mute);

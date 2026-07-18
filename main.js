@@ -509,6 +509,7 @@ app.whenReady().then(async () => {
           indexId,
           indexName,
           temHistorico: !!(summary && summary.hasData),
+          primeiroRegisto: (summary && summary.firstDate) || null,
           ultimaData: (summary && summary.lastDate) || null,
           totalVelas: (summary && summary.totalCandles) || 0
         };
