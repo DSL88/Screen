@@ -165,12 +165,13 @@
         if (highlightTicker && t.ticker === highlightTicker) {
           item.classList.add('just-added');
         }
+
+        const badge = renderHistoryBadgeBadge(t);
+
         item.innerHTML = `
           <span class="wl-symbol">${escapeHtml(t.ticker)}</span>
           <span class="wl-name" title="${escapeHtml(t.name || '')}">${escapeHtml(t.name || '')}</span>
-          <span class="wl-history-badge" data-ticker="${escapeHtml(t.ticker)}" title="Dados históricos importados">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-          </span>
+          ${badge}
           <button class="wl-remove" title="Remover">×</button>
         `;
         item.querySelector('.wl-remove').addEventListener('click', (e) => {
@@ -192,21 +193,52 @@
         setTimeout(() => newItem.classList.remove('just-added'), 1600);
       }
     }
-
-    checkHistoryBadges();
   }
 
-  async function checkHistoryBadges() {
-    const badges = document.querySelectorAll('.wl-history-badge');
-    for (const badge of badges) {
-      const ticker = badge.dataset.ticker;
-      try {
-        const res = await window.api.checkHistory(ticker);
-        if (res && res.ok && res.hasData) {
-          badge.classList.add('has-data');
-        }
-      } catch (_) { /* silently ignore */ }
+  function renderHistoryBadgeBadge(t) {
+    if (t.temHistorico && t.ultimaData) {
+      const d = t.ultimaData.split('-');
+      const fmt = `${d[2]}/${d[1]}/${d[0]}`;
+      return `<span class="wl-history-status wl-history-ok" data-ticker="${escapeHtml(t.ticker)}" title="Histórico: ${t.totalVelas} velas · Última: ${t.ultimaData}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        <span class="wl-history-status-text">${fmt}</span>
+      </span>`;
     }
+    return `<span class="wl-history-status wl-history-none" data-ticker="${escapeHtml(t.ticker)}" title="Sem histórico local — requer importação">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span class="wl-history-status-text">Sem dados</span>
+    </span>`;
+  }
+
+  async function updateWatchlistBadge(ticker, summary) {
+    const item = watchlistEl.querySelector(`.watchlist-item[data-ticker="${CSS.escape(ticker)}"]`);
+    if (!item) return;
+    const oldBadge = item.querySelector('.wl-history-status');
+    if (!oldBadge) return;
+
+    const wlEntry = watchlist.find(w => w.ticker === ticker);
+    if (wlEntry && summary) {
+      wlEntry.temHistorico = !!summary.hasData;
+      wlEntry.ultimaData = summary.lastDate || null;
+      wlEntry.totalVelas = summary.totalCandles || 0;
+    } else if (wlEntry) {
+      try {
+        const detail = await window.api.getTickerDetail(ticker);
+        if (detail && detail.ok && detail.summary) {
+          wlEntry.temHistorico = !!detail.summary.hasData;
+          wlEntry.ultimaData = detail.summary.lastDate || null;
+          wlEntry.totalVelas = detail.summary.totalCandles || 0;
+        }
+      } catch (_) { /* ignore */ }
+    }
+
+    const updated = watchlist.find(w => w.ticker === ticker);
+    if (!updated) return;
+    const newHtml = renderHistoryBadgeBadge(updated);
+    const temp = document.createElement('div');
+    temp.innerHTML = newHtml.trim();
+    const newBadge = temp.firstChild;
+    oldBadge.replaceWith(newBadge);
   }
 
   function renderSuggestions(res, query) {
@@ -1958,7 +1990,7 @@
         assetDetailSyncStatus.hidden = false;
       }
       if (res.summary) updateAssetHistoryUI(res.summary);
-      checkHistoryBadges();
+      updateWatchlistBadge(currentAssetTicker);
     } catch (err) {
       if (assetDetailSyncStatus) {
         assetDetailSyncStatus.textContent = 'Erro: ' + (err.message || String(err));
@@ -1999,7 +2031,7 @@
         return;
       }
       updateAssetHistoryUI({ hasData: false, firstDate: null, lastDate: null, totalCandles: 0 });
-      checkHistoryBadges();
+      updateWatchlistBadge(currentAssetTicker);
     } catch (err) {
       if (assetDetailSyncStatus) {
         assetDetailSyncStatus.textContent = 'Erro: ' + (err.message || String(err));
@@ -2073,7 +2105,7 @@
       if (assetFilePlaceholder) assetFilePlaceholder.hidden = false;
       if (assetFileSelected) assetFileSelected.hidden = true;
 
-      checkHistoryBadges();
+      updateWatchlistBadge(currentAssetTicker);
     } catch (err) {
       if (assetImportProgressWrap) assetImportProgressWrap.hidden = true;
       if (assetImportError) {
@@ -2120,14 +2152,20 @@
   }
 
   window.api.on('ticker:synced', (s) => {
-    if (currentAssetTicker && s.ticker === currentAssetTicker && s.summary) {
-      updateAssetHistoryUI(s.summary);
+    if (s.ticker && s.summary) {
+      updateWatchlistBadge(s.ticker, s.summary);
+      if (currentAssetTicker && s.ticker === currentAssetTicker) {
+        updateAssetHistoryUI(s.summary);
+      }
     }
   });
 
   window.api.on('import-success', (s) => {
-    if (currentAssetTicker && s.ticker === currentAssetTicker && s.summary) {
-      updateAssetHistoryUI(s.summary);
+    if (s.ticker && s.summary) {
+      updateWatchlistBadge(s.ticker, s.summary);
+      if (currentAssetTicker && s.ticker === currentAssetTicker) {
+        updateAssetHistoryUI(s.summary);
+      }
     }
   });
 

@@ -497,14 +497,20 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('ticker:list', async () => {
       const custom = db.getCustomTickers();
+      const tickerSymbols = custom.map(t => String(t.ticker || '').toUpperCase().trim());
+      const batchSummary = db.getHistoricalSummaryBatch(tickerSymbols);
       const enrichedCustom = custom.map(t => {
         const symbolUpper = String(t.ticker || '').toUpperCase().trim();
         const indexId = tickerToIndexMap[symbolUpper] || 'CUSTOM';
         const indexName = indexNames[indexId] || 'Outros Ativos / Manuais';
+        const summary = batchSummary[symbolUpper];
         return {
           ...t,
           indexId,
-          indexName
+          indexName,
+          temHistorico: !!(summary && summary.hasData),
+          ultimaData: (summary && summary.lastDate) || null,
+          totalVelas: (summary && summary.totalCandles) || 0
         };
       });
       return { ok: true, custom: enrichedCustom };
