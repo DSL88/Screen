@@ -510,6 +510,13 @@ class DB {
     };
   }
 
+  deleteHistoricalPrices(ticker) {
+    const result = this.db.prepare(
+      'DELETE FROM historical_prices WHERE ticker = ?'
+    ).run(ticker);
+    return { changes: result.changes || 0 };
+  }
+
   close() {
     if (this.db) this.db.close();
   }

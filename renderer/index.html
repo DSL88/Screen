@@ -484,55 +484,65 @@
           </div>
         </div>
 
-        <div class="asset-detail-history">
-          <div class="asset-detail-section-title">Histórico Local</div>
-          <div class="asset-detail-history-grid">
-            <div class="asset-detail-history-card">
-              <span class="asset-detail-history-label">Primeiro Registo</span>
-              <span class="asset-detail-history-value" id="asset-detail-first-date">—</span>
+        <div id="asset-summary-zone">
+          <div class="asset-detail-history">
+            <div class="asset-detail-section-title-row">
+              <div class="asset-detail-section-title">Histórico Local</div>
+              <button class="asset-detail-delete-btn" id="asset-detail-delete-history" title="Apagar Histórico">
+                <span class="asset-delete-icon"></span>
+                <span>Apagar Histórico</span>
+              </button>
             </div>
-            <div class="asset-detail-history-card">
-              <span class="asset-detail-history-label">Último Registo</span>
-              <span class="asset-detail-history-value" id="asset-detail-last-date">—</span>
+            <div class="asset-detail-history-grid">
+              <div class="asset-detail-history-card">
+                <span class="asset-detail-history-label">Primeiro Registo</span>
+                <span class="asset-detail-history-value" id="asset-detail-first-date">—</span>
+              </div>
+              <div class="asset-detail-history-card">
+                <span class="asset-detail-history-label">Último Registo</span>
+                <span class="asset-detail-history-value" id="asset-detail-last-date">—</span>
+              </div>
+              <div class="asset-detail-history-card">
+                <span class="asset-detail-history-label">Total de Velas</span>
+                <span class="asset-detail-history-value asset-detail-history-candles" id="asset-detail-total-candles">—</span>
+              </div>
             </div>
-            <div class="asset-detail-history-card">
-              <span class="asset-detail-history-label">Total de Velas</span>
-              <span class="asset-detail-history-value asset-detail-history-candles" id="asset-detail-total-candles">—</span>
-            </div>
+          </div>
+
+          <div class="asset-detail-actions-section">
+            <div class="asset-detail-section-title">Sincronização</div>
+            <button class="btn-primary asset-detail-sync-btn" id="asset-detail-sync-yahoo">
+              <span class="btn-label">Sincronizar via Yahoo Finance</span>
+              <span class="spinner" id="asset-detail-sync-spinner" hidden></span>
+            </button>
+            <div class="asset-detail-sync-status" id="asset-detail-sync-status" hidden></div>
           </div>
         </div>
 
-        <div class="asset-detail-actions-section">
-          <div class="asset-detail-section-title">Sincronização</div>
-          <button class="btn-primary asset-detail-sync-btn" id="asset-detail-sync-yahoo">
-            <span class="btn-label">Sincronizar via Yahoo Finance</span>
-            <span class="spinner" id="asset-detail-sync-spinner" hidden></span>
-          </button>
-          <div class="asset-detail-sync-status" id="asset-detail-sync-status" hidden></div>
-        </div>
-
-        <div class="asset-detail-import-section">
-          <div class="asset-detail-section-title">Importar Ficheiro de Atualização</div>
-          <div class="file-upload-area" id="asset-file-upload-area">
-            <input type="file" id="asset-import-file" accept=".csv,.xlsx" hidden />
-            <div class="file-upload-placeholder" id="asset-file-upload-placeholder">
-              <span class="file-upload-icon"></span>
-              <span class="file-upload-text">Arrasta ou clica para carregar .csv / .xlsx</span>
-              <span class="file-upload-hint">Os dados serão associados a este ativo</span>
+        <div id="asset-upload-zone">
+          <div class="asset-detail-import-section">
+            <div class="asset-detail-section-title">Importar Dados Históricos</div>
+            <div class="file-upload-area" id="asset-file-upload-area">
+              <input type="file" id="asset-import-file" accept=".csv,.xlsx" hidden />
+              <div class="file-upload-placeholder" id="asset-file-upload-placeholder">
+                <span class="file-upload-icon"></span>
+                <span class="file-upload-text">Arrasta ou clica para carregar .csv / .xlsx</span>
+                <span class="file-upload-hint">Os dados serão associados a este ativo</span>
+              </div>
+              <div class="file-upload-selected" id="asset-file-upload-selected" hidden>
+                <span class="file-upload-filename" id="asset-file-upload-filename"></span>
+                <button type="button" class="file-upload-remove" id="asset-file-upload-remove" aria-label="Remover">×</button>
+              </div>
             </div>
-            <div class="file-upload-selected" id="asset-file-upload-selected" hidden>
-              <span class="file-upload-filename" id="asset-file-upload-filename"></span>
-              <button type="button" class="file-upload-remove" id="asset-file-upload-remove" aria-label="Remover">×</button>
+            <div class="asset-detail-import-progress" id="asset-import-progress-wrap" hidden>
+              <div class="import-progress-bar">
+                <div class="import-progress-fill" id="asset-import-progress-fill"></div>
+              </div>
+              <span class="import-progress-text" id="asset-import-progress-text">A importar...</span>
             </div>
+            <div class="form-error" id="asset-import-error" hidden></div>
+            <div class="form-success" id="asset-import-success" hidden></div>
           </div>
-          <div class="asset-detail-import-progress" id="asset-import-progress-wrap" hidden>
-            <div class="import-progress-bar">
-              <div class="import-progress-fill" id="asset-import-progress-fill"></div>
-            </div>
-            <span class="import-progress-text" id="asset-import-progress-text">A importar...</span>
-          </div>
-          <div class="form-error" id="asset-import-error" hidden></div>
-          <div class="form-success" id="asset-import-success" hidden></div>
         </div>
       </div>
     </div>
