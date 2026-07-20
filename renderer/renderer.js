@@ -42,6 +42,10 @@
   const modalAdd = document.getElementById('modal-add');
   const modalTicker = document.getElementById('modal-ticker');
   const modalName = document.getElementById('modal-name');
+  const modalCountry = document.getElementById('modal-country');
+  const modalIndexSelect = document.getElementById('modal-index-select');
+  const modalIndexCustom = document.getElementById('modal-index-custom');
+  const groupCustomIndex = document.getElementById('group-custom-index');
   const modalResults = document.getElementById('modal-results');
   const modalError = document.getElementById('modal-error');
   const modalHint = document.getElementById('modal-ticker-hint');
@@ -259,6 +263,131 @@
     oldPills.replaceWith(newBadge);
   }
 
+  function guessStockMetadata(ticker, exchange) {
+    const sym = String(ticker || '').toUpperCase().trim();
+    const ex = String(exchange || '').toLowerCase().trim();
+
+    if (sym.endsWith('.LS') || ex.includes('lisbon')) {
+      return { country: 'Portugal', indexName: 'PSI' };
+    }
+    if (sym.endsWith('.MC') || ex.includes('madrid') || ex.includes('bme')) {
+      return { country: 'Espanha', indexName: 'IBEX35' };
+    }
+    if (sym.endsWith('.DE') || ex.includes('xetra') || ex.includes('frankfurt')) {
+      return { country: 'Alemanha', indexName: 'DAX40' };
+    }
+    if (sym.endsWith('.PA') || ex.includes('paris')) {
+      return { country: 'França', indexName: 'CAC40' };
+    }
+    if (sym.endsWith('.AS') || ex.includes('amsterdam')) {
+      return { country: 'Holanda', indexName: 'AEX25' };
+    }
+    if (sym.endsWith('.SW') || ex.includes('six') || ex.includes('zurich')) {
+      return { country: 'Suíça', indexName: 'SMI' };
+    }
+    if (sym.endsWith('.MI') || ex.includes('milan') || ex.includes('borsa italiana')) {
+      return { country: 'Itália', indexName: 'FTSEMIB' };
+    }
+    if (sym.endsWith('.L') || ex.includes('london')) {
+      return { country: 'Reino Unido', indexName: 'FTSE100' };
+    }
+    if (sym.endsWith('.HK') || ex.includes('hong kong')) {
+      return { country: 'Hong Kong', indexName: 'HANGSENG30' };
+    }
+    if (sym.endsWith('.T') || ex.includes('tokyo')) {
+      return { country: 'Japão', indexName: 'NIKKEI30' };
+    }
+    if (sym.endsWith('.SA') || ex.includes('sao paulo')) {
+      return { country: 'Brasil', indexName: 'BOVESPA' };
+    }
+
+    return { country: 'EUA', indexName: 'SP500' };
+  }
+
+  function setModalIndexValue(idxName) {
+    if (!modalIndexSelect) return;
+    const clean = String(idxName || '').trim().toUpperCase();
+    if (!clean) {
+      modalIndexSelect.selectedIndex = 0;
+      if (groupCustomIndex) groupCustomIndex.hidden = true;
+      return;
+    }
+
+    const options = Array.from(modalIndexSelect.options);
+    const matchedOpt = options.find(opt => opt.value.toUpperCase() === clean);
+
+    if (matchedOpt) {
+      modalIndexSelect.value = matchedOpt.value;
+      if (groupCustomIndex) groupCustomIndex.hidden = true;
+    } else {
+      modalIndexSelect.value = 'CUSTOM_NEW';
+      if (groupCustomIndex) groupCustomIndex.hidden = false;
+      if (modalIndexCustom) modalIndexCustom.value = clean;
+    }
+  }
+
+  function getSelectedModalIndex() {
+    if (!modalIndexSelect) return '';
+    if (modalIndexSelect.value === 'CUSTOM_NEW') {
+      return modalIndexCustom ? modalIndexCustom.value.trim().toUpperCase() : '';
+    }
+    return modalIndexSelect.value.trim().toUpperCase();
+  }
+
+  function addIndexOptionToSelect(idxName) {
+    if (!modalIndexSelect || !idxName) return;
+    const clean = idxName.trim().toUpperCase();
+    const exists = Array.from(modalIndexSelect.options).some(opt => opt.value.toUpperCase() === clean);
+    if (!exists) {
+      const opt = document.createElement('option');
+      opt.value = clean;
+      opt.textContent = clean;
+      const customNewOpt = modalIndexSelect.querySelector('option[value="CUSTOM_NEW"]');
+      if (customNewOpt) {
+        modalIndexSelect.insertBefore(opt, customNewOpt);
+      } else {
+        modalIndexSelect.appendChild(opt);
+      }
+    }
+  }
+
+  if (modalIndexSelect) {
+    modalIndexSelect.addEventListener('change', () => {
+      if (modalIndexSelect.value === 'CUSTOM_NEW') {
+        if (groupCustomIndex) groupCustomIndex.hidden = false;
+        if (modalIndexCustom) modalIndexCustom.focus();
+      } else {
+        if (groupCustomIndex) groupCustomIndex.hidden = true;
+      }
+    });
+  }
+
+  function promptAddTickerWithIndex(t) {
+    if (isInWatchlist(t.ticker)) {
+      if (typeof status !== 'undefined' && status) {
+        status.textContent = `${t.ticker} já está na watchlist.`;
+      }
+      return;
+    }
+
+    if (modalSearch && !modalSearch.hidden) {
+      closeSearchModal();
+    }
+    hideSuggestions();
+
+    openAddModal();
+
+    const meta = guessStockMetadata(t.ticker, t.exchange);
+
+    if (modalTicker) modalTicker.value = t.ticker;
+    if (modalName) modalName.value = t.name || t.ticker;
+    if (modalCountry) modalCountry.value = t.country || meta.country;
+    
+    setModalIndexValue(t.indexName || t.index || meta.indexName);
+
+    showModalHint('valid', '✓ Ticker selecionado. Confirma/altera o Índice na lista abaixo.');
+  }
+
   function renderSuggestions(res, query) {
     const tickers = (res && res.tickers) || [];
     if (tickers.length === 0) {
@@ -279,11 +408,12 @@
         <button class="suggestion-add">${isInWatchlist(r.ticker) ? 'Adicionado' : 'Adicionar'}</button>
       `;
       if (!isInWatchlist(r.ticker)) {
-        div.querySelector('.suggestion-add').addEventListener('click', (e) => {
+        const handler = (e) => {
           e.stopPropagation();
-          addTicker(r);
-        });
-        div.addEventListener('click', () => addTicker(r));
+          promptAddTickerWithIndex(r);
+        };
+        div.querySelector('.suggestion-add').addEventListener('click', handler);
+        div.addEventListener('click', handler);
       }
       suggestionsEl.appendChild(div);
     }
@@ -322,6 +452,9 @@
     if (!modalAdd) return;
     modalAdd.hidden = false;
     showModalError(null);
+    if (modalCountry) modalCountry.value = '';
+    setModalIndexValue('');
+    if (modalIndexCustom) modalIndexCustom.value = '';
     modalResults.innerHTML = '<div class="modal-result-empty">Escreve um símbolo para ver sugestões.</div>';
     modalHint.className = 'form-hint';
     modalHint.textContent = '';
@@ -333,6 +466,9 @@
     modalAdd.hidden = true;
     modalTicker.value = '';
     modalName.value = '';
+    if (modalCountry) modalCountry.value = '';
+    setModalIndexValue('');
+    if (modalIndexCustom) modalIndexCustom.value = '';
     modalResults.innerHTML = '<div class="modal-result-empty">Escreve um símbolo para ver sugestões.</div>';
     modalError.hidden = true;
     modalHint.className = 'form-hint';
@@ -363,6 +499,19 @@
     }
   }
 
+  function updateIndexDatalist(idxName) {
+    const listEl = document.getElementById('index-datalist');
+    if (!listEl || !idxName) return;
+    const clean = idxName.trim().toUpperCase();
+    const exists = Array.from(listEl.options).some(opt => opt.value.toUpperCase() === clean);
+    if (!exists) {
+      const opt = document.createElement('option');
+      opt.value = clean;
+      opt.textContent = clean;
+      listEl.appendChild(opt);
+    }
+  }
+
   async function submitAddModal() {
     showModalError(null);
     const raw = modalTicker.value.trim().toUpperCase();
@@ -373,9 +522,31 @@
       modalTicker.focus();
       return;
     }
-    const name = (modalName.value || '').trim() || raw;
-    await addTicker({ ticker: raw, name, index: 'CUSTOM' });
-    status.textContent = `${raw} adicionado à watchlist.`;
+
+    const name = (modalName ? modalName.value : '').trim();
+    if (!name) {
+      showModalError('Nome da Empresa é obrigatório.');
+      if (modalName) modalName.focus();
+      return;
+    }
+
+    const country = (modalCountry ? modalCountry.value : '').trim();
+    if (!country) {
+      showModalError('País é obrigatório.');
+      if (modalCountry) modalCountry.focus();
+      return;
+    }
+
+    const indexName = getSelectedModalIndex();
+    if (!indexName) {
+      showModalError('Índice Respetivo é obrigatório (seleciona um índice da lista ou digita o nome).');
+      if (modalIndexSelect) modalIndexSelect.focus();
+      return;
+    }
+
+    await addTicker({ ticker: raw, name, country, indexName, index: indexName });
+    addIndexOptionToSelect(indexName);
+    status.textContent = `${raw} (${indexName}) adicionado à watchlist.`;
     closeAddModal();
   }
 
@@ -394,9 +565,12 @@
         ${t.exchange ? `<span class="modal-result-exchange">${escapeHtml(t.exchange)}</span>` : ''}
       `;
       div.addEventListener('click', () => {
+        const meta = guessStockMetadata(t.ticker, t.exchange);
         modalTicker.value = t.ticker;
         modalName.value = t.name;
-        showModalHint('valid', '✓');
+        if (modalCountry) modalCountry.value = meta.country;
+        setModalIndexValue(meta.indexName);
+        showModalHint('valid', '✓ Ticker preenchido. Confirma o País e o Índice.');
         modalResults.innerHTML = '';
       });
       modalResults.appendChild(div);
@@ -625,7 +799,7 @@
           <button class="modal-search-add-btn">${isAdded ? 'Adicionado' : 'Adicionar'}</button>
         `;
         if (!isAdded) {
-          const add = () => addTicker(r);
+          const add = () => promptAddTickerWithIndex(r);
           div.querySelector('.modal-search-add-btn').addEventListener('click', (e) => { e.stopPropagation(); add(); });
           div.addEventListener('click', add);
         }
@@ -724,12 +898,22 @@
       status.textContent = `${t.ticker} já está na watchlist.`;
       return;
     }
-    const entry = { ticker: t.ticker, name: t.name || '', index: t.index || 'CUSTOM' };
+    const idxName = t.indexName || t.index_name || t.index || 'CUSTOM';
+    const country = t.country || '';
+    const entry = { ticker: t.ticker, name: t.name || '', indexId: idxName, indexName: idxName, country };
     watchlist.push(entry);
     renderWatchlist(t.ticker);
     status.textContent = `${t.ticker} adicionado à watchlist.`;
     try {
-      await window.api.addTicker({ ticker: t.ticker, name: t.name, exchange: t.exchange, type: t.type });
+      await window.api.addTicker({
+        ticker: t.ticker,
+        name: t.name,
+        exchange: t.exchange,
+        type: t.type,
+        country: country,
+        indexName: idxName
+      });
+      await loadInitial();
     } catch (err) {
       console.warn('addTicker failed:', err);
     }

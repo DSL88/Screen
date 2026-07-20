@@ -468,12 +468,31 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('ticker:add', async (_event, payload) => {
       if (!payload || !payload.ticker) return { ok: false, error: 'missing-ticker' };
+      const symbolUpper = String(payload.ticker).toUpperCase().trim();
+      const country = payload.country || '';
+      const indexName = payload.indexName || payload.index_name || payload.index || 'CUSTOM';
+
+      // 1. Guardar na tabela custom_tickers
       db.addCustomTicker({
-        ticker: payload.ticker,
-        name: payload.name || '',
+        ticker: symbolUpper,
+        name: payload.name || symbolUpper,
         exchange: payload.exchange || '',
-        type: payload.type || ''
+        type: payload.type || 'EQUITY',
+        country,
+        indexName
       });
+
+      // 2. Guardar/Atualizar na tabela stocks garantindo que index_name e country ficam preenchidos
+      db.upsertStock({
+        ticker: symbolUpper,
+        name: payload.name || symbolUpper,
+        country,
+        indexName
+      });
+
+      // 3. Atualizar o mapa em memória
+      tickerToIndexMap[symbolUpper] = indexName;
+
       return { ok: true };
     });
 
@@ -501,11 +520,15 @@ app.whenReady().then(async () => {
       const batchSummary = db.getHistoricalSummaryBatch(tickerSymbols);
       const enrichedCustom = custom.map(t => {
         const symbolUpper = String(t.ticker || '').toUpperCase().trim();
-        const indexId = tickerToIndexMap[symbolUpper] || 'CUSTOM';
-        const indexName = indexNames[indexId] || 'Outros Ativos / Manuais';
+        const stockRecord = db.getStockByTicker(symbolUpper);
+        
+        const customIdx = stockRecord?.index_name || t.index_name || t.indexName || t.index;
+        const indexId = customIdx || tickerToIndexMap[symbolUpper] || 'CUSTOM';
+        const indexName = indexNames[indexId] || indexId || 'Outros Ativos / Manuais';
         const summary = batchSummary[symbolUpper];
         return {
           ...t,
+          country: stockRecord?.country || t.country || '',
           indexId,
           indexName,
           temHistorico: !!(summary && summary.hasData),
