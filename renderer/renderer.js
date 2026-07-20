@@ -1923,7 +1923,7 @@
     const lastEl = document.getElementById('asset-detail-last-date');
     const candlesEl = document.getElementById('asset-detail-total-candles');
 
-    // Always keep upload-zone visible so user can add/update sheets anytime for the asset
+    // Make upload-zone (caixa de Drag & Drop para adicionar ficheiros .csv / .xlsx) ALWAYS visible for any asset
     if (uploadZone) uploadZone.style.display = 'block';
 
     if (hasData) {
@@ -1946,15 +1946,26 @@
   async function openAssetDetailModal(ticker) {
     if (!modalAssetDetail || !ticker) return;
     const cleanTicker = String(ticker).toUpperCase().trim();
+
+    // 1. Explicitly set active ticker for this session
     currentAssetTicker = cleanTicker;
     assetSelectedFile = null;
 
+    // 2. Full clean reset of all modal DOM elements & inputs
     if (assetDetailTickerEl) assetDetailTickerEl.textContent = cleanTicker;
     if (assetDetailNameEl) assetDetailNameEl.textContent = '';
     if (assetDetailCountryEl) assetDetailCountryEl.textContent = '—';
     if (assetDetailIndexEl) assetDetailIndexEl.textContent = '—';
 
+    const firstEl = document.getElementById('asset-detail-first-date');
+    const lastEl = document.getElementById('asset-detail-last-date');
+    const candlesEl = document.getElementById('asset-detail-total-candles');
+    if (firstEl) firstEl.textContent = '—';
+    if (lastEl) lastEl.textContent = '—';
+    if (candlesEl) candlesEl.textContent = '—';
+
     if (assetDetailSyncStatus) {
+      assetDetailSyncStatus.textContent = '';
       assetDetailSyncStatus.hidden = true;
       assetDetailSyncStatus.className = 'asset-detail-sync-status';
     }
@@ -1964,6 +1975,7 @@
     if (assetFileInput) assetFileInput.value = '';
     if (assetFilePlaceholder) assetFilePlaceholder.hidden = false;
     if (assetFileSelected) assetFileSelected.hidden = true;
+    if (assetFileFilename) assetFileFilename.textContent = '';
     if (assetDetailSyncBtn) assetDetailSyncBtn.disabled = false;
     if (assetDetailSyncSpinner) assetDetailSyncSpinner.hidden = true;
     if (assetDetailSyncBtn) {
@@ -1971,9 +1983,20 @@
       if (label) label.textContent = 'Sincronizar via Yahoo Finance';
     }
 
-    // Perform IPC check FIRST before displaying modal
+    // 3. Temporarily hide BOTH zones during async IPC database query
+    const uploadZone = document.getElementById('upload-zone');
+    const historySummaryZone = document.getElementById('history-summary-zone');
+    if (uploadZone) uploadZone.style.display = 'none';
+    if (historySummaryZone) historySummaryZone.style.display = 'none';
+
+    modalAssetDetail.hidden = false;
+
+    // 4. Query IPC database for currentAssetTicker specifically
     try {
       const res = await window.api.getTickerDetail(cleanTicker);
+      // Guard against race conditions if user clicked another row quickly
+      if (currentAssetTicker !== cleanTicker) return;
+
       if (res && res.ok) {
         if (res.stock) {
           assetDetailNameEl.textContent = res.stock.name || '';
@@ -1991,10 +2014,10 @@
       }
     } catch (err) {
       console.error('[openAssetDetailModal] Error fetching ticker detail:', err);
-      renderModalState(false, {});
+      if (currentAssetTicker === cleanTicker) {
+        renderModalState(false, {});
+      }
     }
-
-    modalAssetDetail.hidden = false;
   }
 
   function closeAssetDetailModal() {
@@ -2052,7 +2075,7 @@
         assetDetailSyncStatus.hidden = false;
       }
       if (res.summary) updateAssetHistoryUI(res.summary);
-      updateWatchlistBadge(currentAssetTicker, res.summary);
+      await updateWatchlistBadge(currentAssetTicker, res.summary);
     } catch (err) {
       if (assetDetailSyncStatus) {
         assetDetailSyncStatus.textContent = 'Erro: ' + (err.message || String(err));
@@ -2093,7 +2116,7 @@
         return;
       }
       renderModalState(false, { hasData: false, firstDate: null, lastDate: null, totalCandles: 0 });
-      updateWatchlistBadge(currentAssetTicker, { hasData: false, firstDate: null, lastDate: null, totalCandles: 0 });
+      await updateWatchlistBadge(currentAssetTicker, { hasData: false, firstDate: null, lastDate: null, totalCandles: 0 });
     } catch (err) {
       if (assetDetailSyncStatus) {
         assetDetailSyncStatus.textContent = 'Erro: ' + (err.message || String(err));
@@ -2126,6 +2149,7 @@
 
   async function submitAssetImport() {
     if (!assetSelectedFile || !currentAssetTicker) return;
+    const activeTicker = currentAssetTicker;
 
     if (assetImportError) { assetImportError.textContent = ''; assetImportError.hidden = true; }
     if (assetImportSuccess) { assetImportSuccess.textContent = ''; assetImportSuccess.hidden = true; }
@@ -2141,8 +2165,8 @@
       if (assetImportProgressText) assetImportProgressText.textContent = 'A processar dados...';
 
       const res = await window.api.importBulk({
-        ticker: currentAssetTicker,
-        name: assetDetailNameEl.textContent || currentAssetTicker,
+        ticker: activeTicker,
+        name: assetDetailNameEl.textContent || activeTicker,
         country: assetDetailCountryEl.textContent === '—' ? '' : assetDetailCountryEl.textContent,
         indexName: assetDetailIndexEl.textContent === '—' ? '' : assetDetailIndexEl.textContent,
         fileData: Array.from(uint8Array),
@@ -2156,16 +2180,18 @@
       }
 
       if (assetImportProgressText) assetImportProgressText.textContent = 'Concluído!';
-      if (res.summary) {
-        renderModalState(!!res.summary.hasData, res.summary);
-      } else {
-        const freshDetail = await window.api.getTickerDetail(currentAssetTicker);
-        if (freshDetail && freshDetail.ok && freshDetail.summary) {
-          renderModalState(!!freshDetail.summary.hasData, freshDetail.summary);
-        }
+
+      // Re-query database immediately for activeTicker
+      const freshDetail = await window.api.getTickerDetail(activeTicker);
+      const summary = (freshDetail && freshDetail.ok && freshDetail.summary) ? freshDetail.summary : res.summary;
+
+      // Update modal immediately if user is still on this ticker
+      if (currentAssetTicker === activeTicker) {
+        renderModalState(!!(summary && summary.hasData), summary);
       }
+
       if (assetImportSuccess) {
-        assetImportSuccess.innerHTML = `✓ ${res.count} velas importadas para <strong>${escapeHtml(res.ticker)}</strong>`;
+        assetImportSuccess.innerHTML = `✓ ${res.count} velas importadas para <strong>${escapeHtml(activeTicker)}</strong>`;
         assetImportSuccess.hidden = false;
       }
 
@@ -2174,7 +2200,8 @@
       if (assetFilePlaceholder) assetFilePlaceholder.hidden = false;
       if (assetFileSelected) assetFileSelected.hidden = true;
 
-      updateWatchlistBadge(currentAssetTicker, res.summary);
+      // Update main table (My List) row immediately to show the two date pills
+      await updateWatchlistBadge(activeTicker, summary);
     } catch (err) {
       if (assetImportProgressWrap) assetImportProgressWrap.hidden = true;
       if (assetImportError) {
