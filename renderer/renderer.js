@@ -995,6 +995,50 @@
     });
   }
 
+  const btnPurgeInactive = document.getElementById('btn-purge-inactive');
+  if (btnPurgeInactive) {
+    btnPurgeInactive.addEventListener('click', async () => {
+      const ok = await openConfirmModal({
+        title: 'Limpar Ativos Inativos / Antigos do Índice',
+        message: 'Tens a certeza que desejas remover da base de dados todos os ativos de índices sem registos de cotação atualizados nos últimos 60 dias?',
+        confirmLabel: 'Sim, limpar inativos',
+        cancelLabel: 'Cancelar',
+        danger: true
+      });
+      if (!ok) return;
+
+      btnPurgeInactive.disabled = true;
+      const span = btnPurgeInactive.querySelector('span');
+      const originalText = span ? span.textContent : btnPurgeInactive.textContent;
+      if (span) span.textContent = 'A limpar...';
+
+      try {
+        const res = await window.api.purgeInactiveStocks(60);
+        if (res && res.ok) {
+          const count = res.totalPurged || 0;
+          const msg = count > 0 
+            ? `Limpeza concluída: ${count} ativos inativos/antigos removidos da base de dados.`
+            : 'Nenhum ativo inativo encontrado (todos os registos estão atualizados nos últimos 60 dias).';
+          if (typeof status !== 'undefined' && status) {
+            status.textContent = msg;
+          }
+          await loadInitial();
+        } else {
+          if (typeof status !== 'undefined' && status) {
+            status.textContent = 'Erro na limpeza: ' + (res && res.error ? res.error : 'desconhecido');
+          }
+        }
+      } catch (err) {
+        if (typeof status !== 'undefined' && status) {
+          status.textContent = 'Erro ao limpar ativos: ' + (err.message || String(err));
+        }
+      } finally {
+        btnPurgeInactive.disabled = false;
+        if (span) span.textContent = originalText;
+      }
+    });
+  }
+
   // Ordenação por direção
   const sortDirectionHeader = document.getElementById('sort-direction');
   if (sortDirectionHeader) {

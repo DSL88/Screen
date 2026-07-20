@@ -80,8 +80,7 @@ const CAC40 = [
   { ticker: 'FR.PA', name: 'Valeo SA' },
   { ticker: 'DG.PA', name: 'Vinci SA' },
   { ticker: 'VIE.PA', name: 'Veolia Environnement SA' },
-  { ticker: 'URW.PA', name: 'Unibail-Rodamco-Westfield SE' },
-  { ticker: 'ATO.PA', name: 'Atos SE' }
+  { ticker: 'URW.PA', name: 'Unibail-Rodamco-Westfield SE' }
 ];
 
 const AEX25 = [
@@ -107,7 +106,6 @@ const AEX25 = [
   { ticker: 'SHELL.AS', name: 'Shell PLC' },
   { ticker: 'UMG.AS', name: 'Universal Music Group NV' },
   { ticker: 'UNA.AS', name: 'Unilever PLC' },
-  { ticker: 'VLK.AS', name: 'Volkswagen AG' },
   { ticker: 'WKL.AS', name: 'Wolters Kluwer NV' },
   { ticker: 'ASRNL.AS', name: 'ASR Nederland NV' }
 ];
@@ -116,7 +114,6 @@ const SMI = [
   { ticker: 'ABBN.SW', name: 'ABB Ltd' },
   { ticker: 'ALC.SW', name: 'Alcon Inc' },
   { ticker: 'ADEN.SW', name: 'Adecco Group AG' },
-  { ticker: 'CSGN.SW', name: 'Credit Suisse Group AG' },
   { ticker: 'GEBN.SW', name: 'Geberit AG' },
   { ticker: 'GIVN.SW', name: 'Givaudan SA' },
   { ticker: 'HLBN.SW', name: 'Holcim Ltd' },
@@ -421,17 +418,66 @@ const PSI = [
   { ticker: 'EGL.LS',  name: 'Mota-Engil, SGPS, S.A.' },
   { ticker: 'GALP.LS', name: 'Galp Energia, SGPS, S.A.' },
   { ticker: 'IBS.LS',  name: 'Ibersol, SGPS, S.A.' },
-  { ticker: 'IPR.LS',  name: 'Impresa, SGPS, S.A.' },
   { ticker: 'JMT.LS',  name: 'Jerónimo Martins, SGPS, S.A.' },
-  { ticker: 'NBA.LS',  name: 'Novabase, SGPS, S.A.' },
   { ticker: 'NOS.LS',  name: 'NOS, SGPS, S.A.' },
   { ticker: 'NVG.LS',  name: 'Navigator Company, S.A.' },
   { ticker: 'RAM.LS',  name: 'Ramada Investimentos, SGPS, S.A.' },
   { ticker: 'RENE.LS', name: 'REN - Redes Energéticas Nacionais, SGPS, S.A.' },
   { ticker: 'SEM.LS',  name: 'Semapa - Sociedade de Investimento e Gestão, SGPS, S.A.' },
-  { ticker: 'SON.LS',  name: 'Sonae, SGPS, S.A.' },
-  { ticker: 'SONC.LS', name: 'Sonae Capital, SGPS, S.A.' },
-  { ticker: 'VAF.LS',  name: 'Greenvolt - Energias Renováveis, S.A.' }
+  { ticker: 'SON.LS',  name: 'Sonae, SGPS, S.A.' }
+];
+
+const EUROSTOXX50 = [
+  { ticker: 'ADS.DE',   name: 'adidas AG' },
+  { ticker: 'ADYEN.AS', name: 'Adyen NV' },
+  { ticker: 'AIR.PA',   name: 'Airbus SE' },
+  { ticker: 'ALV.DE',   name: 'Allianz SE' },
+  { ticker: 'AMS.MC',   name: 'Amadeus IT Group, S.A.' },
+  { ticker: 'ASML.AS',  name: 'ASML Holding NV' },
+  { ticker: 'CS.PA',    name: 'AXA SA' },
+  { ticker: 'BAS.DE',   name: 'BASF SE' },
+  { ticker: 'BAYN.DE',  name: 'Bayer AG' },
+  { ticker: 'BBVA.MC',  name: 'Banco Bilbao Vizcaya Argentaria, S.A.' },
+  { ticker: 'BNP.PA',   name: 'BNP Paribas SA' },
+  { ticker: 'BMW.DE',   name: 'Bayerische Motoren Werke AG' },
+  { ticker: 'BN.PA',    name: 'Danone SA' },
+  { ticker: 'MBG.DE',   name: 'Mercedes-Benz Group AG' },
+  { ticker: 'DBK.DE',   name: 'Deutsche Bank AG' },
+  { ticker: 'DHL.DE',   name: 'Deutsche Post AG' },
+  { ticker: 'DTE.DE',   name: 'Deutsche Telekom AG' },
+  { ticker: 'ENEL.MI',  name: 'Enel S.p.A.' },
+  { ticker: 'ENGI.PA',  name: 'Engie SA' },
+  { ticker: 'ENI.MI',   name: 'Eni S.p.A.' },
+  { ticker: 'EL.PA',    name: 'EssilorLuxottica SA' },
+  { ticker: 'FLTR.L',   name: 'Flutter Entertainment plc' },
+  { ticker: 'RMS.PA',   name: 'Hermès International SCA' },
+  { ticker: 'IBE.MC',   name: 'Iberdrola, S.A.' },
+  { ticker: 'ITX.MC',   name: 'Inditex' },
+  { ticker: 'INGA.AS',  name: 'ING Groep NV' },
+  { ticker: 'ISP.MI',   name: 'Intesa Sanpaolo S.p.A.' },
+  { ticker: 'KER.PA',   name: 'Kering SA' },
+  { ticker: 'OR.PA',    name: "L'Oréal SA" },
+  { ticker: 'MC.PA',    name: 'LVMH Moët Hennessy Louis Vuitton SE' },
+  { ticker: 'MUV2.DE',  name: 'Munich Re' },
+  { ticker: 'NOKIA.HE', name: 'Nokia Corporation' },
+  { ticker: 'PRX.AS',   name: 'Prosus NV' },
+  { ticker: 'RHM.DE',   name: 'Rheinmetall AG' },
+  { ticker: 'RI.PA',    name: 'Pernod Ricard SA' },
+  { ticker: 'SAF.PA',   name: 'Safran SA' },
+  { ticker: 'SAN.PA',   name: 'Sanofi SA' },
+  { ticker: 'SAP.DE',   name: 'SAP SE' },
+  { ticker: 'SU.PA',    name: 'Schneider Electric SE' },
+  { ticker: 'SIE.DE',   name: 'Siemens AG' },
+  { ticker: 'STLA.PA',  name: 'Stellantis NV' },
+  { ticker: 'STM.PA',   name: 'STMicroelectronics NV' },
+  { ticker: 'TTE.PA',   name: 'TotalEnergies SE' },
+  { ticker: 'UCG.MI',   name: 'UniCredit S.p.A.' },
+  { ticker: 'DG.PA',    name: 'Vinci SA' },
+  { ticker: 'VOW3.DE',  name: 'Volkswagen AG' },
+  { ticker: 'VNA.DE',   name: 'Vonovia SE' },
+  { ticker: 'SAN.MC',   name: 'Banco Santander, S.A.' },
+  { ticker: 'IFX.DE',   name: 'Infineon Technologies AG' },
+  { ticker: 'REL.L',    name: 'RELX PLC' }
 ];
 
 const IBEX35 = [
@@ -971,7 +1017,7 @@ const SP500 = [
 ];
 
 const INDICES = {
-  PSI, IBEX35, SP500,
+  PSI, IBEX35, SP500, EUROSTOXX50,
   DAX40, CAC40, AEX25, SMI, BEL20, OMXS30,
   FTSE100, NIKKEI30, HANGSENG30,
   FTSEMIB, OMXC20
@@ -980,6 +1026,7 @@ const INDICES = {
 const WORLD_INDICES = [
   { id: 'PSI',        name: 'Portugal — PSI-20',         country: 'Portugal',   countryEn: 'Portugal',         flag: 'PT', aliases: ['psi', 'psi-20', 'lisbon', 'lisboa'],         hasComponents: true  },
   { id: 'IBEX35',     name: 'Espanha — IBEX 35',         country: 'Espanha',    countryEn: 'Spain',            flag: 'ES', aliases: ['ibex', 'ibex35', 'madrid', 'ibex-35'],       hasComponents: true  },
+  { id: 'EUROSTOXX50', name: 'Europa — Euro Stoxx 50',    country: 'Europa',     countryEn: 'Europe',           flag: 'EU', aliases: ['eurostoxx', 'eurostoxx50', 'stoxx50', 'europe', 'stoxx'], hasComponents: true },
   { id: 'SP500',      name: 'EUA — S&P 500',             country: 'EUA',        countryEn: 'USA',              flag: 'US', aliases: ['s&p', 's&p500', 'sp500', 'snp', 's&p 500'], hasComponents: true  },
   { id: 'NASDAQ100',  name: 'EUA — Nasdaq 100',          country: 'EUA',        countryEn: 'USA',              flag: 'US', aliases: ['nasdaq', 'nasdaq100', 'nasdaq-100'],         hasComponents: false },
   { id: 'DOW30',      name: 'EUA — Dow Jones 30',        country: 'EUA',        countryEn: 'USA',              flag: 'US', aliases: ['dow', 'djia', 'dow jones'],                   hasComponents: false },
@@ -1063,7 +1110,7 @@ function getTickersForIndices(indices) {
 }
 
 module.exports = {
-  PSI, IBEX35, SP500, DAX40, CAC40, AEX25, SMI, BEL20, OMXS30,
+  PSI, IBEX35, SP500, EUROSTOXX50, DAX40, CAC40, AEX25, SMI, BEL20, OMXS30,
   FTSE100, NIKKEI30, HANGSENG30,
   FTSEMIB, OMXC20,
   INDICES, WORLD_INDICES,

@@ -108,11 +108,18 @@ class Scanner {
           candles = await fetchWithRetry(t.ticker, timeframe, 3);
           this.db.cacheOHLCV(`${t.ticker}_${timeframe}`, candles);
         } catch (e) {
-          hooks.onError({ ticker: t.ticker, message: `Falha ao obter dados: ${e.message || e}`, runId });
+          const isInactive = e.isInactive || e.isNotFound || /404|not found|inativo|deslistado|sem volume/i.test(e.message || '');
+          if (isInactive) {
+            console.log(`  [${String(processed).padStart(4)}/${total}] ${(t.ticker || '???').padEnd(10)} [SKIP INATIVO] ${e.message || 'Ticker deslistado ou inativo'}`);
+            hooks.onError({ ticker: t.ticker, message: `[SKIP INATIVO] ${e.message || 'Deslistado/Inativo'}`, runId, isInactive: true });
+          } else {
+            hooks.onError({ ticker: t.ticker, message: `Falha ao obter dados: ${e.message || e}`, runId });
+          }
           candles = null;
         }
 
         if (!candles || candles.length < 60) {
+          if (!candles) return;
           console.log(`  [${String(processed).padStart(4)}/${total}] ${(t.ticker || '???').padEnd(10)} SKIP: insuficientes candles (${candles?.length || 0})`);
           return;
         }
