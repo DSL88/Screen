@@ -151,6 +151,15 @@ class DB {
         );
       `);
     }
+
+    const customCols = this.db.prepare("PRAGMA table_info(custom_tickers)").all();
+    const customColsSet = new Set(customCols.map(c => c.name));
+    if (!customColsSet.has('country')) {
+      this.db.exec('ALTER TABLE custom_tickers ADD COLUMN country TEXT');
+    }
+    if (!customColsSet.has('index_name')) {
+      this.db.exec('ALTER TABLE custom_tickers ADD COLUMN index_name TEXT');
+    }
   }
 
   _seedParams() {
@@ -237,14 +246,18 @@ class DB {
   }
 
   addCustomTicker(t) {
+    const country = t.country || '';
+    const indexName = t.indexName || t.index_name || t.index || '';
     this.db.prepare(`
-      INSERT INTO custom_tickers (ticker, name, exchange, type)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO custom_tickers (ticker, name, exchange, type, country, index_name)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(ticker) DO UPDATE SET
         name = excluded.name,
         exchange = excluded.exchange,
-        type = excluded.type
-    `).run(t.ticker, t.name || '', t.exchange || '', t.type || '');
+        type = excluded.type,
+        country = excluded.country,
+        index_name = excluded.index_name
+    `).run(t.ticker, t.name || '', t.exchange || '', t.type || '', country, indexName);
   }
 
   addCustomTickersBulk(list) {
@@ -440,6 +453,9 @@ class DB {
   }
 
   upsertStock(stock) {
+    const name = stock.name || stock.ticker || '';
+    const country = stock.country || '';
+    const indexName = stock.indexName || stock.index_name || stock.index || 'CUSTOM';
     this.db.prepare(`
       INSERT INTO stocks (ticker, name, country, index_name)
       VALUES (?, ?, ?, ?)
@@ -447,7 +463,7 @@ class DB {
         name = excluded.name,
         country = excluded.country,
         index_name = excluded.index_name
-    `).run(stock.ticker, stock.name, stock.country, stock.indexName);
+    `).run(stock.ticker, name, country, indexName);
   }
 
   saveHistoricalCandlesFromImport(ticker, candles) {

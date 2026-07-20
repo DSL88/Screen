@@ -304,32 +304,75 @@
   <div class="modal-backdrop" id="modal-add" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div class="modal-header">
-        <div class="modal-title" id="modal-title">Adicionar Ticker</div>
+        <div class="modal-title" id="modal-title">Adicionar Ticker Manualmente</div>
         <button class="modal-close" id="modal-close" aria-label="Fechar">×</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label class="form-label" for="modal-ticker">Símbolo</label>
+          <label class="form-label" for="modal-ticker">Código da Ação (Ticker) *</label>
           <div class="form-input-wrap">
             <input
               type="text"
               id="modal-ticker"
               class="form-input"
-              placeholder="AAPL, EDP.LIS, ^GSPC..."
+              placeholder="ex: BCP.LS, AAPL, ITX.MC..."
               autocomplete="off"
               spellcheck="false"
               maxlength="15"
+              required
             />
             <span class="form-hint" id="modal-ticker-hint"></span>
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label" for="modal-name">Nome (opcional)</label>
+          <label class="form-label" for="modal-name">Nome da Empresa *</label>
           <input
             type="text"
             id="modal-name"
             class="form-input"
-            placeholder="Apple Inc."
+            placeholder="ex: Banco Comercial Português"
+            required
+          />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="modal-country">País *</label>
+          <input
+            type="text"
+            id="modal-country"
+            class="form-input"
+            placeholder="ex: Portugal, Espanha, EUA..."
+            required
+          />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="modal-index-select">Índice Respetivo *</label>
+          <select id="modal-index-select" class="form-input" required>
+            <option value="" disabled selected>-- Seleciona o Índice --</option>
+            <option value="PSI">Portugal — PSI (PSI-20)</option>
+            <option value="IBEX35">Espanha — IBEX 35</option>
+            <option value="EUROSTOXX50">Europa — Euro Stoxx 50</option>
+            <option value="SP500">EUA — S&P 500</option>
+            <option value="DAX40">Alemanha — DAX 40</option>
+            <option value="CAC40">França — CAC 40</option>
+            <option value="AEX25">Holanda — AEX 25</option>
+            <option value="SMI">Suíça — SMI</option>
+            <option value="BEL20">Bélgica — BEL 20</option>
+            <option value="OMXS30">Suécia — OMX Stockholm 30</option>
+            <option value="FTSE100">UK — FTSE 100</option>
+            <option value="FTSEMIB">Itália — FTSE MIB</option>
+            <option value="OMXC20">Dinamarca — OMX Copenhagen 20</option>
+            <option value="NIKKEI30">Japão — Nikkei 225</option>
+            <option value="HANGSENG30">Hong Kong — Hang Seng</option>
+            <option value="CUSTOM_NEW">+ Digitar Novo Índice / Personalizado...</option>
+          </select>
+        </div>
+        <div class="form-group" id="group-custom-index" hidden>
+          <label class="form-label" for="modal-index-custom">Nome do Novo Índice *</label>
+          <input
+            type="text"
+            id="modal-index-custom"
+            class="form-input"
+            placeholder="ex: MINHA_CARTEIRA, TECNOLOGIA_PT..."
           />
         </div>
         <div class="form-group">
