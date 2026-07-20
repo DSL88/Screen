@@ -826,6 +826,7 @@
     `;
     body.appendChild(tr);
     tr.querySelector('.btn-investir').addEventListener('click', (e) => {
+      e.stopPropagation();
       const btn = e.currentTarget;
       openInvestModal({
         ticker: btn.dataset.ticker,
@@ -835,6 +836,10 @@
         stop_loss: parseFloat(btn.dataset.stop),
         take_profit: parseFloat(btn.dataset.tp)
       });
+    });
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('.btn-investir')) return;
+      if (r && r.ticker) openAssetDetailModal(r.ticker);
     });
   }
   
@@ -1881,8 +1886,8 @@
   const assetImportProgressText = document.getElementById('asset-import-progress-text');
   const assetImportError = document.getElementById('asset-import-error');
   const assetImportSuccess = document.getElementById('asset-import-success');
-  const assetSummaryZone = document.getElementById('asset-summary-zone');
-  const assetUploadZone = document.getElementById('asset-upload-zone');
+  const assetSummaryZone = document.getElementById('history-summary-zone');
+  const assetUploadZone = document.getElementById('upload-zone');
   const assetDeleteBtn = document.getElementById('asset-detail-delete-history');
 
   let currentAssetTicker = null;
@@ -1891,26 +1896,32 @@
   function fmtDate(d) {
     if (!d) return '—';
     const p = d.split('-');
-    return `${p[2]}/${p[1]}/${p[0]}`;
+    return `${p[2]}-${p[1]}-${p[0]}`;
   }
 
-  function toggleModalState(hasData) {
-    if (assetSummaryZone) assetSummaryZone.style.display = hasData ? '' : 'none';
-    if (assetUploadZone) assetUploadZone.style.display = hasData ? 'none' : '';
+  function renderModalState(hasData, details) {
+    const summary = details || {};
+    const firstEl = document.getElementById('asset-detail-first-date');
+    const lastEl = document.getElementById('asset-detail-last-date');
+    const candlesEl = document.getElementById('asset-detail-total-candles');
+
+    if (hasData) {
+      document.getElementById('upload-zone').style.display = 'none';
+      document.getElementById('history-summary-zone').style.display = 'block';
+      if (firstEl) firstEl.textContent = fmtDate(summary.firstDate);
+      if (lastEl) lastEl.textContent = fmtDate(summary.lastDate);
+      if (candlesEl) candlesEl.textContent = (summary.totalCandles || 0).toLocaleString('pt-PT');
+    } else {
+      document.getElementById('upload-zone').style.display = 'block';
+      document.getElementById('history-summary-zone').style.display = 'none';
+      if (firstEl) firstEl.textContent = '—';
+      if (lastEl) lastEl.textContent = '—';
+      if (candlesEl) candlesEl.textContent = '0';
+    }
   }
 
   function updateAssetHistoryUI(summary) {
-    const hasData = summary && summary.hasData;
-    if (!hasData) {
-      assetDetailFirstDate.textContent = '—';
-      assetDetailLastDate.textContent = '—';
-      assetDetailTotalCandles.textContent = '0';
-    } else {
-      assetDetailFirstDate.textContent = fmtDate(summary.firstDate);
-      assetDetailLastDate.textContent = fmtDate(summary.lastDate);
-      assetDetailTotalCandles.textContent = summary.totalCandles.toLocaleString('pt-PT');
-    }
-    toggleModalState(hasData);
+    renderModalState(!!(summary && summary.hasData), summary || {});
   }
 
   async function openAssetDetailModal(ticker) {
@@ -1926,7 +1937,7 @@
     assetDetailLastDate.textContent = '—';
     assetDetailTotalCandles.textContent = '—';
 
-    toggleModalState(false);
+    renderModalState(false);
 
     if (assetDetailSyncStatus) {
       assetDetailSyncStatus.hidden = true;
