@@ -455,7 +455,7 @@ class DB {
   upsertStock(stock) {
     const name = stock.name || stock.ticker || '';
     const country = stock.country || '';
-    const indexName = stock.indexName || stock.index_name || stock.index || 'CUSTOM';
+    const indexName = stock.indexName || stock.index_name || stock.index || '';
     this.db.prepare(`
       INSERT INTO stocks (ticker, name, country, index_name)
       VALUES (?, ?, ?, ?)
