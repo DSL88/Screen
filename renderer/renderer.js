@@ -956,6 +956,28 @@
 
   btnClearAll.addEventListener('click', clearAll);
 
+  const btnImportCsv = document.getElementById('btn-import-csv');
+  if (btnImportCsv) {
+    btnImportCsv.addEventListener('click', async () => {
+      btnImportCsv.disabled = true;
+      btnImportCsv.querySelector('span').textContent = 'A importar...';
+      try {
+        const res = await window.api.importHistoricalCsv();
+        if (res && res.ok) {
+          status.textContent = res.message || `${res.inserted} velas importadas.`;
+          await loadInitial();
+        } else if (res && res.error !== 'cancelled') {
+          status.textContent = 'Erro na importação: ' + (res.error || 'desconhecido');
+        }
+      } catch (err) {
+        status.textContent = 'Erro na importação: ' + (err.message || String(err));
+      } finally {
+        btnImportCsv.disabled = false;
+        btnImportCsv.querySelector('span').textContent = 'Importar CSV';
+      }
+    });
+  }
+
   // Ordenação por direção
   const sortDirectionHeader = document.getElementById('sort-direction');
   if (sortDirectionHeader) {
