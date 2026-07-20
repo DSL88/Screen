@@ -375,17 +375,16 @@
     }
     hideSuggestions();
 
-    openAddModal();
-
     const meta = guessStockMetadata(t.ticker, t.exchange);
+
+    openAddModal();
 
     if (modalTicker) modalTicker.value = t.ticker;
     if (modalName) modalName.value = t.name || t.ticker;
-    if (modalCountry) modalCountry.value = t.country || '';
-    
-    setModalIndexValue('');
+    if (modalCountry) modalCountry.value = t.country || meta.country || '';
+    setModalIndexValue(meta.indexName);
 
-    showModalHint('invalid', '⚠️ Seleciona obrigatoriamente o Índice no menu abaixo.');
+    showModalHint('valid', '✓ Escolhe/confirma o Índice para onde queres enviar a ação.');
   }
 
   function renderSuggestions(res, query) {
@@ -421,8 +420,10 @@
   }
 
   function hideSuggestions() {
-    suggestionsEl.hidden = true;
-    suggestionsEl.innerHTML = '';
+    if (suggestionsEl) {
+      suggestionsEl.hidden = true;
+      suggestionsEl.innerHTML = '';
+    }
   }
 
   function renderLoading() {
@@ -448,8 +449,81 @@
     }
   }
 
+  const PREDEFINED_INDEXES = [
+    { id: 'PSI', label: 'PSI (Portugal)' },
+    { id: 'IBEX35', label: 'IBEX35 (Espanha)' },
+    { id: 'SP500', label: 'SP500 (EUA)' },
+    { id: 'EUROSTOXX50', label: 'EUROSTOXX50 (Europa)' },
+    { id: 'NASDAQ', label: 'NASDAQ (EUA)' },
+    { id: 'DAX40', label: 'DAX40 (Alemanha)' },
+    { id: 'CAC40', label: 'CAC40 (França)' },
+    { id: 'AEX25', label: 'AEX25 (Holanda)' },
+    { id: 'SMI', label: 'SMI (Suíça)' },
+    { id: 'BEL20', label: 'BEL20 (Bélgica)' },
+    { id: 'OMXS30', label: 'OMXS30 (Suécia)' },
+    { id: 'FTSE100', label: 'FTSE100 (Reino Unido)' },
+    { id: 'FTSEMIB', label: 'FTSEMIB (Itália)' },
+    { id: 'OMXC20', label: 'OMXC20 (Dinamarca)' },
+    { id: 'NIKKEI30', label: 'NIKKEI30 (Japão)' },
+    { id: 'HANGSENG30', label: 'HANGSENG30 (Hong Kong)' },
+    { id: 'BOVESPA', label: 'BOVESPA (Brasil)' },
+    { id: 'Outros', label: 'Outros' },
+  ];
+
+  function populateIndexDropdown() {
+    if (!modalIndexSelect) return;
+    const currentIndexes = new Map();
+    for (const t of watchlist) {
+      const idxId = (t.indexId || t.indexName || '').trim().toUpperCase();
+      if (idxId && !currentIndexes.has(idxId)) {
+        currentIndexes.set(idxId, t.indexName || idxId);
+      }
+    }
+    modalIndexSelect.innerHTML = '';
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '';
+    defaultOpt.disabled = true;
+    defaultOpt.selected = true;
+    defaultOpt.textContent = '-- Seleciona o Índice --';
+    modalIndexSelect.appendChild(defaultOpt);
+    if (currentIndexes.size > 0) {
+      const groupCurrent = document.createElement('optgroup');
+      groupCurrent.label = '⭐ Índices Atuais na My List';
+      for (const [idxId, idxName] of currentIndexes) {
+        const opt = document.createElement('option');
+        opt.value = idxId;
+        opt.textContent = idxName || idxId;
+        groupCurrent.appendChild(opt);
+      }
+      modalIndexSelect.appendChild(groupCurrent);
+    }
+    const groupOther = document.createElement('optgroup');
+    groupOther.label = '🌐 Outros Índices de Mercado';
+    let hasOther = false;
+    for (const idx of PREDEFINED_INDEXES) {
+      if (!currentIndexes.has(idx.id.toUpperCase())) {
+        const opt = document.createElement('option');
+        opt.value = idx.id;
+        opt.textContent = idx.label;
+        groupOther.appendChild(opt);
+        hasOther = true;
+      }
+    }
+    if (hasOther) {
+      modalIndexSelect.appendChild(groupOther);
+    }
+    const groupCustom = document.createElement('optgroup');
+    groupCustom.label = '➕ Personalizado';
+    const customOpt = document.createElement('option');
+    customOpt.value = 'CUSTOM_NEW';
+    customOpt.textContent = '+ Digitar Novo Índice / Personalizado...';
+    groupCustom.appendChild(customOpt);
+    modalIndexSelect.appendChild(groupCustom);
+  }
+
   function openAddModal() {
     if (!modalAdd) return;
+    populateIndexDropdown();
     modalAdd.hidden = false;
     showModalError(null);
     if (modalCountry) modalCountry.value = '';
