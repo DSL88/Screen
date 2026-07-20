@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 
 const REQUIRED_COLUMNS = ['date', 'open', 'high', 'low', 'close', 'volume'];
 
@@ -160,4 +161,84 @@ function parseFile(filePath) {
   }
 }
 
-module.exports = { parseFile };
+const REQUIRED_IMPORT_COLUMNS = ['ticker', 'date', 'open', 'high', 'low', 'close', 'volume'];
+
+async function importFromCsvFile(filePath, db) {
+  if (!fs.existsSync(filePath)) {
+    return { ok: false, error: 'File not found' };
+  }
+
+  const colMap = {};
+  let inserted = 0;
+  let skipped = 0;
+  let headerParsed = false;
+  let firstDate = null;
+  let lastDate = null;
+  let stmt;
+
+  const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+  try {
+    db.db.exec('BEGIN TRANSACTION');
+
+    stmt = db.db.prepare(
+      'INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+
+      const values = line.split(/[;,\t]/).map(v => v.trim());
+
+      if (!headerParsed) {
+        for (const col of REQUIRED_IMPORT_COLUMNS) {
+          const idx = values.findIndex(v => normalizeHeader(v) === col);
+          if (idx === -1) {
+            db.db.exec('ROLLBACK');
+            return { ok: false, error: `Missing required column: ${col}` };
+          }
+          colMap[col] = idx;
+        }
+        headerParsed = true;
+        continue;
+      }
+
+      const ticker = (values[colMap.ticker] || '').trim().toUpperCase();
+      const date = (values[colMap.date] || '').trim();
+      const closeStr = (values[colMap.close] || '').trim();
+
+      if (!ticker || !isValidDate(date) || !closeStr || isNaN(parseFloat(closeStr))) {
+        skipped++;
+        continue;
+      }
+
+      const open = parseFloat((values[colMap.open] || '').trim());
+      const high = parseFloat((values[colMap.high] || '').trim());
+      const low = parseFloat((values[colMap.low] || '').trim());
+      const close = parseFloat(closeStr);
+      const volume = parseInt((values[colMap.volume] || '').replace(/,/g, ''), 10);
+
+      if ([open, high, low, volume].some(v => isNaN(v))) {
+        skipped++;
+        continue;
+      }
+
+      stmt.run(ticker, date, open, high, low, close, volume);
+      inserted++;
+
+      if (!firstDate || date < firstDate) firstDate = date;
+      if (!lastDate || date > lastDate) lastDate = date;
+    }
+
+    db.db.exec('COMMIT');
+    return { ok: true, inserted, skipped, firstDate, lastDate };
+  } catch (err) {
+    try { db.db.exec('ROLLBACK'); } catch (_) {}
+    return { ok: false, error: err.message };
+  } finally {
+    stream.close();
+  }
+}
+
+module.exports = { parseFile, importFromCsvFile };

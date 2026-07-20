@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
 const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
@@ -6,7 +6,7 @@ const os = require('os');
 const Database = require('./src/db/database');
 const yahooClient = require('./src/data/yahooClient');
 const tickerLists = require('./src/data/tickerLists');
-const { parseFile } = require('./src/importer/historicalImporter');
+const { parseFile, importFromCsvFile } = require('./src/importer/historicalImporter');
 
 // Pre-calculate mapping from ticker to index ID for fast lookup
 const tickerToIndexMap = {};
@@ -667,35 +667,49 @@ app.whenReady().then(async () => {
           return { ok: false, error: 'missing-ticker-or-file' };
         }
 
-        // 1. Parse the file
-        const parseResult = parseFile(filePath);
-        if (!parseResult.ok) {
-          return { ok: false, error: parseResult.error };
-        }
+        const ext = path.extname(filePath).toLowerCase();
+        const ticker = payload.ticker.toUpperCase().trim();
+        let count;
+        let firstDate;
+        let lastDate;
 
-        // 2. Upsert stock metadata (creates if not exists, updates if exists)
         db.upsertStock({
-          ticker: payload.ticker.toUpperCase().trim(),
+          ticker,
           name: payload.name || payload.ticker,
           country: payload.country || '',
           indexName: payload.indexName || ''
         });
 
-        // 3. Save historical candles
-        const result = db.saveHistoricalCandlesFromImport(
-          payload.ticker.toUpperCase().trim(),
-          parseResult.candles
-        );
+        if (ext === '.csv') {
+          const importResult = await importFromCsvFile(filePath, db);
+          if (!importResult.ok) {
+            return { ok: false, error: importResult.error };
+          }
+          count = importResult.inserted;
+          firstDate = importResult.firstDate;
+          lastDate = importResult.lastDate;
+        } else {
+          const parseResult = parseFile(filePath);
+          if (!parseResult.ok) {
+            return { ok: false, error: parseResult.error };
+          }
 
-        const firstDate = parseResult.candles[0].date;
-        const lastDate = parseResult.candles[parseResult.candles.length - 1].date;
+          const result = db.saveHistoricalCandlesFromImport(
+            ticker,
+            parseResult.candles
+          );
 
-        const newSummary = db.getHistoricalSummary(payload.ticker.toUpperCase().trim());
+          count = result.changes;
+          firstDate = parseResult.candles[0].date;
+          lastDate = parseResult.candles[parseResult.candles.length - 1].date;
+        }
+
+        const newSummary = db.getHistoricalSummary(ticker);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('import-success', {
-            ticker: payload.ticker.toUpperCase().trim(),
-            totalCandles: result.changes,
+            ticker,
+            totalCandles: count,
             startDate: firstDate,
             endDate: lastDate,
             summary: newSummary
@@ -704,12 +718,12 @@ app.whenReady().then(async () => {
 
         return {
           ok: true,
-          count: result.changes,
-          ticker: payload.ticker.toUpperCase().trim(),
+          count,
+          ticker,
           firstDate,
           lastDate,
           summary: newSummary,
-          message: `${result.changes} velas importadas para ${payload.ticker.toUpperCase().trim()}`
+          message: `${count} velas importadas para ${ticker}`
         };
       } catch (err) {
         console.error('[import:bulk] Error:', err.message);
@@ -719,6 +733,56 @@ app.whenReady().then(async () => {
         if (tmpPath) {
           try { fs.unlinkSync(tmpPath); } catch (_) { /* ignore */ }
         }
+      }
+    });
+
+    // ═══════════════════════════════════════════════════════
+    //  IMPORT HISTORICAL CSV — Manual CSV import via native dialog
+    // ═══════════════════════════════════════════════════════
+    ipcMain.handle('import-historical-csv', async () => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return { ok: false, error: 'window-unavailable' };
+      }
+
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: 'Selecionar ficheiro CSV histórico',
+        properties: ['openFile'],
+        filters: [{ name: 'CSV Files', extensions: ['csv'] }]
+      });
+
+      if (result.canceled || !result.filePaths.length) {
+        return { ok: false, error: 'cancelled' };
+      }
+
+      const filePath = result.filePaths[0];
+
+      try {
+        const importResult = await importFromCsvFile(filePath, db);
+        if (!importResult.ok) {
+          return { ok: false, error: importResult.error };
+        }
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('import-success', {
+            ticker: null,
+            totalCandles: importResult.inserted,
+            startDate: importResult.firstDate,
+            endDate: importResult.lastDate,
+            summary: null
+          });
+        }
+
+        return {
+          ok: true,
+          inserted: importResult.inserted,
+          skipped: importResult.skipped,
+          firstDate: importResult.firstDate,
+          lastDate: importResult.lastDate,
+          message: `${importResult.inserted} velas importadas (${importResult.skipped} ignoradas)`
+        };
+      } catch (err) {
+        console.error('[import-historical-csv] Error:', err.message);
+        return { ok: false, error: err.message || String(err) };
       }
     });
 
