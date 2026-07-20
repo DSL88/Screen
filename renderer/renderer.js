@@ -13,6 +13,18 @@
   const searchClear = document.getElementById('search-clear');
   const suggestionsEl = document.getElementById('suggestions');
   const watchlistEl = document.getElementById('watchlist');
+  if (watchlistEl) {
+    watchlistEl.addEventListener('click', (e) => {
+      const removeBtn = e.target.closest('.wl-remove');
+      const groupHeader = e.target.closest('.watchlist-group-header');
+      if (removeBtn || groupHeader) return;
+
+      const item = e.target.closest('.watchlist-item');
+      if (item && item.dataset.ticker) {
+        openAssetDetailModal(item.dataset.ticker);
+      }
+    });
+  }
   const watchlistEmpty = document.getElementById('watchlist-empty');
   const watchlistCount = document.getElementById('watchlist-count');
   const btnClearAll = document.getElementById('btn-clear-all');
@@ -1895,25 +1907,32 @@
 
   function fmtDate(d) {
     if (!d) return '—';
-    const p = d.split('-');
-    return `${p[2]}-${p[1]}-${p[0]}`;
+    const str = String(d).split('T')[0];
+    const p = str.split('-');
+    if (p.length === 3 && p[0].length === 4) {
+      return `${p[2]}-${p[1]}-${p[0]}`;
+    }
+    return String(d);
   }
 
   function renderModalState(hasData, details) {
     const summary = details || {};
+    const uploadZone = document.getElementById('upload-zone');
+    const historySummaryZone = document.getElementById('history-summary-zone');
     const firstEl = document.getElementById('asset-detail-first-date');
     const lastEl = document.getElementById('asset-detail-last-date');
     const candlesEl = document.getElementById('asset-detail-total-candles');
 
+    // Always keep upload-zone visible so user can add/update sheets anytime for the asset
+    if (uploadZone) uploadZone.style.display = 'block';
+
     if (hasData) {
-      document.getElementById('upload-zone').style.display = 'none';
-      document.getElementById('history-summary-zone').style.display = 'block';
+      if (historySummaryZone) historySummaryZone.style.display = 'block';
       if (firstEl) firstEl.textContent = fmtDate(summary.firstDate);
       if (lastEl) lastEl.textContent = fmtDate(summary.lastDate);
-      if (candlesEl) candlesEl.textContent = (summary.totalCandles || 0).toLocaleString('pt-PT');
+      if (candlesEl) candlesEl.textContent = summary.totalCandles != null ? Number(summary.totalCandles).toLocaleString('pt-PT') : '—';
     } else {
-      document.getElementById('upload-zone').style.display = 'block';
-      document.getElementById('history-summary-zone').style.display = 'none';
+      if (historySummaryZone) historySummaryZone.style.display = 'none';
       if (firstEl) firstEl.textContent = '—';
       if (lastEl) lastEl.textContent = '—';
       if (candlesEl) candlesEl.textContent = '0';
@@ -1925,19 +1944,15 @@
   }
 
   async function openAssetDetailModal(ticker) {
-    if (!modalAssetDetail) return;
-    currentAssetTicker = ticker;
+    if (!modalAssetDetail || !ticker) return;
+    const cleanTicker = String(ticker).toUpperCase().trim();
+    currentAssetTicker = cleanTicker;
     assetSelectedFile = null;
 
-    assetDetailTickerEl.textContent = ticker;
-    assetDetailNameEl.textContent = '';
-    assetDetailCountryEl.textContent = '—';
-    assetDetailIndexEl.textContent = '—';
-    assetDetailFirstDate.textContent = '—';
-    assetDetailLastDate.textContent = '—';
-    assetDetailTotalCandles.textContent = '—';
-
-    renderModalState(false);
+    if (assetDetailTickerEl) assetDetailTickerEl.textContent = cleanTicker;
+    if (assetDetailNameEl) assetDetailNameEl.textContent = '';
+    if (assetDetailCountryEl) assetDetailCountryEl.textContent = '—';
+    if (assetDetailIndexEl) assetDetailIndexEl.textContent = '—';
 
     if (assetDetailSyncStatus) {
       assetDetailSyncStatus.hidden = true;
@@ -1956,22 +1971,30 @@
       if (label) label.textContent = 'Sincronizar via Yahoo Finance';
     }
 
-    modalAssetDetail.hidden = false;
-
+    // Perform IPC check FIRST before displaying modal
     try {
-      const res = await window.api.getTickerDetail(ticker);
-      if (!res || !res.ok) return;
-      if (res.stock) {
-        assetDetailNameEl.textContent = res.stock.name || '';
-        assetDetailCountryEl.textContent = res.stock.country || '—';
-        assetDetailIndexEl.textContent = res.stock.index_name || '—';
-      } else if (res.custom) {
-        assetDetailNameEl.textContent = res.custom.name || '';
-        assetDetailCountryEl.textContent = '—';
-        assetDetailIndexEl.textContent = '—';
+      const res = await window.api.getTickerDetail(cleanTicker);
+      if (res && res.ok) {
+        if (res.stock) {
+          assetDetailNameEl.textContent = res.stock.name || '';
+          assetDetailCountryEl.textContent = res.stock.country || '—';
+          assetDetailIndexEl.textContent = res.stock.index_name || '—';
+        } else if (res.custom) {
+          assetDetailNameEl.textContent = res.custom.name || '';
+          assetDetailCountryEl.textContent = '—';
+          assetDetailIndexEl.textContent = '—';
+        }
+        const summary = res.summary || {};
+        renderModalState(!!summary.hasData, summary);
+      } else {
+        renderModalState(false, {});
       }
-      updateAssetHistoryUI(res.summary);
-    } catch (_) { /* silently ignore */ }
+    } catch (err) {
+      console.error('[openAssetDetailModal] Error fetching ticker detail:', err);
+      renderModalState(false, {});
+    }
+
+    modalAssetDetail.hidden = false;
   }
 
   function closeAssetDetailModal() {
@@ -2029,7 +2052,7 @@
         assetDetailSyncStatus.hidden = false;
       }
       if (res.summary) updateAssetHistoryUI(res.summary);
-      updateWatchlistBadge(currentAssetTicker);
+      updateWatchlistBadge(currentAssetTicker, res.summary);
     } catch (err) {
       if (assetDetailSyncStatus) {
         assetDetailSyncStatus.textContent = 'Erro: ' + (err.message || String(err));
@@ -2069,8 +2092,8 @@
         }
         return;
       }
-      updateAssetHistoryUI({ hasData: false, firstDate: null, lastDate: null, totalCandles: 0 });
-      updateWatchlistBadge(currentAssetTicker);
+      renderModalState(false, { hasData: false, firstDate: null, lastDate: null, totalCandles: 0 });
+      updateWatchlistBadge(currentAssetTicker, { hasData: false, firstDate: null, lastDate: null, totalCandles: 0 });
     } catch (err) {
       if (assetDetailSyncStatus) {
         assetDetailSyncStatus.textContent = 'Erro: ' + (err.message || String(err));
@@ -2133,7 +2156,14 @@
       }
 
       if (assetImportProgressText) assetImportProgressText.textContent = 'Concluído!';
-      if (res.summary) updateAssetHistoryUI(res.summary);
+      if (res.summary) {
+        renderModalState(!!res.summary.hasData, res.summary);
+      } else {
+        const freshDetail = await window.api.getTickerDetail(currentAssetTicker);
+        if (freshDetail && freshDetail.ok && freshDetail.summary) {
+          renderModalState(!!freshDetail.summary.hasData, freshDetail.summary);
+        }
+      }
       if (assetImportSuccess) {
         assetImportSuccess.innerHTML = `✓ ${res.count} velas importadas para <strong>${escapeHtml(res.ticker)}</strong>`;
         assetImportSuccess.hidden = false;
@@ -2144,7 +2174,7 @@
       if (assetFilePlaceholder) assetFilePlaceholder.hidden = false;
       if (assetFileSelected) assetFileSelected.hidden = true;
 
-      updateWatchlistBadge(currentAssetTicker);
+      updateWatchlistBadge(currentAssetTicker, res.summary);
     } catch (err) {
       if (assetImportProgressWrap) assetImportProgressWrap.hidden = true;
       if (assetImportError) {

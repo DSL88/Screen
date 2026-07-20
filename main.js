@@ -830,7 +830,8 @@ app.whenReady().then(async () => {
       if (!ticker) return { ok: false, error: 'missing-ticker' };
       try {
         const hasData = db.hasHistoricalData(ticker);
-        return { ok: true, ticker, hasData };
+        const summary = db.getHistoricalSummary(ticker);
+        return { ok: true, ticker, hasData, summary };
       } catch (err) {
         return { ok: false, error: err.message || String(err) };
       }
