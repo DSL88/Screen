@@ -667,11 +667,7 @@ app.whenReady().then(async () => {
           return { ok: false, error: 'missing-ticker-or-file' };
         }
 
-        const ext = path.extname(filePath).toLowerCase();
         const ticker = payload.ticker.toUpperCase().trim();
-        let count;
-        let firstDate;
-        let lastDate;
 
         db.upsertStock({
           ticker,
@@ -680,29 +676,15 @@ app.whenReady().then(async () => {
           indexName: payload.indexName || ''
         });
 
-        if (ext === '.csv') {
-          const importResult = await importFromCsvFile(filePath, db);
-          if (!importResult.ok) {
-            return { ok: false, error: importResult.error };
-          }
-          count = importResult.inserted;
-          firstDate = importResult.firstDate;
-          lastDate = importResult.lastDate;
-        } else {
-          const parseResult = parseFile(filePath);
-          if (!parseResult.ok) {
-            return { ok: false, error: parseResult.error };
-          }
-
-          const result = db.saveHistoricalCandlesFromImport(
-            ticker,
-            parseResult.candles
-          );
-
-          count = result.changes;
-          firstDate = parseResult.candles[0].date;
-          lastDate = parseResult.candles[parseResult.candles.length - 1].date;
+        const parseResult = parseFile(filePath);
+        if (!parseResult.ok) {
+          return { ok: false, error: parseResult.error };
         }
+
+        const result = db.saveHistoricalCandlesFromImport(ticker, parseResult.candles);
+        const count = result.changes;
+        const firstDate = parseResult.candles[0].date;
+        const lastDate = parseResult.candles[parseResult.candles.length - 1].date;
 
         const newSummary = db.getHistoricalSummary(ticker);
 
@@ -733,6 +715,60 @@ app.whenReady().then(async () => {
         if (tmpPath) {
           try { fs.unlinkSync(tmpPath); } catch (_) { /* ignore */ }
         }
+      }
+    });
+
+    // ═══════════════════════════════════════════════════════
+    //  IMPORT HISTORICAL DATA — Import from file path (CSV/XLSX)
+    // ═══════════════════════════════════════════════════════
+    ipcMain.handle('import-historical-data', async (_event, payload) => {
+      if (!payload || !payload.ticker || !payload.filePath) {
+        return { ok: false, error: 'missing-ticker-or-filePath' };
+      }
+
+      const ticker = payload.ticker.toUpperCase().trim();
+
+      try {
+        const parseResult = parseFile(payload.filePath);
+        if (!parseResult.ok) {
+          return { ok: false, error: parseResult.error };
+        }
+
+        db.upsertStock({
+          ticker,
+          name: payload.name || ticker,
+          country: payload.country || '',
+          indexName: payload.indexName || ''
+        });
+
+        const result = db.saveHistoricalCandlesFromImport(ticker, parseResult.candles);
+        const count = result.changes;
+        const firstDate = parseResult.candles[0].date;
+        const lastDate = parseResult.candles[parseResult.candles.length - 1].date;
+        const newSummary = db.getHistoricalSummary(ticker);
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('import-success', {
+            ticker,
+            totalCandles: count,
+            startDate: firstDate,
+            endDate: lastDate,
+            summary: newSummary
+          });
+        }
+
+        return {
+          ok: true,
+          count,
+          ticker,
+          firstDate,
+          lastDate,
+          summary: newSummary,
+          message: `${count} velas importadas para ${ticker}`
+        };
+      } catch (err) {
+        console.error('[import-historical-data] Error:', err.message);
+        return { ok: false, error: err.message || String(err) };
       }
     });
 

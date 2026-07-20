@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('api', {
   syncTickerYahoo: (ticker) => ipcRenderer.invoke('ticker:syncYahoo', { ticker }),
   deleteTickerHistory: (ticker) => ipcRenderer.invoke('ticker:deleteHistory', { ticker }),
   importHistoricalCsv: () => ipcRenderer.invoke('import-historical-csv'),
+  importHistoricalData: (data) => ipcRenderer.invoke('import-historical-data', data),
   on: (channel, callback) => {
     if (!ALLOWED_EVENTS.has(channel)) {
       throw new Error(`Channel "${channel}" is not allowed`);
