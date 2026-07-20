@@ -492,7 +492,7 @@
             <div class="asset-detail-section-title-row">
               <div class="asset-detail-section-title">Histórico Local</div>
               <button class="asset-detail-delete-btn" id="asset-detail-delete-history" title="Apagar Histórico">
-                <span class="asset-delete-icon"></span>
+                <span class="asset-delete-icon">🗑️</span>
                 <span>Apagar Histórico</span>
               </button>
             </div>
@@ -502,7 +502,7 @@
                 <span class="asset-detail-history-value" id="asset-detail-first-date">—</span>
               </div>
               <div class="asset-detail-history-card">
-                <span class="asset-detail-history-label">Último Registo</span>
+                <span class="asset-detail-history-label">Última Atualização</span>
                 <span class="asset-detail-history-value" id="asset-detail-last-date">—</span>
               </div>
               <div class="asset-detail-history-card">
@@ -511,26 +511,26 @@
               </div>
             </div>
           </div>
+        </div>
 
-          <div class="asset-detail-actions-section">
-            <div class="asset-detail-section-title">Sincronização</div>
-            <button class="btn-primary asset-detail-sync-btn" id="asset-detail-sync-yahoo">
-              <span class="btn-label">Sincronizar via Yahoo Finance</span>
-              <span class="spinner" id="asset-detail-sync-spinner" hidden></span>
-            </button>
-            <div class="asset-detail-sync-status" id="asset-detail-sync-status" hidden></div>
-          </div>
+        <div class="asset-detail-actions-section">
+          <div class="asset-detail-section-title">Sincronização Online</div>
+          <button class="btn-primary asset-detail-sync-btn" id="asset-detail-sync-yahoo">
+            <span class="btn-label">Sincronizar via Yahoo Finance</span>
+            <span class="spinner" id="asset-detail-sync-spinner" hidden></span>
+          </button>
+          <div class="asset-detail-sync-status" id="asset-detail-sync-status" hidden></div>
         </div>
 
         <div id="upload-zone">
           <div class="asset-detail-import-section">
-            <div class="asset-detail-section-title">Importar Dados Históricos</div>
+            <div class="asset-detail-section-title">Importar / Adicionar Folha de Dados (.csv / .xlsx)</div>
             <div class="file-upload-area" id="asset-file-upload-area">
               <input type="file" id="asset-import-file" accept=".csv,.xlsx" hidden />
               <div class="file-upload-placeholder" id="asset-file-upload-placeholder">
                 <span class="file-upload-icon"></span>
                 <span class="file-upload-text">Arrasta ou clica para carregar .csv / .xlsx</span>
-                <span class="file-upload-hint">Os dados serão associados a este ativo</span>
+                <span class="file-upload-hint">Os dados da folha serão associados a este ativo</span>
               </div>
               <div class="file-upload-selected" id="asset-file-upload-selected" hidden>
                 <span class="file-upload-filename" id="asset-file-upload-filename"></span>
