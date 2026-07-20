@@ -132,6 +132,39 @@ function processQuotes(quotes, ticker) {
   return deduped;
 }
 
+function validateStockActivity(candles, ticker) {
+  if (!Array.isArray(candles) || candles.length === 0) {
+    const err = new Error(`Ticker ${ticker} sem cotações registadas (inativo/deslistado).`);
+    err.isInactive = true;
+    throw err;
+  }
+
+  // Verificar as últimas 30 velas (ou todas se menos de 30)
+  const recentCandles = candles.slice(-30);
+  const activeCandles = recentCandles.filter(c => c && isNum(c.close) && c.close > 0 && isNum(c.volume) && c.volume > 0);
+
+  if (activeCandles.length === 0) {
+    const err = new Error(`Ticker ${ticker} inativo: sem volume nem negociação ativa nos últimos 30 dias úteis.`);
+    err.isInactive = true;
+    throw err;
+  }
+
+  // Verificar se a cotação mais recente não está estagnada há mais de 45 dias corridos
+  const latestDateStr = recentCandles[recentCandles.length - 1].date;
+  if (latestDateStr) {
+    const latestDate = new Date(latestDateStr + 'T00:00:00Z');
+    const now = new Date();
+    const diffDays = Math.floor((now - latestDate) / (1000 * 60 * 60 * 24));
+    if (diffDays > 45) {
+      const err = new Error(`Ticker ${ticker} inativo: última cotação há ${diffDays} dias (${latestDateStr}).`);
+      err.isInactive = true;
+      throw err;
+    }
+  }
+
+  return true;
+}
+
 async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3, customPeriod1 = null) {
   const period1 = customPeriod1 || new Date();
 
@@ -179,12 +212,14 @@ async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3, customPeri
 
         const quotes = result && result.quotes;
         if (!Array.isArray(quotes) || quotes.length === 0) {
-          // Se este variante não funcionou, tentar o próximo
           if (tickerVariants.indexOf(tickerVariant) < tickerVariants.length - 1) {
             console.warn(`[yahooClient] ${ticker}: variante "${tickerVariant}" sem dados, a tentar próximo...`);
             continue;
           }
-          throw new Error(`No candles returned for ${ticker} (tentadas variantes: ${tickerVariants.join(', ')})`);
+          const err = new Error(`Ticker ${ticker} não encontrado / 404 no Yahoo Finance.`);
+          err.isNotFound = true;
+          err.isInactive = true;
+          throw err;
         }
 
         const candles = processQuotes(quotes, ticker);
@@ -194,7 +229,9 @@ async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3, customPeri
           const warn = `[yahooClient] AVISO: ${ticker} produziu apenas ${candles.length} velas válidas ` +
             `(${droppedNull} removidas por nulos). Warm-up incompleto (mínimo ${MIN_CANDLES}).`;
           if (candles.length === 0) {
-            throw new Error(`All candles null/empty for ${ticker} após sanitização`);
+            const err = new Error(`Todas as velas nulas/vazias para ${ticker} (ativo deslistado/inativo).`);
+            err.isInactive = true;
+            throw err;
           }
           console.warn(warn);
           if (candles.length < WARMUP_TARGET) {
@@ -202,15 +239,25 @@ async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3, customPeri
           }
         }
 
-        // Se chegou aqui com sucesso, retornar
+        // Validar atividade recente do ativo (volume > 0 nos últimos 30 dias úteis)
+        validateStockActivity(candles, ticker);
+
         if (tickerVariant !== ticker) {
           console.log(`[yahooClient] ${ticker}: a usar variante "${tickerVariant}" com sucesso`);
         }
         return candles;
       } catch (err) {
         const code = err && err.code;
-        const isRateLimit = code === 429 || /rate|429|too many/i.test(String(err.message || ''));
+        const msg = String(err && err.message ? err.message : '');
+        const isRateLimit = code === 429 || /rate|429|too many/i.test(msg);
+        const isNotFoundOrInactive = err.isInactive || err.isNotFound || /404|not found|quote not found/i.test(msg);
         
+        if (isNotFoundOrInactive) {
+          err.isInactive = true;
+          err.isNotFound = true;
+          throw err; // Não tentar retries para tickers comprovadamente inexistentes/inativos
+        }
+
         // Se é rate limit, não adianta tentar outros variantes
         if (isRateLimit) {
           if (i === attempts - 1) {

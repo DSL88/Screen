@@ -544,6 +544,54 @@ class DB {
     return { changes: result.changes || 0 };
   }
 
+  // ═══════════════════════════════════════════════════════════
+  //  PURGE INACTIVE STOCKS — Remover ativos inativos / antigos
+  // ═══════════════════════════════════════════════════════════
+  purgeInactiveStocks(daysCutoff = 60) {
+    const cutoffDate = new Date(Date.now() - daysCutoff * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    // Obter todos os tickers ativos com registos de cotação atualizados nos últimos `daysCutoff` dias
+    const activeRows = this.db.prepare(`
+      SELECT ticker FROM historical_prices GROUP BY ticker HAVING MAX(date) >= ?
+    `).all(cutoffDate);
+    const activeTickers = new Set(activeRows.map(r => r.ticker.toUpperCase().trim()));
+
+    // Identificar tickers a remover da tabela stocks
+    const allStocks = this.db.prepare('SELECT ticker FROM stocks').all();
+    const stocksToRemove = allStocks
+      .map(s => s.ticker)
+      .filter(t => !activeTickers.has(t.toUpperCase().trim()));
+
+    // Identificar tickers a remover da tabela market_shortcuts
+    const allShortcuts = this.db.prepare('SELECT ticker FROM market_shortcuts').all();
+    const shortcutsToRemove = allShortcuts
+      .map(s => s.ticker)
+      .filter(t => !activeTickers.has(t.toUpperCase().trim()));
+
+    let deletedStocks = 0;
+    let deletedShortcuts = 0;
+
+    const tx = this.db.transaction(() => {
+      for (const t of stocksToRemove) {
+        const res = this.db.prepare('DELETE FROM stocks WHERE ticker = ?').run(t);
+        deletedStocks += res.changes || 0;
+      }
+      for (const t of shortcutsToRemove) {
+        const res = this.db.prepare('DELETE FROM market_shortcuts WHERE ticker = ?').run(t);
+        deletedShortcuts += res.changes || 0;
+      }
+    });
+    tx();
+
+    return {
+      cutoffDate,
+      deletedStocks,
+      deletedShortcuts,
+      totalPurged: deletedStocks + deletedShortcuts,
+      purgedTickers: Array.from(new Set([...stocksToRemove, ...shortcutsToRemove]))
+    };
+  }
+
   close() {
     if (this.db) this.db.close();
   }

@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('api', {
   getTickerDetail: (ticker) => ipcRenderer.invoke('ticker:getDetail', { ticker }),
   syncTickerYahoo: (ticker) => ipcRenderer.invoke('ticker:syncYahoo', { ticker }),
   deleteTickerHistory: (ticker) => ipcRenderer.invoke('ticker:deleteHistory', { ticker }),
+  purgeInactiveStocks: (daysCutoff = 60) => ipcRenderer.invoke('db:purgeInactive', { daysCutoff }),
   importHistoricalCsv: () => ipcRenderer.invoke('import-historical-csv'),
   importHistoricalData: (data) => ipcRenderer.invoke('import-historical-data', data),
   on: (channel, callback) => {

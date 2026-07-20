@@ -920,6 +920,16 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('db:purgeInactive', async (_event, payload) => {
+      try {
+        const days = payload && payload.daysCutoff ? Number(payload.daysCutoff) : 60;
+        const result = db.purgeInactiveStocks(days);
+        return { ok: true, ...result };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     createWindow();
   } catch (err) {
     console.error('Fatal init error:', err);
