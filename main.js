@@ -470,7 +470,11 @@ app.whenReady().then(async () => {
       if (!payload || !payload.ticker) return { ok: false, error: 'missing-ticker' };
       const symbolUpper = String(payload.ticker).toUpperCase().trim();
       const country = payload.country || '';
-      const indexName = payload.indexName || payload.index_name || payload.index || 'CUSTOM';
+      const indexName = payload.indexName || payload.index_name || payload.index;
+
+      if (!indexName) {
+        return { ok: false, error: 'missing-index-name' };
+      }
 
       // 1. Guardar na tabela custom_tickers
       db.addCustomTicker({
@@ -482,7 +486,7 @@ app.whenReady().then(async () => {
         indexName
       });
 
-      // 2. Guardar/Atualizar na tabela stocks garantindo que index_name e country ficam preenchidos
+      // 2. Guardar/Atualizar na tabela stocks garantindo que index_name guarda rigorosamente o índice selecionado pelo utilizador
       db.upsertStock({
         ticker: symbolUpper,
         name: payload.name || symbolUpper,

@@ -43,7 +43,7 @@
   const modalTicker = document.getElementById('modal-ticker');
   const modalName = document.getElementById('modal-name');
   const modalCountry = document.getElementById('modal-country');
-  const modalIndexSelect = document.getElementById('modal-index-select');
+  const modalIndexSelect = document.getElementById('manual-stock-index') || document.getElementById('modal-index-select');
   const modalIndexCustom = document.getElementById('modal-index-custom');
   const groupCustomIndex = document.getElementById('group-custom-index');
   const modalResults = document.getElementById('modal-results');
@@ -381,11 +381,11 @@
 
     if (modalTicker) modalTicker.value = t.ticker;
     if (modalName) modalName.value = t.name || t.ticker;
-    if (modalCountry) modalCountry.value = t.country || meta.country;
+    if (modalCountry) modalCountry.value = t.country || '';
     
-    setModalIndexValue(t.indexName || t.index || meta.indexName);
+    setModalIndexValue('');
 
-    showModalHint('valid', '✓ Ticker selecionado. Confirma/altera o Índice na lista abaixo.');
+    showModalHint('invalid', '⚠️ Seleciona obrigatoriamente o Índice no menu abaixo.');
   }
 
   function renderSuggestions(res, query) {
@@ -539,7 +539,8 @@
 
     const indexName = getSelectedModalIndex();
     if (!indexName) {
-      showModalError('Índice Respetivo é obrigatório (seleciona um índice da lista ou digita o nome).');
+      showModalError('Seleção de Índice é obrigatória. Por favor, seleciona um índice da lista.');
+      showModalHint('invalid', '⚠️ Seleção de Índice é obrigatória.');
       if (modalIndexSelect) modalIndexSelect.focus();
       return;
     }
@@ -565,12 +566,11 @@
         ${t.exchange ? `<span class="modal-result-exchange">${escapeHtml(t.exchange)}</span>` : ''}
       `;
       div.addEventListener('click', () => {
-        const meta = guessStockMetadata(t.ticker, t.exchange);
         modalTicker.value = t.ticker;
         modalName.value = t.name;
-        if (modalCountry) modalCountry.value = meta.country;
-        setModalIndexValue(meta.indexName);
-        showModalHint('valid', '✓ Ticker preenchido. Confirma o País e o Índice.');
+        if (modalCountry) modalCountry.value = t.country || '';
+        setModalIndexValue('');
+        showModalHint('invalid', '⚠️ Ticker preenchido. Seleciona obrigatoriamente o Índice na caixa de seleção.');
         modalResults.innerHTML = '';
       });
       modalResults.appendChild(div);
@@ -898,12 +898,19 @@
       status.textContent = `${t.ticker} já está na watchlist.`;
       return;
     }
-    const idxName = t.indexName || t.index_name || t.index || 'CUSTOM';
+    const idxName = t.indexName || t.index_name || t.index;
+    if (!idxName) {
+      console.warn('addTicker falhou: Seleção de Índice é obrigatória.');
+      if (typeof status !== 'undefined' && status) {
+        status.textContent = 'Erro: É obrigatório selecionar um índice para a ação.';
+      }
+      return;
+    }
     const country = t.country || '';
     const entry = { ticker: t.ticker, name: t.name || '', indexId: idxName, indexName: idxName, country };
     watchlist.push(entry);
     renderWatchlist(t.ticker);
-    status.textContent = `${t.ticker} adicionado à watchlist.`;
+    status.textContent = `${t.ticker} adicionado à watchlist (${idxName}).`;
     try {
       await window.api.addTicker({
         ticker: t.ticker,
@@ -1129,10 +1136,10 @@
         } else if (tickerFirst) {
           tickerFirst.click();
         } else if (!isInWatchlist(v)) {
-          addTicker({ ticker: v.toUpperCase(), name: v.toUpperCase() });
+          hideSuggestions();
+          promptAddTickerWithIndex({ ticker: v.toUpperCase(), name: v.toUpperCase() });
           searchInput.value = '';
           if (searchClear) searchClear.hidden = true;
-          hideSuggestions();
         }
       }
     });
