@@ -160,6 +160,46 @@ class DB {
     if (!customColsSet.has('index_name')) {
       this.db.exec('ALTER TABLE custom_tickers ADD COLUMN index_name TEXT');
     }
+
+    this._migrateRecalculateSLTP();
+  }
+
+  _migrateRecalculateSLTP() {
+    const SL_PCT = 0.014;
+    const TP_PCT = 0.028;
+
+    const tx = this.db.transaction(() => {
+      this.db.exec(`
+        UPDATE active_trades
+        SET stop_loss = CASE
+          WHEN direcao = 'COMPRA' THEN preco_entrada * (1 - ${SL_PCT})
+          WHEN direcao = 'VENDA'  THEN preco_entrada * (1 + ${SL_PCT})
+          ELSE stop_loss
+        END,
+        take_profit = CASE
+          WHEN direcao = 'COMPRA' THEN preco_entrada * (1 + ${TP_PCT})
+          WHEN direcao = 'VENDA'  THEN preco_entrada * (1 - ${TP_PCT})
+          ELSE take_profit
+        END
+        WHERE preco_entrada IS NOT NULL AND preco_entrada > 0
+      `);
+
+      this.db.exec(`
+        UPDATE historical_signals
+        SET stop_loss = CASE
+          WHEN direcao = 'COMPRA' THEN preco_entrada * (1 - ${SL_PCT})
+          WHEN direcao = 'VENDA'  THEN preco_entrada * (1 + ${SL_PCT})
+          ELSE stop_loss
+        END,
+        take_profit = CASE
+          WHEN direcao = 'COMPRA' THEN preco_entrada * (1 + ${TP_PCT})
+          WHEN direcao = 'VENDA'  THEN preco_entrada * (1 - ${TP_PCT})
+          ELSE take_profit
+        END
+        WHERE preco_entrada IS NOT NULL AND preco_entrada > 0
+      `);
+    });
+    tx();
   }
 
   _seedParams() {

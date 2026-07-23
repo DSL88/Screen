@@ -2030,6 +2030,8 @@
       <td class="col-name name">${escapeHtml(trade.nome || '')}</td>
       <td class="col-dir"><span class="dir-badge ${dirClass}">${escapeHtml(trade.direcao)}</span></td>
       <td class="col-num">${trade.preco_entrada != null ? trade.preco_entrada.toFixed(2) : '—'}</td>
+      <td class="col-num sl-val">${trade.stop_loss != null ? trade.stop_loss.toFixed(2) : '—'}</td>
+      <td class="col-num tp-val">${trade.take_profit != null ? trade.take_profit.toFixed(2) : '—'}</td>
       <td class="col-num">${trade.preco_fecho != null ? trade.preco_fecho.toFixed(2) : '—'}</td>
       <td class="col-num" style="color: ${resultColor}; font-weight: 600;">${resultText}</td>
       <td class="col-motivo"><span class="dir-badge" style="background: var(--surface-2); border-color: var(--border-strong); color: var(--text-dim); padding: 2px 8px; font-size: 10px;">${escapeHtml(motivoLabel)}</span></td>
@@ -2043,7 +2045,7 @@
     try {
       const res = await window.api.listTrades();
       if (!res || !res.ok) {
-        historyBody.innerHTML = '<tr class="empty"><td colspan="9">Erro ao carregar histórico.</td></tr>';
+        historyBody.innerHTML = '<tr class="empty"><td colspan="11">Erro ao carregar histórico.</td></tr>';
         return;
       }
 
@@ -2051,7 +2053,7 @@
       historyBody.innerHTML = '';
       
       if (closed.length === 0) {
-        historyBody.innerHTML = '<tr class="empty"><td colspan="9">Nenhum trade no histórico. As operações fechadas aparecerão aqui.</td></tr>';
+        historyBody.innerHTML = '<tr class="empty"><td colspan="11">Nenhum trade no histórico. As operações fechadas aparecerão aqui.</td></tr>';
         if (btnClearHistory) btnClearHistory.disabled = true;
       } else {
         // Ordenar por data de fecho (mais recente primeiro)
