@@ -19,7 +19,8 @@ const BB_PERIOD = 30;
 const BB_MULT = 2.0;
 const ATR_PERIOD = 14;
 const ATR_MULT = 1.5;
-const TP_PCT = 0.025;
+const SL_PCT = 0.014;
+const TP_PCT = 0.028;
 const VOL_SMA_PERIOD = 20;
 
 // ── Classificação bull/bear por estado ──────────────────────
@@ -139,6 +140,7 @@ function analyzeSeries(candles, params = {}) {
   const bbMult = params.bbMult ?? BB_MULT;
   const atrPeriod = params.atrPeriod ?? ATR_PERIOD;
   const atrMult = params.atrMult ?? ATR_MULT;
+  const slPct = params.slPct ?? SL_PCT;
   const tpPct = params.tpPct ?? TP_PCT;
 
   // Descarta velas com close null (ainda em formação)
@@ -245,11 +247,11 @@ function analyzeSeries(candles, params = {}) {
   let stopLoss = null;
   let takeProfit = null;
 
-  if (direction === 'COMPRA' && close != null && atrVal != null) {
-    stopLoss = close - atrMult * atrVal;
+  if (direction === 'COMPRA' && close != null) {
+    stopLoss = close * (1 - slPct);
     takeProfit = close * (1 + tpPct);
-  } else if (direction === 'VENDA' && close != null && atrVal != null) {
-    stopLoss = close + atrMult * atrVal;
+  } else if (direction === 'VENDA' && close != null) {
+    stopLoss = close * (1 + slPct);
     takeProfit = close * (1 - tpPct);
   }
 
@@ -309,6 +311,7 @@ module.exports = {
   BB_MULT,
   ATR_PERIOD,
   ATR_MULT,
+  SL_PCT,
   TP_PCT,
   VOL_SMA_PERIOD,
   analyzeSeries,
