@@ -36,11 +36,13 @@
     const items = watchlistEl.querySelectorAll('.watchlist-item');
     const headers = watchlistEl.querySelectorAll('.watchlist-group-header');
     const groups = watchlistEl.querySelectorAll('.watchlist-group-items');
+    const cards = watchlistEl.querySelectorAll('.watchlist-group-card');
 
     if (!term) {
       items.forEach(item => item.classList.remove('is-filtered-out'));
       headers.forEach(header => header.classList.remove('is-filtered-out'));
       groups.forEach(group => group.classList.remove('is-filtered-out'));
+      cards.forEach(card => card.classList.remove('is-filtered-out'));
       const filterEmptyMsg = watchlistEl.querySelector('.watchlist-filter-empty');
       if (filterEmptyMsg) filterEmptyMsg.remove();
       const wlEmpty = document.getElementById('watchlist-empty');
@@ -49,8 +51,9 @@
     }
 
     let visibleCount = 0;
-    groups.forEach(group => {
-      const groupItems = group.querySelectorAll('.watchlist-item');
+    cards.forEach(card => {
+      const groupItems = card.querySelectorAll('.watchlist-item');
+      const header = card.querySelector('.watchlist-group-header');
       let groupVisibleCount = 0;
 
       groupItems.forEach(item => {
@@ -68,17 +71,10 @@
         }
       });
 
-      const header = group.previousElementSibling;
       if (groupVisibleCount === 0) {
-        group.classList.add('is-filtered-out');
-        if (header && header.classList.contains('watchlist-group-header')) {
-          header.classList.add('is-filtered-out');
-        }
+        card.classList.add('is-filtered-out');
       } else {
-        group.classList.remove('is-filtered-out');
-        if (header && header.classList.contains('watchlist-group-header')) {
-          header.classList.remove('is-filtered-out');
-        }
+        card.classList.remove('is-filtered-out');
       }
     });
 
@@ -253,11 +249,15 @@
       const g = groups[key];
       const isCollapsed = collapsedGroups.has(key);
 
+      const groupCard = document.createElement('div');
+      groupCard.className = 'watchlist-group-card';
+      groupCard.dataset.groupId = key;
+
       const header = document.createElement('div');
       header.className = 'watchlist-group-header' + (isCollapsed ? ' is-collapsed' : '');
       header.dataset.groupId = key;
       header.innerHTML = `
-        <span class="wl-group-chevron">${isCollapsed ? '▸' : '▾'}</span>
+        <span class="wl-group-chevron">▾</span>
         <span class="wl-group-title">${escapeHtml(g.name)}</span>
         <span class="wl-group-count">${g.items.length}</span>
       `;
@@ -269,7 +269,6 @@
         }
         renderWatchlist();
       });
-      watchlistEl.appendChild(header);
 
       const itemsContainer = document.createElement('div');
       itemsContainer.className = 'watchlist-group-items' + (isCollapsed ? ' is-hidden' : '');
@@ -297,7 +296,10 @@
         item.addEventListener('click', () => openAssetDetailModal(t.ticker));
         itemsContainer.appendChild(item);
       }
-      watchlistEl.appendChild(itemsContainer);
+
+      groupCard.appendChild(header);
+      groupCard.appendChild(itemsContainer);
+      watchlistEl.appendChild(groupCard);
     }
 
     updateWatchlistCount();
@@ -2361,6 +2363,10 @@
   async function openAssetDetailModal(ticker) {
     if (!modalAssetDetail || !ticker) return;
     const cleanTicker = String(ticker).toUpperCase().trim();
+
+    watchlistEl.querySelectorAll('.watchlist-item.is-active').forEach(el => el.classList.remove('is-active'));
+    const activeItem = watchlistEl.querySelector(`.watchlist-item[data-ticker="${CSS.escape(cleanTicker)}"]`);
+    if (activeItem) activeItem.classList.add('is-active');
 
     // 1. Explicitly set active ticker for this session
     currentAssetTicker = cleanTicker;
