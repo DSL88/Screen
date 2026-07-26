@@ -161,6 +161,12 @@ class DB {
       this.db.exec('ALTER TABLE custom_tickers ADD COLUMN index_name TEXT');
     }
 
+    const stockCols = this.db.prepare("PRAGMA table_info(stocks)").all();
+    const stockColsSet = new Set(stockCols.map(c => c.name));
+    if (!stockColsSet.has('full_history_fetched')) {
+      this.db.exec('ALTER TABLE stocks ADD COLUMN full_history_fetched INTEGER DEFAULT 0');
+    }
+
     this._migrateRecalculateSLTP();
   }
 
@@ -521,6 +527,15 @@ class DB {
     `).run(stock.ticker, name, country, indexName);
   }
 
+  setFullHistoryFetched(ticker) {
+    this.db.prepare('UPDATE stocks SET full_history_fetched = 1 WHERE ticker = ?').run(ticker);
+  }
+
+  getFullHistoryFetched(ticker) {
+    const row = this.db.prepare('SELECT full_history_fetched FROM stocks WHERE ticker = ?').get(ticker);
+    return row ? !!row.full_history_fetched : false;
+  }
+
   saveHistoricalCandlesFromImport(ticker, candles) {
     if (!Array.isArray(candles) || candles.length === 0) return { changes: 0 };
 
@@ -562,22 +577,31 @@ class DB {
   getHistoricalSummary(ticker) {
     const row = this.db.prepare(`
       SELECT 
-        MIN(date) as first_date,
-        MAX(date) as last_date,
-        COUNT(*) as total_candles
-      FROM historical_prices
-      WHERE ticker = ?
-    `).get(ticker);
+        h.MIN_date as first_date,
+        h.MAX_date as last_date,
+        h.total_candles,
+        COALESCE(s.full_history_fetched, 0) as full_history_fetched
+      FROM (
+        SELECT 
+          MIN(date) as MIN_date,
+          MAX(date) as MAX_date,
+          COUNT(*) as total_candles
+        FROM historical_prices
+        WHERE ticker = ?
+      ) h
+      LEFT JOIN stocks s ON s.ticker = ?
+    `).get(ticker, ticker);
 
     if (!row || row.total_candles === 0) {
-      return { hasData: false, firstDate: null, lastDate: null, totalCandles: 0 };
+      return { hasData: false, firstDate: null, lastDate: null, totalCandles: 0, fullHistoryFetched: false };
     }
 
     return {
       hasData: true,
       firstDate: row.first_date,
       lastDate: row.last_date,
-      totalCandles: row.total_candles
+      totalCandles: row.total_candles,
+      fullHistoryFetched: !!row.full_history_fetched
     };
   }
 
@@ -596,13 +620,23 @@ class DB {
       GROUP BY ticker
     `).all(...tickers);
 
+    const fetchedRows = this.db.prepare(`
+      SELECT ticker, full_history_fetched FROM stocks WHERE ticker IN (${placeholders})
+    `).all(...tickers);
+
+    const fetchedMap = {};
+    for (const r of fetchedRows) {
+      fetchedMap[r.ticker] = !!r.full_history_fetched;
+    }
+
     const result = {};
     for (const row of rows) {
       result[row.ticker] = {
         hasData: row.total_candles > 0,
         firstDate: row.first_date || null,
         lastDate: row.last_date || null,
-        totalCandles: row.total_candles || 0
+        totalCandles: row.total_candles || 0,
+        fullHistoryFetched: fetchedMap[row.ticker] || false
       };
     }
     return result;

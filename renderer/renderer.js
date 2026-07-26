@@ -219,29 +219,9 @@
   const collapsedGroups = new Set();
 
   function getCardSyncState(t) {
-    if (!t.temHistorico || !t.ultimaData) return 'card-pending';
-
-    const today = new Date();
-    const dayOfWeek = today.getDay();
-    let lastBusinessDay;
-
-    if (dayOfWeek === 0) {
-      lastBusinessDay = new Date(today);
-      lastBusinessDay.setDate(today.getDate() - 2);
-    } else if (dayOfWeek === 6) {
-      lastBusinessDay = new Date(today);
-      lastBusinessDay.setDate(today.getDate() - 1);
-    } else {
-      lastBusinessDay = new Date(today);
-    }
-
-    const y = lastBusinessDay.getFullYear();
-    const m = String(lastBusinessDay.getMonth() + 1).padStart(2, '0');
-    const d = String(lastBusinessDay.getDate()).padStart(2, '0');
-    const lastBusinessDayStr = `${y}-${m}-${d}`;
-
-    if (t.ultimaData >= lastBusinessDayStr) return 'card-synced';
-    return 'card-outdated';
+    if (t.fullHistoryFetched) return 'card-synced';
+    if (t.temHistorico) return 'card-outdated';
+    return 'card-pending';
   }
 
   function renderWatchlist(highlightTicker) {
@@ -2603,6 +2583,8 @@
             if (uploadZone) uploadZone.hidden = true;
 
             await updateWatchlistBadge(ticker, result.summary);
+            const wlEntry = watchlist.find(w => w.ticker === ticker);
+            if (wlEntry) wlEntry.fullHistoryFetched = true;
             const cardEl = watchlistEl.querySelector('.watchlist-item[data-ticker="' + CSS.escape(ticker) + '"]');
             if (cardEl) {
               cardEl.classList.remove('card-pending', 'card-outdated', 'card-synced');
