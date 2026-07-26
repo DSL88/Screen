@@ -993,7 +993,7 @@ app.whenReady().then(async () => {
           return {
             ok: true,
             ticker,
-            totalCandles: result.changes,
+            totalCandles: newSummary ? newSummary.totalCandles : result.changes,
             summary: newSummary
           };
         }

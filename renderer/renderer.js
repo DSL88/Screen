@@ -218,6 +218,32 @@
   // Track collapsed state per index group
   const collapsedGroups = new Set();
 
+  function getCardSyncState(t) {
+    if (!t.temHistorico || !t.ultimaData) return 'card-pending';
+
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    let lastBusinessDay;
+
+    if (dayOfWeek === 0) {
+      lastBusinessDay = new Date(today);
+      lastBusinessDay.setDate(today.getDate() - 2);
+    } else if (dayOfWeek === 6) {
+      lastBusinessDay = new Date(today);
+      lastBusinessDay.setDate(today.getDate() - 1);
+    } else {
+      lastBusinessDay = new Date(today);
+    }
+
+    const y = lastBusinessDay.getFullYear();
+    const m = String(lastBusinessDay.getMonth() + 1).padStart(2, '0');
+    const d = String(lastBusinessDay.getDate()).padStart(2, '0');
+    const lastBusinessDayStr = `${y}-${m}-${d}`;
+
+    if (t.ultimaData >= lastBusinessDayStr) return 'card-synced';
+    return 'card-outdated';
+  }
+
   function renderWatchlist(highlightTicker) {
     const wlEmpty = document.getElementById('watchlist-empty');
 
@@ -281,7 +307,8 @@
 
       for (const t of g.items) {
         const item = document.createElement('div');
-        item.className = 'watchlist-item is-clickable' + (t.inativo ? ' is-inactive' : '');
+        const syncState = getCardSyncState(t);
+        item.className = 'watchlist-item is-clickable' + (t.inativo ? ' is-inactive' : '') + (syncState ? ' ' + syncState : '');
         item.dataset.ticker = t.ticker;
         if (highlightTicker && t.ticker === highlightTicker) {
           item.classList.add('just-added');
@@ -2576,6 +2603,11 @@
             if (uploadZone) uploadZone.hidden = true;
 
             await updateWatchlistBadge(ticker, result.summary);
+            const cardEl = watchlistEl.querySelector('.watchlist-item[data-ticker="' + CSS.escape(ticker) + '"]');
+            if (cardEl) {
+              cardEl.classList.remove('card-pending', 'card-outdated', 'card-synced');
+              cardEl.classList.add('card-synced');
+            }
           }
         } else {
           const errorMsg = result && result.error ? result.error : 'Erro desconhecido';
