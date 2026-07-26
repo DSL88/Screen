@@ -571,9 +571,9 @@ class Scanner {
         }
       }
 
-      if (!candles || candles.length < markovWindow + 20) continue;
+      if (!candles || candles.length < 200) continue;
 
-      for (let i = markovWindow + 20; i < candles.length; i++) {
+      for (let i = 200; i < candles.length; i++) {
         const currentCandle = candles[i];
         if (currentCandle.date < startDate) continue;
         if (currentCandle.date > endDate) break;

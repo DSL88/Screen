@@ -472,6 +472,21 @@ class DB {
     return rows.map(r => ({ ticker, ...r }));
   }
 
+  getTickerDataRange(ticker) {
+    const row = this.db.prepare(`
+      SELECT 
+        ticker,
+        MIN(date) AS first_date,
+        MAX(date) AS last_date,
+        COUNT(*) AS total_candles
+      FROM historical_prices
+      WHERE ticker = ?
+      GROUP BY ticker
+    `).get(ticker);
+
+    return row || null;
+  }
+
   getLastStoredDate(ticker) {
     const row = this.db.prepare(`
       SELECT MAX(date) as last_date

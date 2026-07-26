@@ -1781,6 +1781,11 @@ body {
 .watchlist-group-card.is-filtered-out {
   display: none;
 }
+.watchlist-item.is-inactive {
+  opacity: 0.45;
+  pointer-events: none;
+  display: none;
+}
 .watchlist-filter-empty {
   padding: 20px 8px;
   text-align: center;

@@ -39,7 +39,9 @@
     const cards = watchlistEl.querySelectorAll('.watchlist-group-card');
 
     if (!term) {
-      items.forEach(item => item.classList.remove('is-filtered-out'));
+      items.forEach(item => {
+        item.classList.remove('is-filtered-out');
+      });
       headers.forEach(header => header.classList.remove('is-filtered-out'));
       groups.forEach(group => group.classList.remove('is-filtered-out'));
       cards.forEach(card => card.classList.remove('is-filtered-out'));
@@ -57,6 +59,10 @@
       let groupVisibleCount = 0;
 
       groupItems.forEach(item => {
+        if (item.classList.contains('is-inactive')) {
+          item.classList.add('is-filtered-out');
+          return;
+        }
         const symbol = item.querySelector('.wl-symbol');
         const name = item.querySelector('.wl-name');
         const symbolText = symbol ? symbol.textContent.toLowerCase() : '';
@@ -275,7 +281,7 @@
 
       for (const t of g.items) {
         const item = document.createElement('div');
-        item.className = 'watchlist-item is-clickable';
+        item.className = 'watchlist-item is-clickable' + (t.inativo ? ' is-inactive' : '');
         item.dataset.ticker = t.ticker;
         if (highlightTicker && t.ticker === highlightTicker) {
           item.classList.add('just-added');
@@ -2340,15 +2346,14 @@
     const lastEl = document.getElementById('asset-detail-last-date');
     const candlesEl = document.getElementById('asset-detail-total-candles');
 
-    // Make upload-zone (caixa de Drag & Drop para adicionar ficheiros .csv / .xlsx) ALWAYS visible for any asset
-    if (uploadZone) uploadZone.style.display = 'block';
-
     if (hasData) {
+      if (uploadZone) uploadZone.style.display = 'none';
       if (historySummaryZone) historySummaryZone.style.display = 'block';
       if (firstEl) firstEl.textContent = fmtDate(summary.firstDate);
       if (lastEl) lastEl.textContent = fmtDate(summary.lastDate);
       if (candlesEl) candlesEl.textContent = summary.totalCandles != null ? Number(summary.totalCandles).toLocaleString('pt-PT') : '—';
     } else {
+      if (uploadZone) uploadZone.style.display = 'block';
       if (historySummaryZone) historySummaryZone.style.display = 'none';
       if (firstEl) firstEl.textContent = '—';
       if (lastEl) lastEl.textContent = '—';

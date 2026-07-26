@@ -222,9 +222,6 @@ async function handleScan({ runId, tickers, params, timeframe }) {
   let emitted = 0;
   const signalsToSend = [];
 
-  // Mínimo dinâmico: markovWindow + margem para warm-up dos indicadores
-  const minCandles = Math.max(MIN_CANDLES_WARMUP, (params.markov_window || 150) + 60);
-
   send({ type: 'progress', payload: { processed: 0, total: list.length, runId } });
 
   const tasks = list.map(t => limit(async () => {
@@ -257,18 +254,24 @@ async function handleScan({ runId, tickers, params, timeframe }) {
         candles = null;
       }
 
-      // ─ Validação rigorosa: mínimo de velas para warm-up ─────
+      let dataRange = null;
+      try {
+        dataRange = await requestDB('getTickerDataRange', { ticker: t.ticker });
+      } catch (_) { }
+
+      const minCandles = Math.max(MIN_CANDLES_WARMUP, (params.markov_window || 150) + 60);
+
       if (!candles || candles.length < minCandles) {
         const candleCount = candles?.length || 0;
         console.warn(`[Scanner] ${t.ticker}: Dados insuficientes - ${candleCount} velas (mínimo: ${minCandles})`);
-        
+
         let detailedMessage = `Dados insuficientes: ${candleCount} velas (mínimo: ${minCandles})`;
         if (candleCount === 0) {
           detailedMessage = `Nenhuma vela disponível para ${t.ticker}. O símbolo pode estar delistado ou a API falhou.`;
         } else if (candleCount < 60) {
           detailedMessage = `Muito poucas velas (${candleCount}) para ${t.ticker}. Necessário mínimo ${minCandles} para análise Markov.`;
         }
-        
+
         send({ type: 'error', payload: {
           ticker: t.ticker,
           message: detailedMessage,
@@ -281,7 +284,7 @@ async function handleScan({ runId, tickers, params, timeframe }) {
       if (!analysisCandles || analysisCandles.length < minCandles) {
         const count = analysisCandles?.length || 0;
         console.warn(`[Scanner] ${t.ticker}: Velas fechadas insuficientes - ${count} (mínimo: ${minCandles})`);
-        
+
         send({ type: 'error', payload: {
           ticker: t.ticker,
           message: `Velas fechadas insuficientes: ${count} (mínimo: ${minCandles}). Algumas velas foram descartadas por estarem em formação.`,
@@ -357,7 +360,8 @@ async function handleScan({ runId, tickers, params, timeframe }) {
             atr: atr14,
             stopLoss: result.stopLoss,
             takeProfit: result.takeProfit,
-            currentState: result.currentState
+            currentState: result.currentState,
+            rollingVwap20: result.rollingVwap20
           }
         });
       }
@@ -425,9 +429,9 @@ async function handleBacktest({ requestId, tickers, params, timeframe, startDate
       }
     }
 
-    if (!candles || candles.length < markovWindow + 20) continue;
+    if (!candles || candles.length < MIN_CANDLES_WARMUP) continue;
 
-    for (let i = markovWindow + 20; i < candles.length; i++) {
+    for (let i = MIN_CANDLES_WARMUP; i < candles.length; i++) {
       const currentCandle = candles[i];
       if (currentCandle.date < startDate) continue;
       if (currentCandle.date > endDate) break;
