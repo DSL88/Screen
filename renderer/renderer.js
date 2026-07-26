@@ -2347,18 +2347,17 @@
     const candlesEl = document.getElementById('asset-detail-total-candles');
 
     if (hasData) {
-      if (uploadZone) uploadZone.style.display = 'none';
       if (historySummaryZone) historySummaryZone.style.display = 'block';
       if (firstEl) firstEl.textContent = fmtDate(summary.firstDate);
       if (lastEl) lastEl.textContent = fmtDate(summary.lastDate);
       if (candlesEl) candlesEl.textContent = summary.totalCandles != null ? Number(summary.totalCandles).toLocaleString('pt-PT') : '—';
     } else {
-      if (uploadZone) uploadZone.style.display = 'block';
       if (historySummaryZone) historySummaryZone.style.display = 'none';
       if (firstEl) firstEl.textContent = '—';
       if (lastEl) lastEl.textContent = '—';
       if (candlesEl) candlesEl.textContent = '0';
     }
+    if (uploadZone) uploadZone.style.display = 'block';
   }
 
   function updateAssetHistoryUI(summary) {
