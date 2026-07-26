@@ -144,6 +144,11 @@
             <p>Watchlist pessoal organizada por índices de mercado. Clica num ativo para ver detalhes e sincronizar.</p>
           </div>
           <div class="topbar-actions">
+            <div class="mylist-search-wrap">
+              <span class="mylist-search-icon"></span>
+              <input type="text" id="my-list-search" class="mylist-search-input" placeholder="Pesquisar por Ticker ou Nome..." autocomplete="off" spellcheck="false" />
+              <button class="mylist-search-clear" id="my-list-search-clear" type="button" aria-label="Limpar pesquisa" hidden>×</button>
+            </div>
             <button class="btn-secondary" id="btn-purge-inactive" title="Remover ativos das listas sem registos de cotação nos últimos 60 dias">
               <span>Limpar Ativos Inativos / Antigos do Índice</span>
             </button>

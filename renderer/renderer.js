@@ -28,6 +28,106 @@
   const watchlistEmpty = document.getElementById('watchlist-empty');
   const watchlistCount = document.getElementById('watchlist-count');
   const btnClearAll = document.getElementById('btn-clear-all');
+  const myListSearchInput = document.getElementById('my-list-search');
+  const myListSearchClear = document.getElementById('my-list-search-clear');
+
+  function filterMyList(query) {
+    const term = String(query || '').toLowerCase().trim();
+    const items = watchlistEl.querySelectorAll('.watchlist-item');
+    const headers = watchlistEl.querySelectorAll('.watchlist-group-header');
+    const groups = watchlistEl.querySelectorAll('.watchlist-group-items');
+
+    if (!term) {
+      items.forEach(item => item.classList.remove('is-filtered-out'));
+      headers.forEach(header => header.classList.remove('is-filtered-out'));
+      groups.forEach(group => group.classList.remove('is-filtered-out'));
+      const filterEmptyMsg = watchlistEl.querySelector('.watchlist-filter-empty');
+      if (filterEmptyMsg) filterEmptyMsg.remove();
+      const wlEmpty = document.getElementById('watchlist-empty');
+      if (wlEmpty) wlEmpty.style.display = watchlist.length === 0 ? 'block' : 'none';
+      return;
+    }
+
+    let visibleCount = 0;
+    groups.forEach(group => {
+      const groupItems = group.querySelectorAll('.watchlist-item');
+      let groupVisibleCount = 0;
+
+      groupItems.forEach(item => {
+        const symbol = item.querySelector('.wl-symbol');
+        const name = item.querySelector('.wl-name');
+        const symbolText = symbol ? symbol.textContent.toLowerCase() : '';
+        const nameText = name ? name.textContent.toLowerCase() : '';
+
+        if (symbolText.includes(term) || nameText.includes(term)) {
+          item.classList.remove('is-filtered-out');
+          groupVisibleCount++;
+          visibleCount++;
+        } else {
+          item.classList.add('is-filtered-out');
+        }
+      });
+
+      const header = group.previousElementSibling;
+      if (groupVisibleCount === 0) {
+        group.classList.add('is-filtered-out');
+        if (header && header.classList.contains('watchlist-group-header')) {
+          header.classList.add('is-filtered-out');
+        }
+      } else {
+        group.classList.remove('is-filtered-out');
+        if (header && header.classList.contains('watchlist-group-header')) {
+          header.classList.remove('is-filtered-out');
+        }
+      }
+    });
+
+    const filterEmptyMsg = watchlistEl.querySelector('.watchlist-filter-empty');
+    if (visibleCount === 0) {
+      const wlEmpty = document.getElementById('watchlist-empty');
+      if (wlEmpty) wlEmpty.style.display = 'none';
+      if (!filterEmptyMsg) {
+        const emptyDiv = document.createElement('div');
+        emptyDiv.className = 'watchlist-filter-empty';
+        emptyDiv.textContent = `Nenhum ativo encontrado para "${query}"`;
+        watchlistEl.appendChild(emptyDiv);
+      } else {
+        filterEmptyMsg.textContent = `Nenhum ativo encontrado para "${query}"`;
+      }
+    } else {
+      if (filterEmptyMsg) filterEmptyMsg.remove();
+      const wlEmpty = document.getElementById('watchlist-empty');
+      if (wlEmpty) wlEmpty.style.display = 'none';
+    }
+  }
+
+  if (myListSearchInput) {
+    myListSearchInput.addEventListener('input', (e) => {
+      const v = e.target.value;
+      if (myListSearchClear) myListSearchClear.hidden = v.length === 0;
+      filterMyList(v);
+    });
+
+    myListSearchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        myListSearchInput.value = '';
+        if (myListSearchClear) myListSearchClear.hidden = true;
+        filterMyList('');
+        myListSearchInput.blur();
+      }
+    });
+  }
+
+  if (myListSearchClear) {
+    myListSearchClear.addEventListener('click', () => {
+      if (myListSearchInput) {
+        myListSearchInput.value = '';
+        myListSearchInput.focus();
+      }
+      myListSearchClear.hidden = true;
+      filterMyList('');
+    });
+  }
 
   let watchlist = [];
   let searchDebounceId = null;
@@ -208,6 +308,10 @@
         newItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         setTimeout(() => newItem.classList.remove('just-added'), 1600);
       }
+    }
+
+    if (myListSearchInput && myListSearchInput.value.trim().length > 0) {
+      filterMyList(myListSearchInput.value);
     }
   }
 
