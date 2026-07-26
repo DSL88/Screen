@@ -1679,6 +1679,101 @@ body {
   width: 100%;
 }
 
+.mylist-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 8px;
+  transition: border-color var(--duration) var(--ease), background var(--duration) var(--ease);
+  min-width: 200px;
+  max-width: 280px;
+}
+.mylist-search-wrap:focus-within {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+.mylist-search-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7384' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-size: contain;
+  background-position: center;
+  opacity: 0.7;
+  transition: opacity var(--duration);
+  pointer-events: none;
+}
+.mylist-search-wrap:focus-within .mylist-search-icon {
+  opacity: 1;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+}
+.mylist-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  padding: 7px 0;
+  min-width: 0;
+  width: 100%;
+}
+.mylist-search-input::placeholder {
+  color: var(--text-mute);
+}
+.mylist-search-input:focus {
+  outline: none;
+  box-shadow: none;
+}
+.mylist-search-input:focus-visible {
+  outline: none;
+}
+.mylist-search-clear {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin-left: 4px;
+  transition: all var(--duration) var(--ease);
+}
+.mylist-search-clear:hover {
+  background: var(--bear);
+  color: #fff;
+}
+
+.watchlist-item.is-filtered-out {
+  display: none;
+}
+.watchlist-group-header.is-filtered-out {
+  display: none;
+}
+.watchlist-group-items.is-filtered-out {
+  display: none;
+}
+.watchlist-filter-empty {
+  padding: 20px 8px;
+  text-align: center;
+  color: var(--text-mute);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 /* ═══════════════════════════════════════════════════════════
    ACTION BUTTONS (Table)
    ═══════════════════════════════════════════════════════════ */
