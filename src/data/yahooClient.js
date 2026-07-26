@@ -449,4 +449,97 @@ async function searchTickers(query, limit = 8) {
   throw new Error('Falha na pesquisa Yahoo: ' + msg);
 }
 
-module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker };
+async function fetchFullYahooHistory(ticker) {
+  const period1 = new Date(0);
+  const period2 = new Date();
+
+  const normalizedTicker = normalizeTicker(ticker);
+  const tickerVariants = [normalizedTicker];
+
+  if (normalizedTicker !== ticker) {
+    tickerVariants.unshift(ticker);
+  }
+
+  if (ticker.includes('.') && !normalizedTicker.includes('-')) {
+    const dashVariant = ticker.replace(/\./g, '-');
+    if (!tickerVariants.includes(dashVariant)) {
+      tickerVariants.push(dashVariant);
+    }
+  }
+
+  const attempts = 3;
+
+  for (let i = 0; i < attempts; i++) {
+    for (const tickerVariant of tickerVariants) {
+      try {
+        await sleep(1500 + Math.random() * 1000);
+
+        const result = await yahooFinance.chart(
+          tickerVariant,
+          { period1, period2, interval: '1d' },
+          {
+            fetchOptions: {
+              headers: { 'User-Agent': USER_AGENT }
+            }
+          }
+        );
+
+        const quotes = result && result.quotes;
+        if (!Array.isArray(quotes) || quotes.length === 0) {
+          if (tickerVariants.indexOf(tickerVariant) < tickerVariants.length - 1) {
+            console.warn(`[yahooClient] ${ticker}: variante "${tickerVariant}" sem dados, a tentar próximo...`);
+            continue;
+          }
+          const err = new Error(`Ticker ${ticker} não encontrado / 404 no Yahoo Finance.`);
+          err.isNotFound = true;
+          throw err;
+        }
+
+        const candles = processQuotes(quotes, ticker);
+
+        if (candles.length === 0) {
+          const err = new Error(`Todas as velas nulas/vazias para ${ticker} (ativo deslistado/inativo).`);
+          err.isInactive = true;
+          throw err;
+        }
+
+        if (tickerVariant !== ticker) {
+          console.log(`[yahooClient] ${ticker}: a usar variante "${tickerVariant}" com sucesso`);
+        }
+        return candles;
+      } catch (err) {
+        const code = err && err.code;
+        const msg = String(err && err.message ? err.message : '');
+        const isRateLimit = code === 429 || /rate|429|too many/i.test(msg);
+        const isNotFoundOrInactive = err.isInactive || err.isNotFound || /404|not found|quote not found/i.test(msg);
+
+        if (isNotFoundOrInactive) {
+          throw err;
+        }
+
+        if (isRateLimit) {
+          if (i === attempts - 1) {
+            throw new Error('Yahoo Finance Rate Limit (429): Demasiados pedidos. Por favor, aguarde alguns minutos.');
+          }
+          await sleep(5000);
+          break;
+        }
+
+        if (tickerVariants.indexOf(tickerVariant) < tickerVariants.length - 1) {
+          console.warn(`[yahooClient] ${ticker}: erro com variante "${tickerVariant}": ${err.message || err}`);
+          continue;
+        }
+
+        if (i === attempts - 1 && tickerVariants.indexOf(tickerVariant) === tickerVariants.length - 1) {
+          throw err;
+        }
+
+        const backoff = 500 * Math.pow(2, i);
+        const jitter = Math.floor(Math.random() * 250);
+        await sleep(backoff + jitter);
+      }
+    }
+  }
+}
+
+module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory };

@@ -120,12 +120,13 @@
               <th class="col-num">Preço</th>
               <th class="col-num">Stop (1.5×ATR)</th>
               <th class="col-num">TP (+2.5%)</th>
+              <th class="col-num col-mc">Monte Carlo</th>
               <th class="col-action">Ação</th>
             </tr>
           </thead>
           <tbody id="results-body">
             <tr class="empty">
-              <td colspan="11">Aguardando execução do scanner...</td>
+              <td colspan="12">Aguardando execução do scanner...</td>
             </tr>
           </tbody>
         </table>
@@ -576,6 +577,15 @@
             <span class="spinner" id="asset-detail-sync-spinner" hidden></span>
           </button>
           <div class="asset-detail-sync-status" id="asset-detail-sync-status" hidden></div>
+        </div>
+
+        <div class="asset-detail-actions-section">
+          <div class="asset-detail-section-title">Histórico Completo</div>
+          <button class="btn-secondary asset-detail-full-download-btn" id="asset-detail-full-download">
+            <span class="btn-label">Descarregar Histórico Completo (Yahoo Finance)</span>
+            <span class="spinner asset-detail-full-download-spinner" hidden></span>
+          </button>
+          <div class="asset-detail-full-download-status" id="asset-detail-full-download-status" hidden></div>
         </div>
 
         <div id="upload-zone">

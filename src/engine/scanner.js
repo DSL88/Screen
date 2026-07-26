@@ -11,6 +11,7 @@
 const pLimit = require('p-limit');
 const { fetchWithRetry } = require('../data/yahooClient');
 const { analyzeSeries, shouldEmit } = require('../quant/markovEngine');
+const { runMarkovMonteCarloSimulation } = require('../quant/monteCarloEngine');
 
 const CONCURRENCY = 5;
 const ADAPTIVE_WINDOW = 50;
@@ -160,6 +161,20 @@ class Scanner {
 
         // ── Emissão de sinal ──────────────────────────────────
         if (emit) {
+          let mcResult = null;
+          if (result.transitionMatrix && result.currentState >= 0) {
+            mcResult = runMarkovMonteCarloSimulation(
+              result.transitionMatrix,
+              result.currentState,
+              analysisCandles,
+              result.close,
+              {}
+            );
+            if (!mcResult.isApproved) {
+              return;
+            }
+          }
+
           const id = this.db.insertSignal({
             ticker: t.ticker,
             date: result.date,
@@ -192,7 +207,12 @@ class Scanner {
             atr: result.atr,
             stopLoss: result.stopLoss,
             takeProfit: result.takeProfit,
-            currentState: result.currentState
+            currentState: result.currentState,
+            mcWinRate: mcResult ? Math.round(mcResult.winRate * 10) / 10 : null,
+            mcApproved: mcResult ? mcResult.isApproved : null,
+            mcTpHits: mcResult ? mcResult.tpHits : null,
+            mcSlHits: mcResult ? mcResult.slHits : null,
+            mcExpired: mcResult ? mcResult.expired : null
           });
         }
       } catch (err) {
