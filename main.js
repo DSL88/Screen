@@ -576,7 +576,8 @@ app.whenReady().then(async () => {
           primeiroRegisto: (summary && summary.firstDate) || null,
           ultimaData: (summary && summary.lastDate) || null,
           totalVelas: (summary && summary.totalCandles) || 0,
-          inativo: !!inativo
+          inativo: !!inativo,
+          fullHistoryFetched: !!(summary && summary.fullHistoryFetched)
         };
       });
       return { ok: true, custom: enrichedCustom };
@@ -982,6 +983,7 @@ app.whenReady().then(async () => {
         if (candles && candles.length > 0) {
           const result = db.saveHistoricalCandlesFromImport(ticker, candles);
           db.cacheOHLCV(ticker, candles);
+          try { db.setFullHistoryFetched(ticker); } catch (_e) { /* ignore */ }
           const newSummary = db.getHistoricalSummary(ticker);
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('ticker:synced', {
