@@ -974,6 +974,35 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('download-full-yahoo-history', async (_event, payload) => {
+      const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
+      if (!ticker) return { ok: false, error: 'missing-ticker' };
+      try {
+        const candles = await yahooClient.fetchFullYahooHistory(ticker);
+        if (candles && candles.length > 0) {
+          const result = db.saveHistoricalCandlesFromImport(ticker, candles);
+          db.cacheOHLCV(ticker, candles);
+          const newSummary = db.getHistoricalSummary(ticker);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ticker:synced', {
+              ticker,
+              newCandles: result.changes,
+              summary: newSummary
+            });
+          }
+          return {
+            ok: true,
+            ticker,
+            totalCandles: result.changes,
+            summary: newSummary
+          };
+        }
+        return { ok: true, ticker, totalCandles: 0, summary: null };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     ipcMain.handle('ticker:deleteHistory', async (_event, payload) => {
       const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
       if (!ticker) return { ok: false, error: 'missing-ticker' };

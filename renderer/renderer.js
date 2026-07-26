@@ -1178,7 +1178,7 @@
   }
 
   function clearTable() {
-    body.innerHTML = '<tr class="empty"><td colspan="11">A processar...</td></tr>';
+    body.innerHTML = '<tr class="empty"><td colspan="12">A processar...</td></tr>';
     scannerRows = []; // Limpar dados armazenados
     currentSort = { column: null, direction: 'asc' }; // Reset ordenação
     updateSortIndicator();
@@ -1211,6 +1211,7 @@
       <td class="col-num price-val">${r.close != null ? r.close.toFixed(2) : '—'}</td>
       <td class="col-num sl-val">${r.stopLoss != null ? r.stopLoss.toFixed(2) : '—'}</td>
       <td class="col-num tp-val">${r.takeProfit != null ? r.takeProfit.toFixed(2) : '—'}</td>
+      <td class="col-num col-mc">${r.mcWinRate != null ? `<span class="mc-pill ${r.mcApproved ? 'mc-pill-approved' : 'mc-pill-rejected'}" title="Simulações: 1.000 | TP: ${r.mcTpHits ?? 0} | SL: ${r.mcSlHits ?? 0} | Expirados: ${r.mcExpired ?? 0}" style="cursor:default">MC: ${Math.round(r.mcWinRate)}%</span>` : '—'}</td>
       <td class="col-action"><button class="btn-investir" data-ticker="${escapeHtml(r.ticker)}" data-nome="${escapeHtml(r.name || '')}" data-direcao="${escapeHtml(r.direction)}" data-preco="${r.close}" data-stop="${r.stopLoss}" data-tp="${r.takeProfit}">Investir</button></td>
     `;
     body.appendChild(tr);
@@ -1235,7 +1236,7 @@
   function renderAllRows() {
     body.innerHTML = '';
     if (scannerRows.length === 0) {
-      body.innerHTML = '<tr class="empty"><td colspan="11">Aguardando execução do scanner...</td></tr>';
+      body.innerHTML = '<tr class="empty"><td colspan="12">Aguardando execução do scanner...</td></tr>';
       return;
     }
     
@@ -1515,7 +1516,7 @@
     status.textContent = summaryMsg;
     footerSummary.textContent = `${d.totalSignals} sinais emitidos · ${d.totalProcessed} tickers processados`;
     if (d.totalSignals === 0) {
-      body.innerHTML = '<tr class="empty"><td colspan="11">Nenhum ativo cumpriu os critérios (Edge ≥ 15%, Volume ≥ 1.2× SMA20, direção válida).</td></tr>';
+      body.innerHTML = '<tr class="empty"><td colspan="12">Nenhum ativo cumpriu os critérios (Edge ≥ 15%, Volume ≥ 1.2× SMA20, direção válida).</td></tr>';
     }
   });
 
@@ -2408,6 +2409,21 @@
       if (label) label.textContent = 'Sincronizar via Yahoo Finance';
     }
 
+    const fullDownloadBtnReset = document.getElementById('asset-detail-full-download');
+    const fullDownloadSpinnerReset = document.getElementById('asset-detail-full-download-spinner');
+    const fullDownloadStatusReset = document.getElementById('asset-detail-full-download-status');
+    if (fullDownloadBtnReset) fullDownloadBtnReset.disabled = false;
+    if (fullDownloadSpinnerReset) fullDownloadSpinnerReset.hidden = true;
+    if (fullDownloadBtnReset) {
+      const label = fullDownloadBtnReset.querySelector('.btn-label');
+      if (label) label.textContent = 'Descarregar Histórico Completo (Yahoo Finance)';
+    }
+    if (fullDownloadStatusReset) {
+      fullDownloadStatusReset.hidden = true;
+      fullDownloadStatusReset.textContent = '';
+      fullDownloadStatusReset.className = 'asset-detail-full-download-status';
+    }
+
     // 3. Temporarily hide BOTH zones during async IPC database query
     const uploadZone = document.getElementById('upload-zone');
     const historySummaryZone = document.getElementById('history-summary-zone');
@@ -2518,6 +2534,68 @@
   }
 
   if (assetDetailSyncBtn) assetDetailSyncBtn.addEventListener('click', syncAssetYahoo);
+
+  const fullDownloadBtn = document.getElementById('asset-detail-full-download');
+  const fullDownloadSpinner = document.getElementById('asset-detail-full-download-spinner');
+  const fullDownloadStatus = document.getElementById('asset-detail-full-download-status');
+
+  if (fullDownloadBtn) {
+    fullDownloadBtn.addEventListener('click', async () => {
+      if (!currentAssetTicker) return;
+      const ticker = currentAssetTicker;
+      fullDownloadBtn.disabled = true;
+      const btnLabel = fullDownloadBtn.querySelector('.btn-label');
+      const originalLabel = btnLabel.textContent;
+      btnLabel.textContent = 'A descarregar histórico completo...';
+      if (fullDownloadSpinner) fullDownloadSpinner.hidden = false;
+      if (fullDownloadStatus) {
+        fullDownloadStatus.hidden = false;
+        fullDownloadStatus.textContent = 'A descarregar histórico do Yahoo Finance desde o IPO...';
+        fullDownloadStatus.className = 'asset-detail-full-download-status is-loading';
+      }
+
+      try {
+        const result = await window.api.downloadFullYahooHistory(ticker);
+        if (result && result.ok) {
+          if (fullDownloadStatus) {
+            fullDownloadStatus.textContent = `Sucesso: ${result.totalCandles} velas históricas descarregadas e guardadas!`;
+            fullDownloadStatus.className = 'asset-detail-full-download-status is-success';
+          }
+          if (result.summary) {
+            const firstDateEl = document.getElementById('asset-detail-first-date');
+            const lastDateEl = document.getElementById('asset-detail-last-date');
+            const totalCandlesEl = document.getElementById('asset-detail-total-candles');
+            if (firstDateEl) firstDateEl.textContent = fmtShortDate(result.summary.firstDate);
+            if (lastDateEl) lastDateEl.textContent = fmtShortDate(result.summary.lastDate);
+            if (totalCandlesEl) totalCandlesEl.textContent = result.summary.totalCandles.toLocaleString('pt-PT');
+
+            const historyZone = document.getElementById('history-summary-zone');
+            if (historyZone) historyZone.hidden = false;
+
+            const uploadZone = document.getElementById('upload-zone');
+            if (uploadZone) uploadZone.hidden = true;
+
+            await updateWatchlistBadge(ticker, result.summary);
+          }
+        } else {
+          const errorMsg = result && result.error ? result.error : 'Erro desconhecido';
+          if (fullDownloadStatus) {
+            fullDownloadStatus.textContent = `Erro: ${errorMsg}`;
+            fullDownloadStatus.className = 'asset-detail-full-download-status is-error';
+          }
+        }
+      } catch (err) {
+        if (fullDownloadStatus) {
+          fullDownloadStatus.textContent = `Erro ao contactar Yahoo Finance: ${err.message || String(err)}`;
+          fullDownloadStatus.className = 'asset-detail-full-download-status is-error';
+        }
+      } finally {
+        fullDownloadBtn.disabled = false;
+        btnLabel.textContent = originalLabel;
+        if (fullDownloadSpinner) fullDownloadSpinner.hidden = true;
+      }
+    });
+  }
 
   async function deleteAssetHistory() {
     if (!currentAssetTicker) return;

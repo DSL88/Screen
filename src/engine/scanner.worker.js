@@ -12,6 +12,7 @@ const { parentPort } = require('worker_threads');
 const pLimit = require('p-limit');
 const { fetchWithRetry } = require('../data/yahooClient');
 const { analyzeSeries, shouldEmit } = require('../quant/markovEngine');
+const { runMarkovMonteCarloSimulation } = require('../quant/monteCarloEngine');
 
 const CONCURRENCY = 5;
 const MIN_CANDLES_WARMUP = 200;
@@ -303,6 +304,20 @@ async function handleScan({ runId, tickers, params, timeframe }) {
       const emit = shouldEmit(result, params.edge_threshold, params.useVolFilter);
 
       if (emit) {
+        let mcResult = null;
+        if (result.transitionMatrix && result.currentState >= 0) {
+          mcResult = runMarkovMonteCarloSimulation(
+            result.transitionMatrix,
+            result.currentState,
+            analysisCandles,
+            result.close,
+            {}
+          );
+          if (!mcResult.isApproved) {
+            return;
+          }
+        }
+
         // ── Guard clause: validar campos NOT NULL antes de enviar ──
         const pStay = result.pStay;
         const edge = result.edge;
@@ -339,7 +354,8 @@ async function handleScan({ runId, tickers, params, timeframe }) {
             p_stay: pStay,
             atr_14: atr14 ?? 0,
             stop_loss: result.stopLoss ?? null,
-            take_profit: result.takeProfit ?? null
+            take_profit: result.takeProfit ?? null,
+            mcWinRate: mcResult ? Math.round(mcResult.winRate * 10) / 10 : null
           },
           // ── Campos para renderer (camelCase) ──
           rendererPayload: {
@@ -361,7 +377,12 @@ async function handleScan({ runId, tickers, params, timeframe }) {
             stopLoss: result.stopLoss,
             takeProfit: result.takeProfit,
             currentState: result.currentState,
-            rollingVwap20: result.rollingVwap20
+            rollingVwap20: result.rollingVwap20,
+            mcWinRate: mcResult ? Math.round(mcResult.winRate * 10) / 10 : null,
+            mcApproved: mcResult ? mcResult.isApproved : null,
+            mcTpHits: mcResult ? mcResult.tpHits : null,
+            mcSlHits: mcResult ? mcResult.slHits : null,
+            mcExpired: mcResult ? mcResult.expired : null
           }
         });
       }
