@@ -19,10 +19,50 @@ function findColumnIndex(headers, target) {
   return headers.findIndex(h => normalizeHeader(h) === target);
 }
 
-function isValidDate(dateStr) {
-  if (!dateStr || typeof dateStr !== 'string') return false;
-  const d = new Date(dateStr);
-  return !isNaN(d.getTime());
+function padDate(y, m, d) {
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+function normalizeDate(dateStr) {
+  if (!dateStr) return null;
+  if (typeof dateStr === 'number') {
+    return excelDateToJSDate(dateStr);
+  }
+  if (typeof dateStr !== 'string') return null;
+  const s = dateStr.trim();
+  if (!s) return null;
+
+  let y, m, d;
+
+  const isoMatch = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (isoMatch) {
+    y = parseInt(isoMatch[1]);
+    m = parseInt(isoMatch[2]);
+    d = parseInt(isoMatch[3]);
+  } else {
+    const slashMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (slashMatch) {
+      m = parseInt(slashMatch[1]);
+      d = parseInt(slashMatch[2]);
+      y = parseInt(slashMatch[3]);
+    } else {
+      const dashMatch = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
+      if (dashMatch) {
+        d = parseInt(dashMatch[1]);
+        m = parseInt(dashMatch[2]);
+        y = parseInt(dashMatch[3]);
+      } else {
+        const fallback = new Date(s);
+        if (!isNaN(fallback.getTime())) {
+          return fallback.toISOString().slice(0, 10);
+        }
+        return null;
+      }
+    }
+  }
+
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  return padDate(y, m, d);
 }
 
 function parseCSV(filePath) {
@@ -87,11 +127,8 @@ function parseXLSX(filePath) {
 }
 
 function cleanRow(row) {
-  let dateVal = row.date;
-  if (typeof dateVal === 'number') {
-    dateVal = excelDateToJSDate(dateVal);
-  }
-  if (!isValidDate(String(dateVal))) {
+  const normalizedDate = normalizeDate(row.date);
+  if (!normalizedDate) {
     return null;
   }
 
@@ -111,7 +148,7 @@ function cleanRow(row) {
   }
 
   return {
-    date: String(dateVal),
+    date: normalizedDate,
     open,
     high,
     low,
@@ -205,10 +242,10 @@ async function importFromCsvFile(filePath, db) {
       }
 
       const ticker = (values[colMap.ticker] || '').trim().toUpperCase();
-      const date = (values[colMap.date] || '').trim();
+      const date = normalizeDate(values[colMap.date]);
       const closeStr = (values[colMap.close] || '').trim();
 
-      if (!ticker || !isValidDate(date) || !closeStr || isNaN(parseFloat(closeStr))) {
+      if (!ticker || !date || !closeStr || isNaN(parseFloat(closeStr))) {
         skipped++;
         continue;
       }

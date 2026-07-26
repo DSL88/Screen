@@ -22,6 +22,7 @@ const ATR_MULT = 1.5;
 const SL_PCT = 0.014;
 const TP_PCT = 0.028;
 const VOL_SMA_PERIOD = 20;
+const VWAP_PERIOD = 20;
 
 // ── Classificação bull/bear por estado ──────────────────────
 //  state = bb_zone + (adx_zone × 3)
@@ -164,6 +165,7 @@ function analyzeSeries(candles, params = {}) {
       volume: null,
       volumeSma: null,
       volumeValid: false,
+      rollingVwap20: null,
       stopLoss: null,
       takeProfit: null,
       currentState: -1,
@@ -183,11 +185,32 @@ function analyzeSeries(candles, params = {}) {
   const atr = atrWilder(highs, lows, closes, atrPeriod);
   const volSma = sma(volumes, VOL_SMA_PERIOD);
 
-  // ── Cadeia de Markov ──────────────────────────────────────
+  const lastIdx = candles.length - 1;
+
+  const typicalPrices = new Array(candles.length);
+  for (let i = 0; i < candles.length; i++) {
+    typicalPrices[i] = (highs[i] + lows[i] + closes[i]) / 3;
+  }
+
+  const rollingVwap = new Array(candles.length).fill(null);
+  for (let i = VWAP_PERIOD - 1; i < candles.length; i++) {
+    let sumTPV = 0;
+    let sumVol = 0;
+    for (let j = i - VWAP_PERIOD + 1; j <= i; j++) {
+      const v = volumes[j];
+      if (v == null || !Number.isFinite(v)) continue;
+      sumTPV += typicalPrices[j] * v;
+      sumVol += v;
+    }
+    if (sumVol > 0) {
+      rollingVwap[i] = sumTPV / sumVol;
+    }
+  }
+  const lastRollingVwap = rollingVwap[lastIdx];
+
   const states = buildStateSeries(bb.pctB, rsi, adx);
   const M = buildTransitionMatrix(states, window);
 
-  const lastIdx = candles.length - 1;
   const lastState = states[lastIdx];
   const dist = forecast(M, lastState, horizon);
 
@@ -272,6 +295,7 @@ function analyzeSeries(candles, params = {}) {
     volume: lastVol,
     volumeSma: lastVolSma,
     volumeValid,
+    rollingVwap20: lastRollingVwap,
     stopLoss,
     takeProfit,
     currentState: lastState,
@@ -287,13 +311,14 @@ function analyzeSeries(candles, params = {}) {
 //    - edgeThreshold é comparado com o edge calculado
 // ═══════════════════════════════════════════════════════════
 function shouldEmit(result, edgeThreshold, useVolFilter) {
-  // Precisa de direção não-neutra
   if (result.direction !== 'COMPRA' && result.direction !== 'VENDA') return false;
 
-  // Edge tem de superar o threshold
+  if (result.direction === 'COMPRA' && result.rollingVwap20 != null && result.close != null) {
+    if (result.close <= result.rollingVwap20) return false;
+  }
+
   if (result.edge < edgeThreshold) return false;
 
-  // Se o utilizador desligou o filtro de volume, ignora volumeValid
   if (useVolFilter === false) return true;
 
   // Caso contrário, exige volume válido
@@ -314,6 +339,7 @@ module.exports = {
   SL_PCT,
   TP_PCT,
   VOL_SMA_PERIOD,
+  VWAP_PERIOD,
   analyzeSeries,
   shouldEmit,
   buildTransitionMatrix,

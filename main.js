@@ -140,15 +140,34 @@ function getScannerWorker() {
       }
 
       case 'saveHistoricalCandles': {
-        // Worker envia velas para guardar na BD
         const requestId = msg.requestId;
         try {
-          const result = db.saveHistoricalCandles(msg.payload.candles);
-          scannerWorker.postMessage({
+          const result = db.saveHistoricalCandles(msg.payload.candles);          scannerWorker.postMessage({
             type: 'dbResponse',
             requestId,
             ok: true,
             data: result
+          });
+        } catch (err) {
+          scannerWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: false,
+            error: err.message
+          });
+        }
+        break;
+      }
+
+      case 'getTickerDataRange': {
+        const requestId = msg.requestId;
+        try {
+          const range = db.getTickerDataRange(msg.payload.ticker);
+          scannerWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: true,
+            data: range
           });
         } catch (err) {
           scannerWorker.postMessage({
@@ -522,6 +541,22 @@ app.whenReady().then(async () => {
       const custom = db.getCustomTickers();
       const tickerSymbols = custom.map(t => String(t.ticker || '').toUpperCase().trim());
       const batchSummary = db.getHistoricalSummaryBatch(tickerSymbols);
+
+      const cutoffDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+      const lastDateMap = {};
+      if (tickerSymbols.length > 0) {
+        const lastDateRows = db.db.prepare(`
+          SELECT ticker, MAX(date) as max_date
+          FROM historical_prices
+          WHERE ticker IN (${tickerSymbols.map(() => '?').join(',')})
+          GROUP BY ticker
+        `).all(...tickerSymbols);
+        for (const r of lastDateRows) {
+          lastDateMap[r.ticker] = r.max_date;
+        }
+      }
+
       const enrichedCustom = custom.map(t => {
         const symbolUpper = String(t.ticker || '').toUpperCase().trim();
         const stockRecord = db.getStockByTicker(symbolUpper);
@@ -530,6 +565,8 @@ app.whenReady().then(async () => {
         const indexId = customIdx || tickerToIndexMap[symbolUpper] || 'CUSTOM';
         const indexName = indexNames[indexId] || indexId || 'Outros Ativos / Manuais';
         const summary = batchSummary[symbolUpper];
+        const maxDate = lastDateMap[symbolUpper] || null;
+        const inativo = summary && summary.hasData && (!maxDate || maxDate < cutoffDate);
         return {
           ...t,
           country: stockRecord?.country || t.country || '',
@@ -538,7 +575,8 @@ app.whenReady().then(async () => {
           temHistorico: !!(summary && summary.hasData),
           primeiroRegisto: (summary && summary.firstDate) || null,
           ultimaData: (summary && summary.lastDate) || null,
-          totalVelas: (summary && summary.totalCandles) || 0
+          totalVelas: (summary && summary.totalCandles) || 0,
+          inativo: !!inativo
         };
       });
       return { ok: true, custom: enrichedCustom };
@@ -942,6 +980,17 @@ app.whenReady().then(async () => {
       try {
         const result = db.deleteHistoricalPrices(ticker);
         return { ok: true, ticker, deleted: result.changes };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('get-ticker-data-range', async (_event, payload) => {
+      const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
+      if (!ticker) return { ok: false, error: 'missing-ticker' };
+      try {
+        const result = db.getTickerDataRange(ticker);
+        return { ok: true, ticker, data: result };
       } catch (err) {
         return { ok: false, error: err.message || String(err) };
       }
