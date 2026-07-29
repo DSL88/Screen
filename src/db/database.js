@@ -757,7 +757,7 @@ class DB {
 
     const tickers = this.getTickersByIndex(indexName);
     if (tickers.length === 0) {
-      return { isUpdated: false, latestStoredDate: null, expectedDate, outdatedTickers: [] };
+      return { isUpdated: false, maxStoredDate: null, expectedDate, outdatedTickers: [] };
     }
 
     let overallMax = null;
@@ -781,7 +781,7 @@ class DB {
 
     return {
       isUpdated: outdatedTickers.length === 0,
-      latestStoredDate: overallMax,
+      maxStoredDate: overallMax,
       expectedDate,
       outdatedTickers
     };
