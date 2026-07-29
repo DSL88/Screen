@@ -139,6 +139,27 @@ function getScannerWorker() {
         break;
       }
 
+      case 'getLocalHistoricalPricesLimit': {
+        const requestId = msg.requestId;
+        try {
+          const prices = db.getLocalHistoricalPricesLimit(msg.payload.ticker, msg.payload.limit);
+          scannerWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: true,
+            data: prices
+          });
+        } catch (err) {
+          scannerWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: false,
+            error: err.message
+          });
+        }
+        break;
+      }
+
       case 'saveHistoricalCandles': {
         const requestId = msg.requestId;
         try {
@@ -1073,10 +1094,19 @@ app.whenReady().then(async () => {
 
           try {
             const lastDate = db.getLastStoredDate(ticker);
-            const customPeriod1 = lastDate
-              ? new Date(new Date(lastDate + 'T00:00:00Z').getTime() - 86400000)
-              : null;
+            if (!lastDate) {
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('sync-all-progress', {
+                  current: i + 1,
+                  total: tickers.length,
+                  ticker,
+                  status: 'skipped'
+                });
+              }
+              continue;
+            }
 
+            const customPeriod1 = new Date(new Date(lastDate + 'T00:00:00Z').getTime() - 86400000);
             const candles = await yahooClient.fetchWithRetry(ticker, '1d', 2, customPeriod1);
 
             if (candles && candles.length > 0) {

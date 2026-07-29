@@ -36,6 +36,7 @@
   const freshnessBannerMessage = document.getElementById('freshness-banner-message');
   const btnFreshnessGoMylist = document.getElementById('btn-freshness-go-mylist');
   const btnFreshnessContinue = document.getElementById('btn-freshness-continue');
+  let freshnessOverride = false;
   const toastContainer = document.getElementById('toast-container');
 
   function filterMyList(query) {
@@ -380,6 +381,7 @@
       wlEntry.primeiroRegisto = summary.firstDate || null;
       wlEntry.ultimaData = summary.lastDate || null;
       wlEntry.totalVelas = summary.totalCandles || 0;
+      wlEntry.fullHistoryFetched = !!summary.fullHistoryFetched;
     } else if (wlEntry) {
       try {
         const detail = await window.api.getTickerDetail(ticker);
@@ -388,6 +390,7 @@
           wlEntry.primeiroRegisto = detail.summary.firstDate || null;
           wlEntry.ultimaData = detail.summary.lastDate || null;
           wlEntry.totalVelas = detail.summary.totalCandles || 0;
+          wlEntry.fullHistoryFetched = !!detail.summary.fullHistoryFetched;
         }
       } catch (_) { /* ignore */ }
     }
@@ -399,6 +402,10 @@
     temp.innerHTML = newHtml.trim();
     const newBadge = temp.firstChild;
     oldPills.replaceWith(newBadge);
+
+    item.classList.remove('card-pending', 'card-outdated', 'card-synced');
+    const syncState = getCardSyncState(updated);
+    if (syncState) item.classList.add(syncState);
   }
 
   function guessStockMetadata(ticker, exchange) {
@@ -1489,6 +1496,7 @@
   // Freshness banner "Continue Anyway" button
   if (btnFreshnessContinue) {
     btnFreshnessContinue.addEventListener('click', () => {
+      freshnessOverride = true;
       if (freshnessBanner) freshnessBanner.hidden = true;
       if (btn) btn.click();
     });
@@ -1509,9 +1517,9 @@
     }
 
     // Freshness check before scan
-    if (!freshnessBanner) {
-      // Freshness banner not available, proceed normally
-    } else {
+    if (freshnessOverride) {
+      freshnessOverride = false;
+    } else if (freshnessBanner) {
       try {
         const freshness = await window.api.checkListFreshness(null);
         if (freshness && freshness.ok && !freshness.isUpdated && freshness.outdatedTickers && freshness.outdatedTickers.length > 0) {
