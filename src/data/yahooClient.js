@@ -542,4 +542,44 @@ async function fetchFullYahooHistory(ticker) {
   }
 }
 
-module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory };
+async function fetchIncrementalYahooHistory(ticker, lastStoredDate) {
+  const nextDay = new Date(lastStoredDate + 'T00:00:00Z');
+  nextDay.setDate(nextDay.getDate() + 1);
+  const period1 = nextDay;
+  const period2 = new Date();
+
+  if (period1.getTime() >= period2.getTime()) {
+    return [];
+  }
+
+  try {
+    await sleep(1500 + Math.random() * 1000);
+
+    const normalizedTicker = normalizeTicker(ticker);
+    const result = await yahooFinance.chart(
+      normalizedTicker,
+      { period1, period2, interval: '1d' },
+      {
+        fetchOptions: {
+          headers: { 'User-Agent': USER_AGENT }
+        }
+      }
+    );
+
+    const quotes = result && result.quotes;
+    if (!Array.isArray(quotes) || quotes.length === 0) {
+      return [];
+    }
+
+    return processQuotes(quotes, ticker);
+  } catch (err) {
+    const msg = String(err && err.message ? err.message : '');
+    if (/404|not found|no data|period1/i.test(msg)) {
+      return [];
+    }
+    console.warn(`[yahooClient] fetchIncrementalYahooHistory(${ticker}): ${msg}`);
+    return [];
+  }
+}
+
+module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory };
