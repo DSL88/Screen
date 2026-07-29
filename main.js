@@ -1106,8 +1106,7 @@ app.whenReady().then(async () => {
               continue;
             }
 
-            const customPeriod1 = new Date(new Date(lastDate + 'T00:00:00Z').getTime() - 86400000);
-            const candles = await yahooClient.fetchWithRetry(ticker, '1d', 2, customPeriod1);
+            const candles = await yahooClient.fetchIncrementalYahooHistory(ticker, lastDate);
 
             if (candles && candles.length > 0) {
               const result = db.saveHistoricalCandlesFromImport(ticker, candles);
