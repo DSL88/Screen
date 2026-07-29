@@ -7,7 +7,9 @@ const ALLOWED_EVENTS = new Set([
   'scan:error',
   'import-success',
   'scanner-sync-status',
-  'ticker:synced'
+  'ticker:synced',
+  'sync-all-progress',
+  'sync-all-done'
 ]);
 
 contextBridge.exposeInMainWorld('api', {
@@ -39,6 +41,8 @@ contextBridge.exposeInMainWorld('api', {
   deleteTickerHistory: (ticker) => ipcRenderer.invoke('ticker:deleteHistory', { ticker }),
   getTickerDataRange: (ticker) => ipcRenderer.invoke('get-ticker-data-range', { ticker }),
   purgeInactiveStocks: (daysCutoff = 60) => ipcRenderer.invoke('db:purgeInactive', { daysCutoff }),
+  syncAllListStocks: (indexFilter) => ipcRenderer.invoke('sync-all-list-stocks', indexFilter),
+  checkListFreshness: (indexFilter) => ipcRenderer.invoke('check-list-freshness', indexFilter),
   importHistoricalCsv: () => ipcRenderer.invoke('import-historical-csv'),
   importHistoricalData: (data) => ipcRenderer.invoke('import-historical-data', data),
   on: (channel, callback) => {

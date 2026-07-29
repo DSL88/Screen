@@ -30,6 +30,13 @@
   const btnClearAll = document.getElementById('btn-clear-all');
   const myListSearchInput = document.getElementById('my-list-search');
   const myListSearchClear = document.getElementById('my-list-search-clear');
+  const btnSyncAllStocks = document.getElementById('btn-sync-all-stocks');
+  const syncAllSpinner = document.getElementById('sync-all-spinner');
+  const freshnessBanner = document.getElementById('freshness-banner');
+  const freshnessBannerMessage = document.getElementById('freshness-banner-message');
+  const btnFreshnessGoMylist = document.getElementById('btn-freshness-go-mylist');
+  const btnFreshnessContinue = document.getElementById('btn-freshness-continue');
+  const toastContainer = document.getElementById('toast-container');
 
   function filterMyList(query) {
     const term = String(query || '').toLowerCase().trim();
@@ -334,6 +341,18 @@
     if (!iso) return '-';
     const [year, month, day] = iso.split('-');
     return `${day}-${month}-${year}`;
+  }
+
+  function showToast(message, type = 'success', duration = 4000) {
+    if (!toastContainer) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast toast-' + type;
+    toast.innerHTML = `<span class="toast-icon">${type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ'}</span><span class="toast-text">${escapeHtml(message)}</span>`;
+    toastContainer.appendChild(toast);
+    setTimeout(() => {
+      toast.classList.add('toast-fadeout');
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
   }
 
   function renderHistoryBadgeBadge(t) {
@@ -1424,6 +1443,57 @@
     });
   }
 
+  // --- Sync All Stocks ---
+  if (btnSyncAllStocks) {
+    btnSyncAllStocks.addEventListener('click', async () => {
+      btnSyncAllStocks.disabled = true;
+      const label = btnSyncAllStocks.querySelector('.btn-label');
+      const originalLabel = label.textContent;
+      label.textContent = 'A sincronizar novos dias...';
+      if (syncAllSpinner) syncAllSpinner.hidden = false;
+
+      try {
+        const res = await window.api.syncAllListStocks(null);
+        if (res && res.ok) {
+          const msg = res.totalNewCandles > 0
+            ? `Lista atualizada com sucesso! ${res.totalNewCandles} novas velas gravadas.`
+            : res.message || 'Lista já estava atualizada. Nenhuma vela nova.';
+          showToast(msg, 'success');
+          if (typeof status !== 'undefined' && status) status.textContent = msg;
+          await loadInitial();
+        } else {
+          const errMsg = res && res.error ? res.error : 'Erro desconhecido';
+          showToast('Erro na sincronização: ' + errMsg, 'error');
+          if (typeof status !== 'undefined' && status) status.textContent = 'Erro na sincronização: ' + errMsg;
+        }
+      } catch (err) {
+        showToast('Erro na sincronização: ' + (err.message || String(err)), 'error');
+        if (typeof status !== 'undefined' && status) status.textContent = 'Erro: ' + (err.message || String(err));
+      } finally {
+        btnSyncAllStocks.disabled = false;
+        label.textContent = originalLabel;
+        if (syncAllSpinner) syncAllSpinner.hidden = true;
+      }
+    });
+  }
+
+  // Freshness banner "Go to My List" button
+  if (btnFreshnessGoMylist) {
+    btnFreshnessGoMylist.addEventListener('click', () => {
+      if (freshnessBanner) freshnessBanner.hidden = true;
+      const myListTabBtn = document.querySelector('.tab-btn[data-tab="mylist"]');
+      if (myListTabBtn) myListTabBtn.click();
+    });
+  }
+
+  // Freshness banner "Continue Anyway" button
+  if (btnFreshnessContinue) {
+    btnFreshnessContinue.addEventListener('click', () => {
+      if (freshnessBanner) freshnessBanner.hidden = true;
+      if (btn) btn.click();
+    });
+  }
+
   // Ordenação por direção
   const sortDirectionHeader = document.getElementById('sort-direction');
   if (sortDirectionHeader) {
@@ -1436,6 +1506,33 @@
     if (watchlist.length === 0) {
       status.textContent = 'Adiciona pelo menos um ticker à watchlist.';
       return;
+    }
+
+    // Freshness check before scan
+    if (!freshnessBanner) {
+      // Freshness banner not available, proceed normally
+    } else {
+      try {
+        const freshness = await window.api.checkListFreshness(null);
+        if (freshness && freshness.ok && !freshness.isUpdated && freshness.outdatedTickers && freshness.outdatedTickers.length > 0) {
+          const expectedDateFormatted = freshness.expectedDate
+            ? freshness.expectedDate.split('-').reverse().join('-')
+            : '—';
+          freshnessBannerMessage.innerHTML =
+            `A tua lista de ativos contém dados desatualizados (último registo local: <strong>${freshness.latestStoredDate ? freshness.latestStoredDate.split('-').reverse().join('-') : '—'}</strong>).<br/>` +
+            `Para garantir que os sinais de Markov, Rolling VWAP e Monte Carlo utilizam a cotação de fecho mais recente, ` +
+            `por favor acede à aba <strong>"My List"</strong> e clica em <strong>"🔄 Sincronizar / Atualizar Lista"</strong>.`;
+          freshnessBanner.hidden = false;
+          return; // Stop the scan initiation
+        }
+      } catch (err) {
+        console.warn('Freshness check failed, proceeding with scan:', err);
+      }
+    }
+
+    // Hide freshness banner if it was previously shown
+    if (freshnessBanner && !freshnessBanner.hidden) {
+      freshnessBanner.hidden = true;
     }
 
     setRunning(true);
@@ -2793,5 +2890,21 @@
       'downloaded-new': `${s.ticker} — +${s.newDataCount} velas novas`
     };
     statusLine.textContent = labels[s.status] || s.status;
+  });
+
+  // Listeners for sync-all progress and done events
+  window.api.on('sync-all-progress', (p) => {
+    if (p && btnSyncAllStocks) {
+      const label = btnSyncAllStocks.querySelector('.btn-label');
+      if (label && p.status === 'syncing') {
+        label.textContent = `A sincronizar ${p.ticker} (${p.current}/${p.total})...`;
+      }
+    }
+  });
+
+  window.api.on('sync-all-done', (p) => {
+    if (p && p.errorCount > 0 && typeof status !== 'undefined' && status) {
+      status.textContent = `Sincronização concluída: ${p.updatedCount} atualizados, ${p.errorCount} erros.`;
+    }
   });
 })();

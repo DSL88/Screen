@@ -697,6 +697,62 @@ class DB {
     };
   }
 
+  getTickersByIndex(indexName = null) {
+    if (indexName) {
+      return this.db.prepare(
+        'SELECT ticker FROM custom_tickers WHERE UPPER(index_name) = UPPER(?) ORDER BY ticker'
+      ).all(indexName).map(r => r.ticker);
+    }
+    return this.db.prepare(
+      'SELECT ticker FROM custom_tickers ORDER BY ticker'
+    ).all().map(r => r.ticker);
+  }
+
+  checkListFreshness(indexName = null) {
+    const today = new Date();
+    const day = today.getDay();
+    let expectedDate;
+    if (day === 0 || day === 6) {
+      const diff = day === 0 ? 2 : 1;
+      const friday = new Date(today);
+      friday.setDate(today.getDate() - diff);
+      expectedDate = friday.toISOString().slice(0, 10);
+    } else {
+      expectedDate = today.toISOString().slice(0, 10);
+    }
+
+    const tickers = this.getTickersByIndex(indexName);
+    if (tickers.length === 0) {
+      return { isUpdated: false, latestStoredDate: null, expectedDate, outdatedTickers: [] };
+    }
+
+    let overallMax = null;
+    const outdatedTickers = [];
+
+    for (const ticker of tickers) {
+      const row = this.db.prepare(
+        'SELECT MAX(date) as last_date FROM historical_prices WHERE ticker = ?'
+      ).get(ticker);
+
+      const lastDate = row ? row.last_date : null;
+
+      if (lastDate && (!overallMax || lastDate > overallMax)) {
+        overallMax = lastDate;
+      }
+
+      if (!lastDate || lastDate < expectedDate) {
+        outdatedTickers.push(ticker);
+      }
+    }
+
+    return {
+      isUpdated: outdatedTickers.length === 0,
+      latestStoredDate: overallMax,
+      expectedDate,
+      outdatedTickers
+    };
+  }
+
   close() {
     if (this.db) this.db.close();
   }

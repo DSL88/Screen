@@ -1037,6 +1037,98 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('check-list-freshness', async (_event, indexFilter) => {
+      try {
+        const result = db.checkListFreshness(indexFilter || null);
+        return { ok: true, ...result };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('sync-all-list-stocks', async (_event, indexFilter) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'window-unavailable' };
+
+      try {
+        const tickers = db.getTickersByIndex(indexFilter || null);
+        if (!tickers || tickers.length === 0) {
+          return { ok: true, totalStocks: 0, updatedCount: 0, totalNewCandles: 0, errors: [], message: 'Nenhum ativo na lista para sincronizar.' };
+        }
+
+        let updatedCount = 0;
+        let totalNewCandles = 0;
+        const errors = [];
+
+        for (let i = 0; i < tickers.length; i++) {
+          const ticker = tickers[i];
+
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('sync-all-progress', {
+              current: i + 1,
+              total: tickers.length,
+              ticker,
+              status: 'syncing'
+            });
+          }
+
+          try {
+            const lastDate = db.getLastStoredDate(ticker);
+            const customPeriod1 = lastDate
+              ? new Date(new Date(lastDate + 'T00:00:00Z').getTime() - 86400000)
+              : null;
+
+            const candles = await yahooClient.fetchWithRetry(ticker, '1d', 2, customPeriod1);
+
+            if (candles && candles.length > 0) {
+              const result = db.saveHistoricalCandlesFromImport(ticker, candles);
+              db.cacheOHLCV(ticker, candles);
+              totalNewCandles += result.changes || candles.length;
+              updatedCount++;
+            }
+
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('sync-all-progress', {
+                current: i + 1,
+                total: tickers.length,
+                ticker,
+                status: 'done'
+              });
+            }
+          } catch (err) {
+            errors.push({ ticker, error: err.message || String(err) });
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('sync-all-progress', {
+                current: i + 1,
+                total: tickers.length,
+                ticker,
+                status: 'error',
+                error: err.message || String(err)
+              });
+            }
+          }
+        }
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('sync-all-done', {
+            totalStocks: tickers.length,
+            updatedCount,
+            totalNewCandles,
+            errorCount: errors.length
+          });
+        }
+
+        return {
+          ok: true,
+          totalStocks: tickers.length,
+          updatedCount,
+          totalNewCandles,
+          errors
+        };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     createWindow();
   } catch (err) {
     console.error('Fatal init error:', err);
