@@ -9,7 +9,6 @@
 'use strict';
 
 const pLimit = require('p-limit');
-const { fetchWithRetry } = require('../data/yahooClient');
 const { analyzeSeries, shouldEmit } = require('../quant/markovEngine');
 const { runMarkovMonteCarloSimulation } = require('../quant/monteCarloEngine');
 
@@ -103,25 +102,16 @@ class Scanner {
       hooks.onProgress({ processed, total, currentTicker: t.ticker, runId });
 
       try {
-        // ── Obter candles frescas da API ──────────────────────
-        let candles;
-        try {
-          candles = await fetchWithRetry(t.ticker, timeframe, 3);
-          this.db.cacheOHLCV(`${t.ticker}_${timeframe}`, candles);
-        } catch (e) {
-          const isInactive = e.isInactive || e.isNotFound || /404|not found|inativo|deslistado|sem volume/i.test(e.message || '');
-          if (isInactive) {
-            console.log(`  [${String(processed).padStart(4)}/${total}] ${(t.ticker || '???').padEnd(10)} [SKIP INATIVO] ${e.message || 'Ticker deslistado ou inativo'}`);
-            hooks.onError({ ticker: t.ticker, message: `[SKIP INATIVO] ${e.message || 'Deslistado/Inativo'}`, runId, isInactive: true });
-          } else {
-            hooks.onError({ ticker: t.ticker, message: `Falha ao obter dados: ${e.message || e}`, runId });
-          }
-          candles = null;
-        }
+        const loadLimit = Math.max(300, (params.markov_window || 150) + 100);
+        let candles = this.db.getLocalHistoricalPricesLimit(t.ticker, loadLimit);
 
         if (!candles || candles.length < 60) {
-          if (!candles) return;
-          console.log(`  [${String(processed).padStart(4)}/${total}] ${(t.ticker || '???').padEnd(10)} SKIP: insuficientes candles (${candles?.length || 0})`);
+          if (!candles) {
+            console.log(`  [${String(processed).padStart(4)}/${total}] ${(t.ticker || '???').padEnd(10)} Dados insuficientes no SQLite local para este ativo.`);
+            hooks.onError({ ticker: t.ticker, message: 'Dados insuficientes no SQLite local para este ativo.', runId });
+          } else {
+            console.log(`  [${String(processed).padStart(4)}/${total}] ${(t.ticker || '???').padEnd(10)} SKIP: insuficientes candles (${candles.length})`);
+          }
           return;
         }
 
@@ -290,16 +280,9 @@ class Scanner {
     return candles;
   }
 
-  async _getCandlesSince(ticker, sinceDate, timeframe = '1d') {
-    const cacheKey = `${ticker}_${timeframe}`;
-    let candles;
-    try {
-      candles = await fetchWithRetry(ticker, timeframe, 3);
-      this.db.cacheOHLCV(cacheKey, candles);
-    } catch (_) {
-      candles = this.db.getCachedOHLCV(cacheKey);
-      if (!candles) return null;
-    }
+  _getCandlesSince(ticker, sinceDate) {
+    let candles = this.db.getLocalHistoricalPrices(ticker);
+    if (!candles || candles.length === 0) return null;
     if (!sinceDate) return candles;
     return candles.filter(c => c.date > sinceDate);
   }
@@ -336,7 +319,7 @@ class Scanner {
       const candleCache = {};
       for (const ticker of tickersToFetch) {
         if (this.cancelled.has(runId)) return;
-        candleCache[ticker] = await this._getCandlesSince(ticker, null);
+        candleCache[ticker] = this._getCandlesSince(ticker, null);
       }
 
       let slHit = 0, tpHit = 0;
@@ -463,7 +446,7 @@ class Scanner {
 
     const tasks = active.map(trade => limit(async () => {
       try {
-        const candles = await fetchWithRetry(trade.ticker, '1d', 2);
+        const candles = this.db.getLocalHistoricalPrices(trade.ticker);
         if (!candles || candles.length === 0) return;
 
         const last = candles[candles.length - 1];
@@ -580,17 +563,7 @@ class Scanner {
     for (const t of list) {
       if (this.cancelled.has(runId)) break;
 
-      const cacheKey = `${t.ticker}_${timeframe}`;
-      let candles = this.db.getCachedOHLCV(cacheKey);
-      if (!candles) {
-        try {
-          candles = await fetchWithRetry(t.ticker, timeframe, 3);
-          this.db.cacheOHLCV(cacheKey, candles);
-        } catch (_) {
-          continue;
-        }
-      }
-
+      let candles = this.db.getLocalHistoricalPrices(t.ticker);
       if (!candles || candles.length < 200) continue;
 
       for (let i = 200; i < candles.length; i++) {

@@ -188,12 +188,10 @@ async function handleScan({ runId, tickers, params, timeframe }) {
         
         // Detetar tipo de erro para mensagem mais específica
         let detailedMessage = `Falha ao obter dados: ${errorMsg}`;
-        if (errorMsg.includes('No data found') || errorMsg.includes('No candles returned')) {
-          detailedMessage = `Símbolo não encontrado ou delistado: ${t.ticker}. Verificar se o símbolo está correto.`;
-        } else if (errorMsg.includes('Rate Limit') || errorMsg.includes('429')) {
-          detailedMessage = `Rate limit do Yahoo Finance. Aguardar antes de tentar novamente.`;
+        if (errorMsg.includes('Sem dados locais') || errorMsg.includes('No data found') || errorMsg.includes('No candles returned')) {
+          detailedMessage = `Dados insuficientes: sem dados locais para ${t.ticker}. Sincroniza na aba "My List".`;
         } else if (errorMsg.includes('null/empty')) {
-          detailedMessage = `Dados corrompidos ou incompletos para ${t.ticker}.`;
+          detailedMessage = `Dados insuficientes: dados corrompidos ou incompletos para ${t.ticker}.`;
         }
         
         send({ type: 'error', payload: { ticker: t.ticker, message: detailedMessage, runId } });
@@ -213,9 +211,9 @@ async function handleScan({ runId, tickers, params, timeframe }) {
 
         let detailedMessage = `Dados insuficientes: ${candleCount} velas (mínimo: ${minCandles})`;
         if (candleCount === 0) {
-          detailedMessage = `Nenhuma vela disponível para ${t.ticker}. O símbolo pode estar delistado ou a API falhou.`;
+          detailedMessage = `Dados insuficientes: nenhuma vela disponível para ${t.ticker}. O símbolo pode estar delistado.`;
         } else if (candleCount < 60) {
-          detailedMessage = `Muito poucas velas (${candleCount}) para ${t.ticker}. Necessário mínimo ${minCandles} para análise Markov.`;
+          detailedMessage = `Dados insuficientes: poucas velas (${candleCount}) para ${t.ticker}. Necessário mínimo ${minCandles} para análise Markov.`;
         }
 
         send({ type: 'error', payload: {
