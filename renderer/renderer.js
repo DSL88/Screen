@@ -1526,10 +1526,12 @@
           const expectedDateFormatted = freshness.expectedDate
             ? freshness.expectedDate.split('-').reverse().join('-')
             : '—';
+          const maxDateFormatted = freshness.maxStoredDate
+            ? freshness.maxStoredDate.split('-').reverse().join('-')
+            : '—';
           freshnessBannerMessage.innerHTML =
-            `A tua lista de ativos contém dados desatualizados (último registo local: <strong>${freshness.latestStoredDate ? freshness.latestStoredDate.split('-').reverse().join('-') : '—'}</strong>).<br/>` +
-            `Para garantir que os sinais de Markov, Rolling VWAP e Monte Carlo utilizam a cotação de fecho mais recente, ` +
-            `por favor acede à aba <strong>"My List"</strong> e clica em <strong>"🔄 Sincronizar / Atualizar Lista"</strong>.`;
+            `⚠️ A base de dados tem cotações até <strong>${maxDateFormatted}</strong>, mas a última sessão de mercado esperada é <strong>${expectedDateFormatted}</strong>. ` +
+            `Por favor, acede à aba <strong>"My List"</strong> e clica em <strong>"Atualizar"</strong> antes de fazer a análise.`;
           freshnessBanner.hidden = false;
           return; // Stop the scan initiation
         }

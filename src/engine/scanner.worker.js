@@ -144,77 +144,20 @@ function classifyPosition(trade, currentPrice, currentDirection) {
 //  SCAN — Varrimento principal
 // ═══════════════════════════════════════════════════════════
 
-// ── Helper: Obter candles com cache inteligente ────────────
-//  1. Verifica cache local (historical_prices)
-//  2. Se vazio ou desatualizado, faz fetch apenas do delta
-//  3. Guarda novas velas na BD
-//  4. Retorna série completa para análise
+// ── Helper: Obter candles exclusivamente da SQLite local ──
+//  A atualização dos dados deve ser feita na aba "My List".
+//  O scanner apenas lê — nunca faz fetch à API do Yahoo Finance.
 async function getCandlesWithCache(ticker, timeframe, params) {
-  try {
-    // Passo 1: Verificar última data guardada localmente
-    let lastStoredDate = null;
-    try {
-      lastStoredDate = await requestDB('getLastStoredDate', { ticker });
-    } catch (err) {
-      console.warn(`[Scanner] ${ticker}: Falha ao consultar cache local - ${err.message}`);
-    }
+  const markovWindow = params && params.markov_window ? params.markov_window : 150;
+  const loadLimit = Math.max(300, markovWindow + 100);
 
-    if (lastStoredDate) {
-      // Dados locais existem → fetch incremental desde a última data
-      // O INSERT OR REPLACE reescreve a última vela e adiciona as novas
-      console.log(`[Scanner] ${ticker}: Dados locais até ${lastStoredDate} → fetch incremental`);
-      send({ type: 'sync-status', payload: { ticker, status: 'syncing', lastDate: lastStoredDate } });
+  const candles = await requestDB('getLocalHistoricalPricesLimit', { ticker, limit: loadLimit });
 
-      try {
-        const period1 = new Date(lastStoredDate);
-        const newCandles = await fetchWithRetry(ticker, timeframe, 3, period1);
-
-        if (newCandles && newCandles.length > 0) {
-          // Guardar na tabela permanente
-          await requestDB('saveHistoricalCandles', { candles: newCandles });
-          // Guardar também no cache temporário para compatibilidade
-          send({ type: 'cacheOHLCV', payload: { key: `${ticker}_${timeframe}`, candles: newCandles } });
-          console.log(`[Scanner] ${ticker}: +${newCandles.length} velas sincronizadas`);
-          send({ type: 'sync-status', payload: { ticker, status: 'downloaded-new', newDataCount: newCandles.length, lastDate: lastStoredDate } });
-        } else {
-          console.log(`[Scanner] ${ticker}: Sem dados novos`);
-          send({ type: 'sync-status', payload: { ticker, status: 'up-to-date', lastDate: lastStoredDate } });
-        }
-      } catch (err) {
-        console.warn(`[Scanner] ${ticker}: Falha no fetch incremental: ${err.message}. A usar dados locais.`);
-        send({ type: 'sync-status', payload: { ticker, status: 'up-to-date', lastDate: lastStoredDate, warning: true } });
-      }
-
-      // Carregar série consolidada da SQLite (sempre, mesmo se fetch falhou)
-      const markovWindow = params && params.markov_window ? params.markov_window : 150;
-      const loadLimit = Math.max(400, markovWindow + 100);
-      const fullSeries = await requestDB('getLocalHistoricalPricesLimit', { ticker, limit: loadLimit });
-      if (fullSeries && fullSeries.length > 0) {
-        return fullSeries;
-      }
-    }
-
-    // Sem dados locais → download completo (1.5 anos) e guardar como seed
-    console.log(`[Scanner] ${ticker}: Sem dados locais → download completo`);
-    send({ type: 'sync-status', payload: { ticker, status: 'syncing', lastDate: null } });
-
-    try {
-      const fullHistory = await fetchWithRetry(ticker, timeframe, 3);
-      if (fullHistory && fullHistory.length > 0) {
-        await requestDB('saveHistoricalCandles', { candles: fullHistory });
-        send({ type: 'cacheOHLCV', payload: { key: `${ticker}_${timeframe}`, candles: fullHistory } });
-        console.log(`[Scanner] ${ticker}: ${fullHistory.length} velas guardadas (seed inicial)`);
-        send({ type: 'sync-status', payload: { ticker, status: 'downloaded-new', newDataCount: fullHistory.length, lastDate: null } });
-      }
-      return fullHistory;
-    } catch (err) {
-      console.error(`[Scanner] ${ticker}: Sem dados locais e API falhou: ${err.message}`);
-      throw new Error(`Sem dados locais e falha na API: ${err.message}`);
-    }
-  } catch (err) {
-    console.error(`[Scanner] ${ticker}: Erro crítico - ${err.message}`);
-    throw err;
+  if (!candles || candles.length === 0) {
+    throw new Error(`Sem dados locais para ${ticker}. Sincroniza os dados na aba "My List" primeiro.`);
   }
+
+  return candles;
 }
 
 async function handleScan({ runId, tickers, params, timeframe }) {
