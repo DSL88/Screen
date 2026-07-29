@@ -476,15 +476,27 @@ class DB {
     return { changes: tx(candles) };
   }
 
-  getLocalHistoricalPrices(ticker) {
+  getLocalHistoricalPrices(ticker, limit = 300) {
     const rows = this.db.prepare(`
       SELECT date, open, high, low, close, volume
       FROM historical_prices
       WHERE ticker = ?
-      ORDER BY date ASC
-    `).all(ticker);
+      ORDER BY date DESC
+      LIMIT ?
+    `).all(ticker, limit);
 
-    return rows.map(r => ({ ticker, ...r }));
+    if (!rows || rows.length === 0) {
+      return [];
+    }
+
+    return rows.reverse().map(row => ({
+      date: row.date,
+      open: Number(row.open),
+      high: Number(row.high),
+      low: Number(row.low),
+      close: Number(row.close),
+      volume: Number(row.volume)
+    }));
   }
 
   getLocalHistoricalPricesLimit(ticker, limit) {
@@ -496,7 +508,18 @@ class DB {
       LIMIT ?
     `).all(ticker, limit);
 
-    return rows.reverse().map(r => ({ ticker, ...r }));
+    if (!rows || rows.length === 0) {
+      return [];
+    }
+
+    return rows.reverse().map(row => ({
+      date: row.date,
+      open: Number(row.open),
+      high: Number(row.high),
+      low: Number(row.low),
+      close: Number(row.close),
+      volume: Number(row.volume)
+    }));
   }
 
   getTickerDataRange(ticker) {
