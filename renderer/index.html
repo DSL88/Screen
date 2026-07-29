@@ -136,6 +136,19 @@
         <span id="footer-summary">0 sinais emitidos · 0 tickers processados</span>
         <span class="footer-meta">Markov 9×9 · BB(30,2) · RSI(21) · ADX(14) · 252 d</span>
       </footer>
+      <div class="freshness-banner" id="freshness-banner" hidden>
+        <div class="freshness-banner-content">
+          <span class="freshness-banner-icon">⚠️</span>
+          <div class="freshness-banner-text">
+            <strong>Atenção: Dados Desatualizados Detetados</strong><br/>
+            <span id="freshness-banner-message">A tua lista de ativos contém dados desatualizados.</span>
+          </div>
+          <div class="freshness-banner-actions">
+            <button class="btn-primary" id="btn-freshness-go-mylist">🔄 Ir para My List e Atualizar</button>
+            <button class="btn-secondary" id="btn-freshness-continue">Continuar Mesmo Assim</button>
+          </div>
+        </div>
+      </div>
       </div>
 
       <div class="tab-content" id="tab-mylist">
@@ -150,6 +163,10 @@
               <input type="text" id="my-list-search" class="mylist-search-input" placeholder="Pesquisar por Ticker ou Nome..." autocomplete="off" spellcheck="false" />
               <button class="mylist-search-clear" id="my-list-search-clear" type="button" aria-label="Limpar pesquisa" hidden>×</button>
             </div>
+            <button class="btn-primary" id="btn-sync-all-stocks" title="Sincronizar todos os ativos da lista com o Yahoo Finance">
+              <span class="btn-label">🔄 Sincronizar / Atualizar Lista</span>
+              <span class="spinner" id="sync-all-spinner" hidden></span>
+            </button>
             <button class="btn-secondary" id="btn-purge-inactive" title="Remover ativos das listas sem registos de cotação nos últimos 60 dias">
               <span>Limpar Ativos Inativos / Antigos do Índice</span>
             </button>
@@ -272,6 +289,7 @@
       </div>
     </main>
     </div>
+    <div class="toast-container" id="toast-container"></div>
   </div>
 
   <div class="modal-backdrop modal-backdrop-search" id="modal-search" hidden>
