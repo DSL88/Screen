@@ -22,126 +22,68 @@ class DB {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
+    this.db.pragma('cache_size = -64000');
+    this.db.pragma('temp_store = MEMORY');
+    this.db.pragma('foreign_keys = ON');
     this._migrate();
     this._seedParams();
     return Promise.resolve();
   }
 
   _migrate() {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS historical_signals (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticker          TEXT NOT NULL,
-        date            TEXT NOT NULL,
-        preco_entrada   REAL NOT NULL,
-        direcao         TEXT CHECK(direcao IN ('COMPRA','VENDA')),
-        edge            REAL NOT NULL,
-        p_stay          REAL NOT NULL,
-        atr_14          REAL NOT NULL,
-        stop_loss       REAL,
-        take_profit     REAL,
-        status          TEXT DEFAULT 'aberto' CHECK(status IN ('aberto','fechado')),
-        resultado_pct   REAL,
-        closed_at       TEXT,
-        close_reason    TEXT,
-        created_at      TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_ticker_date ON historical_signals(ticker, date);
-      CREATE INDEX IF NOT EXISTS idx_status ON historical_signals(status);
-
-      CREATE TABLE IF NOT EXISTS adaptive_params (
-        key   TEXT PRIMARY KEY,
-        value REAL NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS ohlcv_cache (
-        ticker        TEXT NOT NULL,
-        date          TEXT NOT NULL,
-        open          REAL NOT NULL,
-        high          REAL NOT NULL,
-        low           REAL NOT NULL,
-        close         REAL NOT NULL,
-        volume        REAL NOT NULL,
-        fetched_at    TEXT NOT NULL,
-        PRIMARY KEY (ticker, date)
-      );
-
-      CREATE TABLE IF NOT EXISTS historical_prices (
-        ticker        TEXT NOT NULL,
-        date          TEXT NOT NULL,
-        open          REAL NOT NULL,
-        high          REAL NOT NULL,
-        low           REAL NOT NULL,
-        close         REAL NOT NULL,
-        volume        INTEGER NOT NULL,
-        PRIMARY KEY (ticker, date)
-      );
-      CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date);
-
-      CREATE TABLE IF NOT EXISTS stocks (
-        ticker      TEXT PRIMARY KEY,
-        name        TEXT NOT NULL,
-        country     TEXT NOT NULL,
-        index_name  TEXT NOT NULL,
-        created_at  TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS custom_tickers (
-        ticker     TEXT PRIMARY KEY,
-        name       TEXT,
-        exchange   TEXT,
-        type       TEXT,
-        added_at   TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS active_trades (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticker         TEXT NOT NULL,
-        nome           TEXT,
-        direcao        TEXT CHECK(direcao IN ('COMPRA','VENDA')),
-        preco_entrada  REAL NOT NULL,
-        stop_loss      REAL NOT NULL,
-        take_profit    REAL NOT NULL,
-        data_entrada   TEXT NOT NULL,
-        status         TEXT DEFAULT 'aberto' CHECK(status IN ('aberto','fechado')),
-        resultado_pct  REAL,
-        preco_fecho    REAL,
-        motivo_fecho   TEXT,
-        fechado_em     TEXT,
-        created_at     TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_active_trades_status ON active_trades(status);
-
-      CREATE TABLE IF NOT EXISTS market_shortcuts (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticker    TEXT NOT NULL UNIQUE,
-        nome      TEXT,
-        mercado   TEXT,
-        tipo      TEXT,
-        added_at  TEXT DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_market_shortcuts_ticker ON market_shortcuts(ticker);
-    `);
-
-    const cols = this.db.prepare("PRAGMA table_info(historical_signals)").all();
-    const have = new Set(cols.map(c => c.name));
-    if (!have.has('stop_loss')) {
-      this.db.exec('ALTER TABLE historical_signals ADD COLUMN stop_loss REAL');
-    }
-    if (!have.has('take_profit')) {
-      this.db.exec('ALTER TABLE historical_signals ADD COLUMN take_profit REAL');
-    }
-    if (!have.has('closed_at')) {
-      this.db.exec('ALTER TABLE historical_signals ADD COLUMN closed_at TEXT');
-    }
-    if (!have.has('close_reason')) {
-      this.db.exec('ALTER TABLE historical_signals ADD COLUMN close_reason TEXT');
-    }
-
-    // Migration: ensure stocks table exists for older databases
-    const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='stocks'").get();
-    if (!tables) {
+    const tx = this.db.transaction(() => {
       this.db.exec(`
+        CREATE TABLE IF NOT EXISTS historical_signals (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          ticker          TEXT NOT NULL,
+          date            TEXT NOT NULL,
+          preco_entrada   REAL NOT NULL,
+          direcao         TEXT CHECK(direcao IN ('COMPRA','VENDA')),
+          edge            REAL NOT NULL,
+          p_stay          REAL NOT NULL,
+          atr_14          REAL NOT NULL,
+          stop_loss       REAL,
+          take_profit     REAL,
+          status          TEXT DEFAULT 'aberto' CHECK(status IN ('aberto','fechado')),
+          resultado_pct   REAL,
+          closed_at       TEXT,
+          close_reason    TEXT,
+          created_at      TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_ticker_date ON historical_signals(ticker, date);
+        CREATE INDEX IF NOT EXISTS idx_status ON historical_signals(status);
+
+        CREATE TABLE IF NOT EXISTS adaptive_params (
+          key   TEXT PRIMARY KEY,
+          value REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS ohlcv_cache (
+          ticker        TEXT NOT NULL,
+          date          TEXT NOT NULL,
+          open          REAL NOT NULL,
+          high          REAL NOT NULL,
+          low           REAL NOT NULL,
+          close         REAL NOT NULL,
+          volume        REAL NOT NULL,
+          fetched_at    TEXT NOT NULL,
+          PRIMARY KEY (ticker, date)
+        );
+
+        CREATE TABLE IF NOT EXISTS historical_prices (
+          ticker        TEXT NOT NULL,
+          date          TEXT NOT NULL,
+          open          REAL NOT NULL,
+          high          REAL NOT NULL,
+          low           REAL NOT NULL,
+          close         REAL NOT NULL,
+          volume        INTEGER NOT NULL,
+          PRIMARY KEY (ticker, date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date);
+        CREATE INDEX IF NOT EXISTS idx_historical_prices_ticker_date_asc ON historical_prices (ticker, date ASC);
+        CREATE INDEX IF NOT EXISTS idx_stocks_ticker ON stocks (ticker);
+
         CREATE TABLE IF NOT EXISTS stocks (
           ticker      TEXT PRIMARY KEY,
           name        TEXT NOT NULL,
@@ -149,25 +91,91 @@ class DB {
           index_name  TEXT NOT NULL,
           created_at  TEXT DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS custom_tickers (
+          ticker     TEXT PRIMARY KEY,
+          name       TEXT,
+          exchange   TEXT,
+          type       TEXT,
+          added_at   TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS active_trades (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          ticker         TEXT NOT NULL,
+          nome           TEXT,
+          direcao        TEXT CHECK(direcao IN ('COMPRA','VENDA')),
+          preco_entrada  REAL NOT NULL,
+          stop_loss      REAL NOT NULL,
+          take_profit    REAL NOT NULL,
+          data_entrada   TEXT NOT NULL,
+          status         TEXT DEFAULT 'aberto' CHECK(status IN ('aberto','fechado')),
+          resultado_pct  REAL,
+          preco_fecho    REAL,
+          motivo_fecho   TEXT,
+          fechado_em     TEXT,
+          created_at     TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_active_trades_status ON active_trades(status);
+
+        CREATE TABLE IF NOT EXISTS market_shortcuts (
+          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          ticker    TEXT NOT NULL UNIQUE,
+          nome      TEXT,
+          mercado   TEXT,
+          tipo      TEXT,
+          added_at  TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_market_shortcuts_ticker ON market_shortcuts(ticker);
       `);
-    }
 
-    const customCols = this.db.prepare("PRAGMA table_info(custom_tickers)").all();
-    const customColsSet = new Set(customCols.map(c => c.name));
-    if (!customColsSet.has('country')) {
-      this.db.exec('ALTER TABLE custom_tickers ADD COLUMN country TEXT');
-    }
-    if (!customColsSet.has('index_name')) {
-      this.db.exec('ALTER TABLE custom_tickers ADD COLUMN index_name TEXT');
-    }
+      const cols = this.db.prepare("PRAGMA table_info(historical_signals)").all();
+      const have = new Set(cols.map(c => c.name));
+      if (!have.has('stop_loss')) {
+        this.db.exec('ALTER TABLE historical_signals ADD COLUMN stop_loss REAL');
+      }
+      if (!have.has('take_profit')) {
+        this.db.exec('ALTER TABLE historical_signals ADD COLUMN take_profit REAL');
+      }
+      if (!have.has('closed_at')) {
+        this.db.exec('ALTER TABLE historical_signals ADD COLUMN closed_at TEXT');
+      }
+      if (!have.has('close_reason')) {
+        this.db.exec('ALTER TABLE historical_signals ADD COLUMN close_reason TEXT');
+      }
 
-    const stockCols = this.db.prepare("PRAGMA table_info(stocks)").all();
-    const stockColsSet = new Set(stockCols.map(c => c.name));
-    if (!stockColsSet.has('full_history_fetched')) {
-      this.db.exec('ALTER TABLE stocks ADD COLUMN full_history_fetched INTEGER DEFAULT 0');
-    }
+      // Migration: ensure stocks table exists for older databases
+      const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='stocks'").get();
+      if (!tables) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS stocks (
+            ticker      TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            country     TEXT NOT NULL,
+            index_name  TEXT NOT NULL,
+            created_at  TEXT DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+      }
 
-    this._migrateRecalculateSLTP();
+      const customCols = this.db.prepare("PRAGMA table_info(custom_tickers)").all();
+      const customColsSet = new Set(customCols.map(c => c.name));
+      if (!customColsSet.has('country')) {
+        this.db.exec('ALTER TABLE custom_tickers ADD COLUMN country TEXT');
+      }
+      if (!customColsSet.has('index_name')) {
+        this.db.exec('ALTER TABLE custom_tickers ADD COLUMN index_name TEXT');
+      }
+
+      const stockCols = this.db.prepare("PRAGMA table_info(stocks)").all();
+      const stockColsSet = new Set(stockCols.map(c => c.name));
+      if (!stockColsSet.has('full_history_fetched')) {
+        this.db.exec('ALTER TABLE stocks ADD COLUMN full_history_fetched INTEGER DEFAULT 0');
+      }
+
+      this._migrateRecalculateSLTP();
+    });
+    tx();
   }
 
   _migrateRecalculateSLTP() {
@@ -476,6 +484,18 @@ class DB {
     `).all(ticker);
 
     return rows.map(r => ({ ticker, ...r }));
+  }
+
+  getLocalHistoricalPricesLimit(ticker, limit) {
+    const rows = this.db.prepare(`
+      SELECT date, open, high, low, close, volume
+      FROM historical_prices
+      WHERE ticker = ?
+      ORDER BY date DESC
+      LIMIT ?
+    `).all(ticker, limit);
+
+    return rows.reverse().map(r => ({ ticker, ...r }));
   }
 
   getTickerDataRange(ticker) {

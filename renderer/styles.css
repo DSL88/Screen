@@ -3391,9 +3391,14 @@ select.param-input option {
   background-color: rgba(245, 158, 11, 0.05);
 }
 
+.watchlist-item.card-skipped {
+  border-left: 5px solid #6b7280 !important;
+  background-color: rgba(107, 114, 128, 0.05);
+}
+
 .watchlist-item.card-pending {
-  border-left: 5px solid #ef4444 !important;
-  background-color: rgba(239, 68, 68, 0.05);
+  border-left: 5px solid #6b7280 !important;
+  background-color: rgba(107, 114, 128, 0.05);
 }
 
 /* ═══════════════════════════════════════════════════════════

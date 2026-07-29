@@ -149,7 +149,7 @@ function classifyPosition(trade, currentPrice, currentDirection) {
 //  2. Se vazio ou desatualizado, faz fetch apenas do delta
 //  3. Guarda novas velas na BD
 //  4. Retorna série completa para análise
-async function getCandlesWithCache(ticker, timeframe) {
+async function getCandlesWithCache(ticker, timeframe, params) {
   try {
     // Passo 1: Verificar última data guardada localmente
     let lastStoredDate = null;
@@ -186,7 +186,9 @@ async function getCandlesWithCache(ticker, timeframe) {
       }
 
       // Carregar série consolidada da SQLite (sempre, mesmo se fetch falhou)
-      const fullSeries = await requestDB('getLocalHistoricalPrices', { ticker });
+      const markovWindow = params && params.markov_window ? params.markov_window : 150;
+      const loadLimit = Math.max(400, markovWindow + 100);
+      const fullSeries = await requestDB('getLocalHistoricalPricesLimit', { ticker, limit: loadLimit });
       if (fullSeries && fullSeries.length > 0) {
         return fullSeries;
       }
@@ -234,7 +236,7 @@ async function handleScan({ runId, tickers, params, timeframe }) {
       let candles;
       try {
         console.log(`[Scanner] ${t.ticker}: A obter dados com cache inteligente...`);
-        candles = await getCandlesWithCache(t.ticker, timeframe);
+        candles = await getCandlesWithCache(t.ticker, timeframe, params);
         console.log(`[Scanner] ${t.ticker}: ${candles?.length || 0} velas disponíveis para análise`);
         send({ type: 'cacheOHLCV', payload: { key: `${t.ticker}_${timeframe}`, candles } });
       } catch (e) {
