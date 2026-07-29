@@ -446,7 +446,7 @@ class Scanner {
 
     const tasks = active.map(trade => limit(async () => {
       try {
-        const candles = this.db.getLocalHistoricalPrices(trade.ticker);
+        const candles = this.db.getLocalHistoricalPrices(trade.ticker, 300);
         if (!candles || candles.length === 0) return;
 
         const last = candles[candles.length - 1];
@@ -563,7 +563,7 @@ class Scanner {
     for (const t of list) {
       if (this.cancelled.has(runId)) break;
 
-      let candles = this.db.getLocalHistoricalPrices(t.ticker);
+      let candles = this.db.getLocalHistoricalPrices(t.ticker, 5000);
       if (!candles || candles.length < 200) continue;
 
       for (let i = 200; i < candles.length; i++) {
