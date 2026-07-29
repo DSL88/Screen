@@ -728,18 +728,32 @@ class DB {
     ).all().map(r => r.ticker);
   }
 
-  checkListFreshness(indexName = null) {
-    const today = new Date();
-    const day = today.getDay();
-    let expectedDate;
-    if (day === 0 || day === 6) {
-      const diff = day === 0 ? 2 : 1;
-      const friday = new Date(today);
-      friday.setDate(today.getDate() - diff);
-      expectedDate = friday.toISOString().slice(0, 10);
+  getLastExpectedTradingDay() {
+    const now = new Date();
+    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dayOfWeek = target.getDay();
+
+    if (dayOfWeek === 6) {
+      target.setDate(target.getDate() - 1);
+    } else if (dayOfWeek === 0) {
+      target.setDate(target.getDate() - 2);
     } else {
-      expectedDate = today.toISOString().slice(0, 10);
+      const currentHour = now.getHours();
+      if (currentHour < 22 && dayOfWeek === 1) {
+        target.setDate(target.getDate() - 3);
+      } else if (currentHour < 22) {
+        target.setDate(target.getDate() - 1);
+      }
     }
+
+    const year = target.getFullYear();
+    const month = String(target.getMonth() + 1).padStart(2, '0');
+    const day = String(target.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  checkListFreshness(indexName = null) {
+    const expectedDate = this.getLastExpectedTradingDay();
 
     const tickers = this.getTickersByIndex(indexName);
     if (tickers.length === 0) {
