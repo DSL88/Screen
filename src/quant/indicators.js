@@ -319,6 +319,34 @@ function bollingerBands(closes, period = 30, mult = 2.0) {
   return { mid, upper, lower, pctB };
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Rolling VWAP – Volume Weighted Average Price
+// ═══════════════════════════════════════════════════════════
+function calculateRollingVWAP(candles, period = 20) {
+  const n = candles.length;
+  const out = new Array(n).fill(null);
+  if (n < period || period <= 0) return out;
+
+  for (let i = period - 1; i < n; i++) {
+    let sumTPV = 0;
+    let sumVol = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const high = Number(candles[j].high);
+      const low = Number(candles[j].low);
+      const close = Number(candles[j].close);
+      const volume = Number(candles[j].volume);
+      if (!Number.isFinite(volume) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) continue;
+      const tp = (high + low + close) / 3;
+      sumTPV += tp * volume;
+      sumVol += volume;
+    }
+    if (sumVol > 0) {
+      out[i] = sumTPV / sumVol;
+    }
+  }
+  return out;
+}
+
 module.exports = {
   sma,
   ema,
@@ -328,5 +356,6 @@ module.exports = {
   atrWilder,
   adxWilder,
   bollingerBands,
-  trueRange
+  trueRange,
+  calculateRollingVWAP
 };

@@ -8,7 +8,7 @@
 
 'use strict';
 
-const { sma, rsiWilder, adxWilder, bollingerBands, atrWilder } = require('./indicators');
+const { sma, rsiWilder, adxWilder, bollingerBands, atrWilder, calculateRollingVWAP } = require('./indicators');
 
 // ── Constantes ──────────────────────────────────────────────
 const NUM_STATES = 9;
@@ -187,25 +187,7 @@ function analyzeSeries(candles, params = {}) {
 
   const lastIdx = candles.length - 1;
 
-  const typicalPrices = new Array(candles.length);
-  for (let i = 0; i < candles.length; i++) {
-    typicalPrices[i] = (highs[i] + lows[i] + closes[i]) / 3;
-  }
-
-  const rollingVwap = new Array(candles.length).fill(null);
-  for (let i = VWAP_PERIOD - 1; i < candles.length; i++) {
-    let sumTPV = 0;
-    let sumVol = 0;
-    for (let j = i - VWAP_PERIOD + 1; j <= i; j++) {
-      const v = volumes[j];
-      if (v == null || !Number.isFinite(v)) continue;
-      sumTPV += typicalPrices[j] * v;
-      sumVol += v;
-    }
-    if (sumVol > 0) {
-      rollingVwap[i] = sumTPV / sumVol;
-    }
-  }
+  const rollingVwap = calculateRollingVWAP(candles, VWAP_PERIOD);
   const lastRollingVwap = rollingVwap[lastIdx];
 
   const states = buildStateSeries(bb.pctB, rsi, adx);
