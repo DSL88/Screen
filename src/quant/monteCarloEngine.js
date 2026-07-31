@@ -5,7 +5,13 @@ const { buildStateSeries, NUM_STATES, SL_PCT, TP_PCT } = require('./markovEngine
 
 const MC_ITERATIONS = 1000;
 const MC_DAYS_AHEAD = 20;
-const MC_THRESHOLD = 65;
+const MC_THRESHOLD = 50;
+
+const MC_TIERS = {
+  REJECTED: 'REJECTED',
+  MODERATE: 'MODERATE',
+  ELITE: 'ELITE'
+};
 
 const RSI_PERIOD = 21;
 const ADX_PERIOD = 14;
@@ -55,6 +61,16 @@ function buildStateReturnsMap(candles) {
   return returnsByState;
 }
 
+function classifyMCTier(winRate) {
+  if (winRate >= 65) {
+    return { mcTier: MC_TIERS.ELITE, mcApproved: true, mcLabel: 'Alta Probabilidade' };
+  }
+  if (winRate >= 50) {
+    return { mcTier: MC_TIERS.MODERATE, mcApproved: true, mcLabel: 'Probabilidade Moderada' };
+  }
+  return { mcTier: MC_TIERS.REJECTED, mcApproved: false, mcLabel: 'Rejeitado' };
+}
+
 function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, currentPrice, options) {
   const opts = options || {};
   const iterations = opts.iterations || MC_ITERATIONS;
@@ -63,7 +79,7 @@ function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, 
   const tpPct = opts.tpPct != null ? opts.tpPct : TP_PCT;
 
   if (!transitionMatrix || currentState < 0 || !candles || candles.length < 60 || !currentPrice || currentPrice <= 0) {
-    return { winRate: 0, tpHits: 0, slHits: 0, expired: iterations, isApproved: false };
+    return { winRate: 0, tpHits: 0, slHits: 0, expired: iterations, isApproved: false, mcTier: 'REJECTED', mcLabel: 'Rejeitado' };
   }
 
   const returnsByState = buildStateReturnsMap(candles);
@@ -107,9 +123,9 @@ function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, 
   }
 
   const winRate = (tpHits / iterations) * 100;
-  const isApproved = winRate >= MC_THRESHOLD;
+  const tier = classifyMCTier(winRate);
 
-  return { winRate, tpHits, slHits, expired, isApproved };
+  return { winRate, tpHits, slHits, expired, isApproved: tier.mcApproved, mcTier: tier.mcTier, mcLabel: tier.mcLabel };
 }
 
-module.exports = { runMarkovMonteCarloSimulation, MC_ITERATIONS, MC_DAYS_AHEAD, MC_THRESHOLD };
+module.exports = { runMarkovMonteCarloSimulation, MC_ITERATIONS, MC_DAYS_AHEAD, MC_THRESHOLD, MC_TIERS, classifyMCTier };

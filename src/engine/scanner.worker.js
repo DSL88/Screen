@@ -298,7 +298,8 @@ async function handleScan({ runId, tickers, params, timeframe }) {
             atr_14: atr14 ?? 0,
             stop_loss: result.stopLoss ?? null,
             take_profit: result.takeProfit ?? null,
-            mcWinRate: mcResult ? Math.round(mcResult.winRate * 10) / 10 : null
+            mcWinRate: mcResult ? Math.round(mcResult.winRate * 10) / 10 : null,
+            mcTier: mcResult ? mcResult.mcTier : null
           },
           // ── Campos para renderer (camelCase) ──
           rendererPayload: {
@@ -325,7 +326,9 @@ async function handleScan({ runId, tickers, params, timeframe }) {
             mcApproved: mcResult ? mcResult.isApproved : null,
             mcTpHits: mcResult ? mcResult.tpHits : null,
             mcSlHits: mcResult ? mcResult.slHits : null,
-            mcExpired: mcResult ? mcResult.expired : null
+            mcExpired: mcResult ? mcResult.expired : null,
+            mcTier: mcResult ? mcResult.mcTier : null,
+            mcLabel: mcResult ? mcResult.mcLabel : null
           }
         });
       }

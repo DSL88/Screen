@@ -1635,6 +1635,48 @@ body {
   color: var(--text-mute);
   border: 1px solid var(--border);
 }
+.badge-mc-elite {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+.badge-mc-moderate {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.25);
+}
+.badge-mc-rejected {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-mute);
+  border: 1px solid var(--border);
+}
+.mc-tooltip {
+  position: absolute;
+  z-index: 9999;
+  background: #1a1d23;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text);
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.mc-tooltip strong {
+  color: #34d399;
+}
+.mc-filter-select {
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  margin-left: 8px;
+}
 .col-mc {
   text-align: center !important;
 }

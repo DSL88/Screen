@@ -1217,16 +1217,22 @@
     updateSortIndicator();
   }
 
+  function passesMcFilter(r) {
+    const mcFilter = document.getElementById('mc-filter');
+    if (!mcFilter || mcFilter.value !== 'elite') return true;
+    return r.mcTier === 'ELITE' || (r.mcWinRate != null && r.mcWinRate >= 65);
+  }
+
   function appendRow(r) {
     const empty = body.querySelector('tr.empty');
     if (empty) empty.remove();
     
-    // Armazenar dados para ordenação
     scannerRows.push(r);
     
-    // Se não há ordenação ativa, adicionar diretamente ao DOM
     if (!currentSort.column) {
-      renderRowToDOM(r, body.children.length);
+      if (passesMcFilter(r)) {
+        renderRowToDOM(r, body.children.length);
+      }
     }
   }
   
@@ -1244,7 +1250,25 @@
       <td class="col-num price-val">${r.close != null ? r.close.toFixed(2) : '—'}</td>
       <td class="col-num sl-val">${r.stopLoss != null ? r.stopLoss.toFixed(2) : '—'}</td>
       <td class="col-num tp-val">${r.takeProfit != null ? r.takeProfit.toFixed(2) : '—'}</td>
-      <td class="col-num col-mc">${r.mcWinRate != null ? `<span class="mc-pill ${r.mcApproved ? 'mc-pill-approved' : 'mc-pill-rejected'}" title="Simulações: 1.000 | TP: ${r.mcTpHits ?? 0} | SL: ${r.mcSlHits ?? 0} | Expirados: ${r.mcExpired ?? 0}" style="cursor:default">MC: ${Math.round(r.mcWinRate)}%</span>` : '—'}</td>
+      <td class="col-num col-mc">${r.mcWinRate != null ? (() => {
+        const tierClass = r.mcTier === 'ELITE' ? 'badge-mc-elite' : r.mcTier === 'MODERATE' ? 'badge-mc-moderate' : 'badge-mc-rejected';
+        const tierLabel = r.mcTier === 'ELITE' ? 'Elite' : r.mcTier === 'MODERATE' ? 'Moderado' : 'Rejeitado';
+        const tp = r.mcTpHits ?? 0;
+        const sl = r.mcSlHits ?? 0;
+        const exp = r.mcExpired ?? 0;
+        const wr = Math.round(r.mcWinRate * 10) / 10;
+        const expectation = ((wr / 100) * 2.8 - (1 - wr / 100) * 1.4).toFixed(2);
+        const tooltipLines = [
+          'Classificação: ' + (r.mcLabel || tierLabel),
+          'Taxa de Sucesso: ' + wr + '%',
+          'Simulações: 1.000 trajetórias (20 dias úteis)',
+          '  Sucessos (TP 2,8%): ' + tp,
+          '  Derrotas (SL 1,4%): ' + sl,
+          '  Expirados: ' + exp,
+          'Expectativa Matemática: +' + expectation + '% por trade'
+        ];
+        return '<span class="mc-pill ' + tierClass + '" data-mc-tooltip="' + escapeHtml(tooltipLines.join('\\n')) + '" style="cursor:default">MC: ' + Math.round(wr) + '% (' + tierLabel + ')</span>';
+      })() : '—'}</td>
       <td class="col-action"><button class="btn-investir" data-ticker="${escapeHtml(r.ticker)}" data-nome="${escapeHtml(r.name || '')}" data-direcao="${escapeHtml(r.direction)}" data-preco="${r.close}" data-stop="${r.stopLoss}" data-tp="${r.takeProfit}">Investir</button></td>
     `;
     body.appendChild(tr);
@@ -1273,8 +1297,12 @@
       return;
     }
     
-    scannerRows.forEach((r, index) => {
-      renderRowToDOM(r, index + 1);
+    let rowIndex = 0;
+    scannerRows.forEach((r) => {
+      if (passesMcFilter(r)) {
+        rowIndex++;
+        renderRowToDOM(r, rowIndex);
+      }
     });
   }
   
@@ -1370,6 +1398,36 @@
       hideSuggestions();
     }
   });
+
+  document.addEventListener('mouseover', (e) => {
+    const badge = e.target.closest('[data-mc-tooltip]');
+    if (!badge) return;
+    let tip = document.querySelector('.mc-tooltip');
+    if (!tip) {
+      tip = document.createElement('div');
+      tip.className = 'mc-tooltip';
+      document.body.appendChild(tip);
+    }
+    tip.innerHTML = badge.dataset.mcTooltip.replace(/\\n/g, '<br>');
+    const rect = badge.getBoundingClientRect();
+    tip.style.left = rect.left + 'px';
+    tip.style.top = (rect.bottom + 6) + 'px';
+    tip.style.display = 'block';
+  });
+
+  document.addEventListener('mouseout', (e) => {
+    if (e.target.closest('[data-mc-tooltip]')) {
+      const tip = document.querySelector('.mc-tooltip');
+      if (tip) tip.style.display = 'none';
+    }
+  });
+
+  const mcFilterEl = document.getElementById('mc-filter');
+  if (mcFilterEl) {
+    mcFilterEl.addEventListener('change', () => {
+      renderAllRows();
+    });
+  }
 
   if (searchClear) {
     searchClear.addEventListener('click', () => {

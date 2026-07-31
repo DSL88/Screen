@@ -202,7 +202,9 @@ class Scanner {
             mcApproved: mcResult ? mcResult.isApproved : null,
             mcTpHits: mcResult ? mcResult.tpHits : null,
             mcSlHits: mcResult ? mcResult.slHits : null,
-            mcExpired: mcResult ? mcResult.expired : null
+            mcExpired: mcResult ? mcResult.expired : null,
+            mcTier: mcResult ? mcResult.mcTier : null,
+            mcLabel: mcResult ? mcResult.mcLabel : null
           });
         }
       } catch (err) {
