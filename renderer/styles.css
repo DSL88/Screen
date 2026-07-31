@@ -3562,3 +3562,61 @@ select.param-input option {
   from { opacity: 1; transform: translateX(0); }
   to { opacity: 0; transform: translateX(24px); }
 }
+
+/* ============== STOCK HOVER CARD ============== */
+.stock-hover-card {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  padding: 12px 14px;
+  min-width: 200px;
+  max-width: 320px;
+  opacity: 1;
+  transition: opacity 0.15s ease-in-out;
+  will-change: opacity;
+}
+.stock-hover-card.hidden {
+  display: none;
+  opacity: 0;
+}
+.hover-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+.hover-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hover-card-ticker {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent-hover);
+}
+.hover-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hover-card-info-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.hover-card-label {
+  color: var(--text-mute);
+}
+.hover-card-value {
+  font-family: var(--mono);
+  color: var(--text-dim);
+}

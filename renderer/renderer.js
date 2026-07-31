@@ -24,6 +24,38 @@
         openAssetDetailModal(item.dataset.ticker);
       }
     });
+
+    let currentHoverItem = null;
+
+    watchlistEl.addEventListener('mouseover', (e) => {
+      const item = e.target.closest('.watchlist-item');
+      if (!item || item === currentHoverItem) return;
+      currentHoverItem = item;
+      if (hoverCard) {
+        hoverCardName.textContent = item.dataset.name || item.dataset.ticker || '--';
+        hoverCardTicker.textContent = item.dataset.ticker || '--';
+        hoverCardFirstDate.textContent = item.dataset.firstDate || 'Sem Registos';
+        hoverCard.classList.remove('hidden');
+      }
+      positionHoverCard(e);
+    });
+
+    watchlistEl.addEventListener('mousemove', (e) => {
+      if (hoverCard && !hoverCard.classList.contains('hidden')) {
+        positionHoverCard(e);
+      }
+    });
+
+    watchlistEl.addEventListener('mouseout', (e) => {
+      if (!hoverCard || hoverCard.classList.contains('hidden')) return;
+      const item = e.target.closest('.watchlist-item');
+      if (item !== currentHoverItem) return;
+      const related = e.relatedTarget;
+      if (!related || !item.contains(related)) {
+        hoverCard.classList.add('hidden');
+        currentHoverItem = null;
+      }
+    });
   }
   const watchlistEmpty = document.getElementById('watchlist-empty');
   const watchlistCount = document.getElementById('watchlist-count');
@@ -38,6 +70,22 @@
   const btnFreshnessContinue = document.getElementById('btn-freshness-continue');
   let freshnessOverride = false;
   const toastContainer = document.getElementById('toast-container');
+  const hoverCard = document.getElementById('stock-hover-card');
+  const hoverCardName = document.getElementById('hover-card-name');
+  const hoverCardTicker = document.getElementById('hover-card-ticker');
+  const hoverCardFirstDate = document.getElementById('hover-card-first-date');
+
+  function positionHoverCard(e) {
+    if (!hoverCard) return;
+    const margin = 15;
+    const rect = hoverCard.getBoundingClientRect();
+    let x = e.clientX + margin;
+    let y = e.clientY + margin;
+    if (x + rect.width > window.innerWidth - margin) x = Math.max(margin, e.clientX - rect.width - margin);
+    if (y + rect.height > window.innerHeight - margin) y = Math.max(margin, e.clientY - rect.height - margin);
+    hoverCard.style.left = x + 'px';
+    hoverCard.style.top = y + 'px';
+  }
 
   function filterMyList(query) {
     const term = String(query || '').toLowerCase().trim();
@@ -298,6 +346,8 @@
         const syncState = getCardSyncState(t);
         item.className = 'watchlist-item is-clickable' + (t.inativo ? ' is-inactive' : '') + (syncState ? ' ' + syncState : '');
         item.dataset.ticker = t.ticker;
+        item.dataset.name = t.name || t.ticker;
+        item.dataset.firstDate = (t.temHistorico && t.primeiroRegisto) ? fmtShortDate(t.primeiroRegisto) : 'Sem Registos';
         if (highlightTicker && t.ticker === highlightTicker) {
           item.classList.add('just-added');
         }
@@ -397,6 +447,7 @@
 
     const updated = watchlist.find(w => w.ticker === ticker);
     if (!updated) return;
+    item.dataset.firstDate = (updated.temHistorico && updated.primeiroRegisto) ? fmtShortDate(updated.primeiroRegisto) : 'Sem Registos';
     const newHtml = renderHistoryBadgeBadge(updated);
     const temp = document.createElement('div');
     temp.innerHTML = newHtml.trim();
