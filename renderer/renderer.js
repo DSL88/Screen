@@ -2963,11 +2963,15 @@
   window.api.on('sync-all-progress', (p) => {
     if (p && btnSyncAllStocks) {
       const label = btnSyncAllStocks.querySelector('.btn-label');
-      if (label && p.status === 'syncing') {
-        label.textContent = `A sincronizar ${p.ticker} (${p.current}/${p.total})...`;
+      if (label && p.current != null && p.total != null) {
+        label.textContent = `A sincronizar ${p.current}/${p.total}...`;
       }
-      if (p.status === 'done' && p.summary) {
-        void updateWatchlistBadge(p.ticker, p.summary);
+      if (Array.isArray(p.updated)) {
+        for (const u of p.updated) {
+          if (u && u.ticker && u.summary) {
+            void updateWatchlistBadge(u.ticker, u.summary);
+          }
+        }
       }
     }
   });
