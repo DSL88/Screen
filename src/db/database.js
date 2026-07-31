@@ -83,7 +83,6 @@ class DB {
         );
         CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date);
         CREATE INDEX IF NOT EXISTS idx_historical_prices_ticker_date_asc ON historical_prices (ticker, date ASC);
-        CREATE INDEX IF NOT EXISTS idx_stocks_ticker ON stocks (ticker);
 
         CREATE TABLE IF NOT EXISTS stocks (
           ticker      TEXT PRIMARY KEY,
@@ -92,6 +91,7 @@ class DB {
           index_name  TEXT NOT NULL,
           created_at  TEXT DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE INDEX IF NOT EXISTS idx_stocks_ticker ON stocks (ticker);
 
         CREATE TABLE IF NOT EXISTS custom_tickers (
           ticker     TEXT PRIMARY KEY,

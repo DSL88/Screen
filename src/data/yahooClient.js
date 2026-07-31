@@ -542,10 +542,19 @@ async function fetchFullYahooHistory(ticker) {
   }
 }
 
+function buildIncrementalPeriod1(lastStoredDate) {
+  if (!lastStoredDate || typeof lastStoredDate !== 'string') return null;
+  const date = new Date(lastStoredDate + 'T00:00:00Z');
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date;
+}
+
 async function fetchIncrementalYahooHistory(ticker, lastStoredDate) {
-  const nextDay = new Date(lastStoredDate + 'T00:00:00Z');
-  nextDay.setDate(nextDay.getDate() + 1);
-  const period1 = nextDay;
+  const period1 = buildIncrementalPeriod1(lastStoredDate);
+  if (!period1) {
+    return [];
+  }
   const period2 = new Date();
 
   if (period1.getTime() >= period2.getTime()) {
@@ -582,4 +591,4 @@ async function fetchIncrementalYahooHistory(ticker, lastStoredDate) {
   }
 }
 
-module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory };
+module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory, buildIncrementalPeriod1 };

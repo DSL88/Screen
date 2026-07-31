@@ -6,6 +6,7 @@ const os = require('os');
 const Database = require('./src/db/database');
 const yahooClient = require('./src/data/yahooClient');
 const tickerLists = require('./src/data/tickerLists');
+const { isIncrementalUpToDate, addDays } = require('./src/utils/dateUtils');
 const { parseFile, importFromCsvFile } = require('./src/importer/historicalImporter');
 
 // Pre-calculate mapping from ticker to index ID for fast lookup
@@ -950,7 +951,12 @@ app.whenReady().then(async () => {
       if (!ticker) return { ok: false, error: 'missing-ticker' };
       try {
         const lastDate = db.getLastStoredDate(ticker);
-        const customPeriod1 = lastDate ? new Date(lastDate + 'T00:00:00Z') : null;
+        const expected = db.getLastExpectedTradingDay();
+        if (isIncrementalUpToDate(lastDate, expected)) {
+          return { ok: true, ticker, newCandles: 0, message: 'Dados já atualizados.' };
+        }
+        const next = lastDate ? addDays(lastDate, 1) : null;
+        const customPeriod1 = next ? new Date(next + 'T00:00:00Z') : null;
 
         let candles;
         try {
@@ -1079,6 +1085,7 @@ app.whenReady().then(async () => {
         let updatedCount = 0;
         let totalNewCandles = 0;
         const errors = [];
+        const expected = db.getLastExpectedTradingDay();
 
         for (let i = 0; i < tickers.length; i++) {
           const ticker = tickers[i];
@@ -1094,7 +1101,7 @@ app.whenReady().then(async () => {
 
           try {
             const lastDate = db.getLastStoredDate(ticker);
-            if (!lastDate) {
+            if (!lastDate || isIncrementalUpToDate(lastDate, expected)) {
               if (mainWindow && !mainWindow.isDestroyed()) {
                 mainWindow.webContents.send('sync-all-progress', {
                   current: i + 1,
@@ -1115,12 +1122,15 @@ app.whenReady().then(async () => {
               updatedCount++;
             }
 
+            const summary = db.getHistoricalSummary(ticker);
+
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('sync-all-progress', {
                 current: i + 1,
                 total: tickers.length,
                 ticker,
-                status: 'done'
+                status: 'done',
+                summary
               });
             }
           } catch (err) {
