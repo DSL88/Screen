@@ -476,6 +476,36 @@ class DB {
     return { changes: tx(candles) };
   }
 
+  saveHistoricalCandlesBatch(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) return { changes: 0 };
+
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const tx = this.db.transaction((batch) => {
+      let changes = 0;
+      for (const entry of batch) {
+        for (const c of entry.candles) {
+          const r = stmt.run(
+            entry.ticker,
+            c.date,
+            c.open,
+            c.high,
+            c.low,
+            c.close,
+            c.volume
+          );
+          changes += r.changes || 0;
+        }
+      }
+      return changes;
+    });
+
+    return { changes: tx(entries) };
+  }
+
   getLocalHistoricalPrices(ticker, limit = 300) {
     const rows = this.db.prepare(`
       SELECT date, open, high, low, close, volume
