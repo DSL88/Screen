@@ -1525,7 +1525,6 @@
             : res.message || 'Lista já estava atualizada. Nenhuma vela nova.';
           showToast(msg, 'success');
           if (typeof status !== 'undefined' && status) status.textContent = msg;
-          await loadInitial();
         } else {
           const errMsg = res && res.error ? res.error : 'Erro desconhecido';
           showToast('Erro na sincronização: ' + errMsg, 'error');
@@ -2966,6 +2965,9 @@
       const label = btnSyncAllStocks.querySelector('.btn-label');
       if (label && p.status === 'syncing') {
         label.textContent = `A sincronizar ${p.ticker} (${p.current}/${p.total})...`;
+      }
+      if (p.status === 'done' && p.summary) {
+        void updateWatchlistBadge(p.ticker, p.summary);
       }
     }
   });
