@@ -856,6 +856,11 @@
           if (typeof status !== 'undefined' && status) status.textContent = 'Erro: ' + s.error;
         }
       } catch (_) { /* ignora */ }
+      if (typeof status !== 'undefined' && status) status.textContent = `A consultar Yahoo Finance para o índice ${idx}...`;
+      showToast(`A consultar Yahoo Finance para o índice ${idx}...`, 'info');
+      if (window.api.syncIndexFirstDates) {
+        window.api.syncIndexFirstDates(idx);
+      }
     });
   }
 
@@ -3229,6 +3234,27 @@
           const wlEntry = watchlist.find(w => w.ticker === p.ticker);
           if (wlEntry) wlEntry.first_date = p.firstDate;
         }
+      }
+    });
+  }
+
+  if (window.api.onIndexFirstDateProgress) {
+    window.api.onIndexFirstDateProgress((data) => {
+      if (!data || !data.ticker || !data.firstDate) return;
+      const { ticker, firstDate, current, total } = data;
+      const item = watchlistEl.querySelector(`.watchlist-item[data-ticker="${CSS.escape(ticker)}"]`);
+      if (item) {
+        item.dataset.firstDate = fmtShortDate(firstDate);
+        const pillFirst = item.querySelector('.wl-pill-first');
+        if (pillFirst) {
+          pillFirst.textContent = fmtShortDate(firstDate);
+          pillFirst.classList.add('synced-green');
+        }
+        const wlEntry = watchlist.find(w => w.ticker === ticker);
+        if (wlEntry) wlEntry.first_date = firstDate;
+      }
+      if (typeof status !== 'undefined' && status) {
+        status.textContent = `[${current}/${total}] ${ticker}: 1ª data Yahoo = ${fmtShortDate(firstDate)}`;
       }
     });
   }
