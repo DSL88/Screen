@@ -77,7 +77,6 @@
   const hoverCardFirstDate = document.getElementById('hover-card-first-date');
   const selectCountryFilter = document.getElementById('select-country-filter');
   const selectIndexBulkFetch = document.getElementById('select-index-bulk-fetch');
-  const btnFetchIndexHistory = document.getElementById('btn-fetch-index-history');
   const btnFetchFirstDate = document.getElementById('btn-update-index-dates');
   const btnCancelCountryImport = document.getElementById('btn-cancel-country-import');
   const indexBulkProgress = document.getElementById('index-bulk-progress');
@@ -855,48 +854,6 @@
     }
   }
 
-  if (btnFetchIndexHistory) {
-    btnFetchIndexHistory.addEventListener('click', async () => {
-      const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
-      if (!idx) { showToast('Seleciona um índice da lista primeiro.', 'error'); return; }
-      const selectedOption = selectIndexBulkFetch && selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0];
-      const requestIndex = (selectedOption && selectedOption.dataset.dbName) || idx;
-      const idxLabel = selectedOption
-        ? selectIndexBulkFetch.selectedOptions[0].textContent : idx;
-      currentIndexBulkLabel = idxLabel;
-      indexDateErrors = 0;
-      btnFetchIndexHistory.disabled = true;
-      if (indexBulkProgress) indexBulkProgress.hidden = false;
-      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A descarregar histórico do Índice ${idxLabel}: iniciando...`;
-      if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
-      try {
-        const res = await window.api.downloadIndexFullHistory(requestIndex);
-        if (res && res.ok) {
-          const hasErrors = Number(res.errorCount || 0) > 0;
-          const isEmpty = Number(res.total || 0) === 0;
-          const msg = res.total === 0
-            ? (res.message || `Sem ativos para ${idxLabel}.`)
-            : hasErrors
-              ? `Importação parcial: ${res.updated || 0}/${res.total} com histórico total (${res.errorCount} falha(s)).`
-              : `Concluído: ${res.updated}/${res.total} com histórico total.`;
-          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = msg;
-          if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
-          showToast(msg, hasErrors || isEmpty ? 'info' : 'success');
-          await reloadMyListFromDatabase();
-        } else {
-          const errMsg = res && res.error ? res.error : 'Erro desconhecido';
-          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + errMsg;
-          showToast('Erro na descarga: ' + errMsg, 'error');
-        }
-      } catch (err) {
-        if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + (err.message || String(err));
-        showToast('Erro na descarga: ' + (err.message || String(err)), 'error');
-      } finally {
-        btnFetchIndexHistory.disabled = false;
-      }
-    });
-  }
-
   if (btnFetchFirstDate) {
     btnFetchFirstDate.addEventListener('click', async () => {
       const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
@@ -986,7 +943,7 @@
       // Country import and index-wide downloads touch the same records. Keep
       // those controls coherent, but do not freeze search, add, purge or the
       // rest of My List.
-      [selectCountryFilter, selectIndexBulkFetch, btnFetchIndexHistory, btnFetchFirstDate]
+      [selectCountryFilter, selectIndexBulkFetch, btnFetchFirstDate]
         .filter(Boolean).forEach(control => { control.disabled = isBusy; });
       if (btnCancelCountryImport) {
         btnCancelCountryImport.hidden = !isBusy;
