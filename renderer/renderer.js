@@ -60,9 +60,9 @@
   const watchlistEmpty = document.getElementById('watchlist-empty');
   const watchlistCount = document.getElementById('watchlist-count');
   const btnClearAll = document.getElementById('btn-clear-all');
-  const myListSearchInput = document.getElementById('my-list-search');
+  const myListSearchInput = document.getElementById('mylist-search-input');
   const myListSearchClear = document.getElementById('my-list-search-clear');
-  const btnSyncAllStocks = document.getElementById('btn-sync-all-stocks');
+  const btnDownloadAllMylist = document.getElementById('btn-download-all-mylist');
   const syncAllSpinner = document.getElementById('sync-all-spinner');
   const freshnessBanner = document.getElementById('freshness-banner');
   const freshnessBannerMessage = document.getElementById('freshness-banner-message');
@@ -1630,13 +1630,12 @@
   }
 
   // --- Sync All Stocks ---
-  if (btnSyncAllStocks) {
-    btnSyncAllStocks.addEventListener('click', async () => {
-      btnSyncAllStocks.disabled = true;
-      const label = btnSyncAllStocks.querySelector('.btn-label');
+  if (btnDownloadAllMylist) {
+    btnDownloadAllMylist.addEventListener('click', async () => {
+      btnDownloadAllMylist.disabled = true;
+      const label = btnDownloadAllMylist.querySelector('span');
       const originalLabel = label.textContent;
       label.textContent = 'A sincronizar novos dias...';
-      if (syncAllSpinner) syncAllSpinner.hidden = false;
 
       try {
         const res = await window.api.syncAllListStocks(null);
@@ -1655,11 +1654,15 @@
         showToast('Erro na sincronização: ' + (err.message || String(err)), 'error');
         if (typeof status !== 'undefined' && status) status.textContent = 'Erro: ' + (err.message || String(err));
       } finally {
-        btnSyncAllStocks.disabled = false;
+        btnDownloadAllMylist.disabled = false;
         label.textContent = originalLabel;
-        if (syncAllSpinner) syncAllSpinner.hidden = true;
       }
     });
+  }
+
+  const btnAddStockModal = document.getElementById('btn-add-stock-modal');
+  if (btnAddStockModal) {
+    btnAddStockModal.addEventListener('click', () => openAddModal());
   }
 
   // Freshness banner "Go to My List" button
@@ -3082,8 +3085,8 @@
 
   // Listeners for sync-all progress and done events
   window.api.on('sync-all-progress', (p) => {
-    if (p && btnSyncAllStocks) {
-      const label = btnSyncAllStocks.querySelector('.btn-label');
+    if (p && btnDownloadAllMylist) {
+      const label = btnDownloadAllMylist.querySelector('span');
       if (label && p.current != null && p.total != null) {
         label.textContent = `A sincronizar ${p.current}/${p.total}...`;
       }
