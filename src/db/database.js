@@ -173,6 +173,9 @@ class DB {
       if (!stockColsSet.has('full_history_fetched')) {
         this.db.exec('ALTER TABLE stocks ADD COLUMN full_history_fetched INTEGER DEFAULT 0');
       }
+      if (!stockColsSet.has('first_date')) {
+        this.db.exec('ALTER TABLE stocks ADD COLUMN first_date TEXT');
+      }
 
       this._migrateRecalculateSLTP();
     });
@@ -583,17 +586,17 @@ class DB {
 
   getStockByTicker(ticker) {
     return this.db.prepare(
-      'SELECT ticker, name, country, index_name FROM stocks WHERE ticker = ?'
+      'SELECT ticker, name, country, index_name, first_date FROM stocks WHERE ticker = ?'
     ).get(ticker);
   }
 
   getStocksByIndex(indexName = null) {
     if (indexName) {
       return this.db.prepare(
-        "SELECT ticker, name, country, index_name FROM stocks WHERE UPPER(index_name) = UPPER(?) ORDER BY ticker"
+        "SELECT ticker, name, country, index_name, first_date FROM stocks WHERE UPPER(index_name) = UPPER(?) ORDER BY ticker"
       ).all(indexName);
     }
-    return this.db.prepare("SELECT ticker, name, country, index_name FROM stocks ORDER BY ticker").all();
+    return this.db.prepare("SELECT ticker, name, country, index_name, first_date FROM stocks ORDER BY ticker").all();
   }
 
   upsertStock(stock) {
@@ -612,6 +615,10 @@ class DB {
 
   setFullHistoryFetched(ticker) {
     this.db.prepare('UPDATE stocks SET full_history_fetched = 1 WHERE ticker = ?').run(ticker);
+  }
+
+  setStockFirstDate(ticker, firstDate) {
+    return this.db.prepare('UPDATE stocks SET first_date = ? WHERE ticker = ?').run(firstDate || null, ticker);
   }
 
   getFullHistoryFetched(ticker) {

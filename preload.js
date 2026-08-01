@@ -10,7 +10,8 @@ const ALLOWED_EVENTS = new Set([
   'ticker:synced',
   'sync-all-progress',
   'sync-all-done',
-  'index-download-progress'
+  'index-download-progress',
+  'first-date-fetch-progress'
 ]);
 
 contextBridge.exposeInMainWorld('api', {
@@ -49,6 +50,12 @@ contextBridge.exposeInMainWorld('api', {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('index-download-progress', handler);
     return () => ipcRenderer.removeListener('index-download-progress', handler);
+  },
+  fetchIndexFirstDate: (indexName) => ipcRenderer.invoke('fetch-first-date-index', indexName),
+  onFirstDateProgress: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('first-date-fetch-progress', handler);
+    return () => ipcRenderer.removeListener('first-date-fetch-progress', handler);
   },
   importHistoricalCsv: () => ipcRenderer.invoke('import-historical-csv'),
   importHistoricalData: (data) => ipcRenderer.invoke('import-historical-data', data),

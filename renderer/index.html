@@ -171,6 +171,9 @@
             <button id="btn-fetch-index-history" class="btn btn-secondary toolbar-btn" title="Descarregar histórico completo de todos os ativos deste índice">
               <i class="toolbar-btn-icon">📥</i><span>Histórico do Índice</span>
             </button>
+            <button id="btn-fetch-index-first-date" class="btn btn-secondary toolbar-btn" title="Buscar e guardar na SQLite a 1ª data disponível no Yahoo Finance para os ativos deste índice">
+              <i class="toolbar-btn-icon">🗓️</i><span>Mapear 1ª Data (Yahoo)</span>
+            </button>
           </div>
 
           <div class="toolbar-group global-actions-group">
@@ -662,7 +665,7 @@
       </div>
       <div class="hover-card-body">
         <div class="hover-card-info-row">
-          <span class="hover-card-label">📅 Primeiro Registo:</span>
+          <span class="hover-card-label">📅 Primeiro Registo Yahoo:</span>
           <span id="hover-card-first-date" class="hover-card-value">--</span>
         </div>
       </div>
