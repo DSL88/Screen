@@ -595,21 +595,18 @@ async function fetchFirstTradeDate(ticker) {
   try {
     await sleep(1200 + Math.random() * 800);
     const normalizedTicker = normalizeTicker(ticker);
-    const result = await yahooFinance.chart(
-      normalizedTicker,
-      { period1: new Date(0), interval: '1mo' },
-      { fetchOptions: { headers: { 'User-Agent': USER_AGENT } } }
-    );
-    let firstDate = null;
-    if (result && result.meta && result.meta.firstTradeDate) {
-      const d = result.meta.firstTradeDate instanceof Date ? result.meta.firstTradeDate : new Date(result.meta.firstTradeDate);
-      if (!Number.isNaN(d.getTime())) firstDate = d.toISOString().slice(0, 10);
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(normalizedTicker)}?range=max&interval=1mo`;
+    const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
+    if (!res || !res.ok) return null;
+    const json = await res.json();
+    const resultArr = json && json.chart && Array.isArray(json.chart.result) ? json.chart.result : null;
+    const result = resultArr && resultArr.length > 0 ? resultArr[0] : null;
+    const timestamps = result && result.timestamp;
+    if (Array.isArray(timestamps) && timestamps.length > 0) {
+      const d = new Date(timestamps[0] * 1000);
+      if (!Number.isNaN(d.getTime())) return d.toISOString().split('T')[0];
     }
-    if (!firstDate && result && Array.isArray(result.quotes) && result.quotes.length > 0) {
-      const q = result.quotes[0].date;
-      if (q instanceof Date && !Number.isNaN(q.getTime())) firstDate = q.toISOString().slice(0, 10);
-    }
-    return firstDate;
+    return null;
   } catch (err) {
     console.warn(`[yahooClient] fetchFirstTradeDate(${ticker}): ${err && err.message ? err.message : err}`);
     return null;
