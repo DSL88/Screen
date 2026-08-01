@@ -737,11 +737,23 @@
     modalIndexSelect.appendChild(groupCustom);
   }
 
+  function cleanIndexId(raw) {
+    if (!raw) return '';
+    let clean = String(raw).trim();
+    if (clean.includes('—')) clean = clean.split('—')[1].trim();
+    if (clean.includes('–')) clean = clean.split('–')[1].trim();
+    if (clean.includes('|')) {
+      const parts = clean.split('|');
+      clean = parts[1] ? parts[1].trim() : parts[0].trim();
+    }
+    return clean.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  }
+
   function populateIndexBulkFetchDropdown() {
     if (!selectIndexBulkFetch) return;
     const currentIndexes = new Map();
     for (const t of watchlist) {
-      const idxId = (t.indexId || t.indexName || '').trim().toUpperCase();
+      const idxId = (t.indexId && String(t.indexId).trim()) ? String(t.indexId).trim().toUpperCase() : cleanIndexId(t.indexName);
       if (!idxId || idxId === 'CUSTOM') continue;
       if (!currentIndexes.has(idxId)) {
         currentIndexes.set(idxId, t.indexName || idxId);
@@ -810,7 +822,7 @@
       btnFetchFirstDate.disabled = true;
       if (selectIndexBulkFetch) selectIndexBulkFetch.disabled = true;
       const btnOriginalLabel = btnFetchFirstDate.querySelector('span');
-      if (btnOriginalLabel) btnOriginalLabel.textContent = `A atualizar ${idxLabel}...`;
+      if (btnOriginalLabel) btnOriginalLabel.textContent = `⏳ [0/...] A atualizar ${idxLabel}...`;
       if (indexBulkProgress) indexBulkProgress.hidden = false;
       if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A atualizar 1ª data do índice ${idxLabel}: iniciando...`;
       if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
@@ -823,19 +835,25 @@
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = msg;
           if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
           if (typeof status !== 'undefined' && status) status.textContent = msg;
+          if (btnOriginalLabel) btnOriginalLabel.textContent = '✅ Concluído!';
           showToast(msg, 'success');
+          renderWatchlist();
         } else {
           const errMsg = (res && res.message) || (res && res.error) || 'Erro desconhecido';
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + errMsg;
+          if (btnOriginalLabel) btnOriginalLabel.textContent = '❌ Falhou';
           showToast('Erro na atualização: ' + errMsg, 'error');
         }
       } catch (err) {
         if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + (err.message || String(err));
+        if (btnOriginalLabel) btnOriginalLabel.textContent = '❌ Falhou';
         showToast('Erro na atualização: ' + (err.message || String(err)), 'error');
       } finally {
-        btnFetchFirstDate.disabled = false;
-        if (selectIndexBulkFetch) selectIndexBulkFetch.disabled = false;
-        if (btnOriginalLabel) btnOriginalLabel.textContent = 'Atualizar 1ª Data do Índice';
+        setTimeout(() => {
+          btnFetchFirstDate.disabled = false;
+          if (selectIndexBulkFetch) selectIndexBulkFetch.disabled = false;
+          if (btnOriginalLabel) btnOriginalLabel.textContent = 'Atualizar Data';
+        }, 3000);
       }
     });
   }
@@ -854,7 +872,7 @@
               status.textContent = `Índice ${idx}: ${s.totalStocks} ativos registados, ${s.stocksWithDataCount} com histórico local.`;
             }
           } else {
-            const msg = `Possui ${s.totalStocks} ativos registados, mas sem histórico de velas locais. Clica em 'Mapear 1ª Data' para registar as datas de início.`;
+            const msg = `Possui ${s.totalStocks} ativos registados, mas sem histórico de velas locais. Clica em 'Atualizar Data' para registar as datas de início.`;
             if (typeof status !== 'undefined' && status) status.textContent = msg;
             showToast(msg, 'error');
           }
@@ -862,11 +880,6 @@
           if (typeof status !== 'undefined' && status) status.textContent = 'Erro: ' + s.error;
         }
       } catch (_) { /* ignora */ }
-      if (typeof status !== 'undefined' && status) status.textContent = `A consultar Yahoo Finance para o índice ${idx}...`;
-      showToast(`A consultar Yahoo Finance para o índice ${idx}...`, 'info');
-      if (window.api.syncIndexFirstDates) {
-        window.api.syncIndexFirstDates(idx);
-      }
     });
   }
 
@@ -3270,6 +3283,12 @@
       if (!data || !data.ticker) return;
       const { ticker, current, total } = data;
       const pct = total > 0 ? Math.round(current / total * 100) : 0;
+      const btnLabel = btnFetchFirstDate ? btnFetchFirstDate.querySelector('span') : null;
+      if (data.firstDate) {
+        if (btnLabel) btnLabel.textContent = `⏳ [${current}/${total}] ${ticker}: ${fmtShortDate(data.firstDate)}`;
+      } else if (btnLabel) {
+        btnLabel.textContent = `⏳ [${current}/${total}] ${ticker}`;
+      }
       if (indexBulkProgressLabel) {
         const idxLabel = currentIndexBulkLabel || '';
         const label = data.firstDate
