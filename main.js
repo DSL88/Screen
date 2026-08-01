@@ -1315,7 +1315,7 @@ app.whenReady().then(async () => {
 
           for (const r of results) {
             if (r.status === 'done') {
-              db.setStockFirstDate(r.ticker, r.firstDate);
+              db.updateStockFirstDate(r.ticker, r.firstDate);
               updated++;
             } else if (r.status === 'error') {
               errors.push({ ticker: r.ticker, error: r.error });
@@ -1350,6 +1350,17 @@ app.whenReady().then(async () => {
         }
 
         return { ok: true, total, updated, errorCount: errors.length, errors };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('check-index-status', async (_event, indexName) => {
+      const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
+      if (!index) return { ok: false, error: 'missing-index-name' };
+      try {
+        const status = db.checkIndexDataStatus(index);
+        return { ok: true, ...status };
       } catch (err) {
         return { ok: false, error: err.message || String(err) };
       }

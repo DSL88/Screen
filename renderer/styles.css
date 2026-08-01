@@ -3677,16 +3677,19 @@ select.param-input option {
 .mylist-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 16px;
+  background-color: #1e222d;
+  padding: 12px 18px;
+  border-radius: 8px;
+  border: 1px solid #2a2e39;
+  margin-bottom: 16px;
   flex-wrap: wrap;
-  padding: 12px 32px;
-  background: #131722;
-  border-bottom: 1px solid #2a2e39;
 }
 .toolbar-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .search-group {
   flex: 1;
@@ -3706,7 +3709,7 @@ select.param-input option {
 }
 .search-icon {
   position: absolute;
-  left: 10px;
+  left: 12px;
   top: 50%;
   transform: translateY(-50%);
   font-style: normal;
@@ -3716,19 +3719,20 @@ select.param-input option {
 }
 .toolbar-input,
 .toolbar-select {
-  height: 38px;
+  height: 38px !important;
   background: #1e222d;
   color: #d1d4dc;
   border: 1px solid #2a2e39;
   border-radius: 6px;
   font-family: var(--font);
   font-size: 13px;
+  font-weight: 500;
   outline: none;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 .toolbar-input {
-  width: 100%;
-  padding: 0 12px 0 32px;
+  width: 240px;
+  padding: 0 12px 0 34px;
 }
 .toolbar-input::placeholder {
   color: #787b86;
@@ -3747,10 +3751,10 @@ select.param-input option {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 38px;
+  height: 38px !important;
   padding: 0 14px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1;
   border-radius: 6px;
   white-space: nowrap;
