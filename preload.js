@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('index-download-progress', handler);
   },
   fetchIndexFirstDate: (indexName) => ipcRenderer.invoke('fetch-first-date-index', indexName),
+  fetchIndexFirstDates: (indexName) => ipcRenderer.invoke('fetch-first-dates-for-index', indexName),
   syncIndexFirstDates: (indexName) => ipcRenderer.invoke('sync-index-first-dates', indexName),
   onIndexFirstDateProgress: (callback) => {
     const handler = (_event, data) => callback(data);

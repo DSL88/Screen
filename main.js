@@ -1403,6 +1403,62 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('fetch-first-dates-for-index', async (event, indexName) => {
+      const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
+      if (!index) return { success: false, message: 'missing-index-name' };
+
+      const sleep = ms => new Promise(res => setTimeout(res, ms));
+      const delayBetween = () => sleep(200 + Math.random() * 100);
+
+      try {
+        const stocks = db.getStocksByIndex(index);
+        if (!stocks || stocks.length === 0) {
+          return { success: false, message: 'Nenhum ativo encontrado para este índice na SQLite.' };
+        }
+
+        const tickers = stocks.map(s => s.ticker);
+        const total = tickers.length;
+        let updatedCount = 0;
+        let current = 0;
+
+        for (const ticker of tickers) {
+          current++;
+          try {
+            const firstDate = await yahooClient.fetchFirstTradeDate(ticker);
+            if (firstDate) {
+              db.updateStockFirstDate(ticker, firstDate);
+              updatedCount++;
+            }
+            if (event.sender && !event.sender.isDestroyed()) {
+              event.sender.send('index-first-date-progress', {
+                current,
+                total,
+                ticker,
+                firstDate: firstDate || null
+              });
+            }
+          } catch (err) {
+            console.error(`[fetch-first-dates-for-index] Erro para ${ticker}:`, err);
+            if (event.sender && !event.sender.isDestroyed()) {
+              event.sender.send('index-first-date-progress', {
+                current,
+                total,
+                ticker,
+                firstDate: null,
+                error: err.message || String(err)
+              });
+            }
+          }
+          if (current < total) await delayBetween();
+        }
+
+        return { success: true, updatedCount };
+      } catch (error) {
+        console.error('[fetch-first-dates-for-index] Falha:', error);
+        return { success: false, error: error.message || String(error) };
+      }
+    });
+
     createWindow();
   } catch (err) {
     console.error('Fatal init error:', err);

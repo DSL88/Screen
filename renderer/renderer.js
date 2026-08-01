@@ -808,20 +808,22 @@
         ? selectIndexBulkFetch.selectedOptions[0].textContent : idx;
       currentIndexBulkLabel = idxLabel;
       btnFetchFirstDate.disabled = true;
+      if (selectIndexBulkFetch) selectIndexBulkFetch.disabled = true;
       if (indexBulkProgress) indexBulkProgress.hidden = false;
-      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A mapear 1ª data do Índice ${idxLabel}: iniciando...`;
+      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A consultar Yahoo Finance para o índice ${idxLabel}...`;
       if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
+      if (typeof status !== 'undefined' && status) status.textContent = `A consultar Yahoo Finance para o índice ${idxLabel}...`;
       try {
-        const res = await window.api.fetchIndexFirstDate(idx);
-        if (res && res.ok) {
-          const msg = res.total === 0
-            ? (res.message || `Sem ativos para ${idxLabel}.`)
-            : `Concluído: ${res.updated}/${res.total} com 1ª data mapeada (${res.errorCount || 0} erros).`;
+        const res = await window.api.fetchIndexFirstDates(idx);
+        if (res && res.success) {
+          const updated = res.updatedCount || 0;
+          const msg = `Primeiras datas atualizadas com sucesso para ${updated} ativos do índice ${idxLabel}!`;
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = msg;
           if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
-          showToast(msg, res.errorCount > 0 ? 'error' : 'success');
+          if (typeof status !== 'undefined' && status) status.textContent = msg;
+          showToast(msg, 'success');
         } else {
-          const errMsg = res && res.error ? res.error : 'Erro desconhecido';
+          const errMsg = (res && res.message) || (res && res.error) || 'Erro desconhecido';
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + errMsg;
           showToast('Erro no mapeamento: ' + errMsg, 'error');
         }
@@ -830,6 +832,7 @@
         showToast('Erro no mapeamento: ' + (err.message || String(err)), 'error');
       } finally {
         btnFetchFirstDate.disabled = false;
+        if (selectIndexBulkFetch) selectIndexBulkFetch.disabled = false;
       }
     });
   }
