@@ -1403,7 +1403,7 @@ app.whenReady().then(async () => {
       }
     });
 
-    ipcMain.handle('fetch-first-dates-for-index', async (event, indexName) => {
+    ipcMain.handle('fetch-index-first-dates', async (event, indexName) => {
       const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
       if (!index) return { success: false, message: 'missing-index-name' };
 
@@ -1430,7 +1430,7 @@ app.whenReady().then(async () => {
               updatedCount++;
             }
             if (event.sender && !event.sender.isDestroyed()) {
-              event.sender.send('index-first-date-progress', {
+              event.sender.send('index-date-progress', {
                 current,
                 total,
                 ticker,
@@ -1438,9 +1438,9 @@ app.whenReady().then(async () => {
               });
             }
           } catch (err) {
-            console.error(`[fetch-first-dates-for-index] Erro para ${ticker}:`, err);
+            console.error(`[fetch-index-first-dates] Erro para ${ticker}:`, err);
             if (event.sender && !event.sender.isDestroyed()) {
-              event.sender.send('index-first-date-progress', {
+              event.sender.send('index-date-progress', {
                 current,
                 total,
                 ticker,
@@ -1454,7 +1454,7 @@ app.whenReady().then(async () => {
 
         return { success: true, updatedCount };
       } catch (error) {
-        console.error('[fetch-first-dates-for-index] Falha:', error);
+        console.error('[fetch-index-first-dates] Falha:', error);
         return { success: false, error: error.message || String(error) };
       }
     });
