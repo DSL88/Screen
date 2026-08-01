@@ -76,7 +76,7 @@
   const hoverCardFirstDate = document.getElementById('hover-card-first-date');
   const selectIndexBulkFetch = document.getElementById('select-index-bulk-fetch');
   const btnFetchIndexHistory = document.getElementById('btn-fetch-index-history');
-  const btnFetchFirstDate = document.getElementById('btn-fetch-index-first-date');
+  const btnFetchFirstDate = document.getElementById('btn-update-index-dates');
   const indexBulkProgress = document.getElementById('index-bulk-progress');
   const indexBulkProgressLabel = document.getElementById('index-bulk-progress-label');
   const indexBulkProgressFill = document.getElementById('index-bulk-progress-fill');
@@ -803,18 +803,20 @@
   if (btnFetchFirstDate) {
     btnFetchFirstDate.addEventListener('click', async () => {
       const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
-      if (!idx) { showToast('Seleciona um índice da lista primeiro.', 'error'); return; }
+      if (!idx || idx === 'ALL') { showToast('Seleciona um índice específico para atualizar.', 'error'); return; }
       const idxLabel = (selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0])
         ? selectIndexBulkFetch.selectedOptions[0].textContent : idx;
       currentIndexBulkLabel = idxLabel;
       btnFetchFirstDate.disabled = true;
       if (selectIndexBulkFetch) selectIndexBulkFetch.disabled = true;
+      const btnOriginalLabel = btnFetchFirstDate.querySelector('span');
+      if (btnOriginalLabel) btnOriginalLabel.textContent = `A atualizar ${idxLabel}...`;
       if (indexBulkProgress) indexBulkProgress.hidden = false;
-      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A consultar Yahoo Finance para o índice ${idxLabel}...`;
+      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A atualizar 1ª data do índice ${idxLabel}: iniciando...`;
       if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
-      if (typeof status !== 'undefined' && status) status.textContent = `A consultar Yahoo Finance para o índice ${idxLabel}...`;
+      if (typeof status !== 'undefined' && status) status.textContent = `A atualizar ${idxLabel}...`;
       try {
-        const res = await window.api.fetchIndexFirstDates(idx);
+        const res = await window.api.updateIndexFirstDates(idx);
         if (res && res.success) {
           const updated = res.updatedCount || 0;
           const msg = `Primeiras datas atualizadas com sucesso para ${updated} ativos do índice ${idxLabel}!`;
@@ -825,14 +827,15 @@
         } else {
           const errMsg = (res && res.message) || (res && res.error) || 'Erro desconhecido';
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + errMsg;
-          showToast('Erro no mapeamento: ' + errMsg, 'error');
+          showToast('Erro na atualização: ' + errMsg, 'error');
         }
       } catch (err) {
         if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + (err.message || String(err));
-        showToast('Erro no mapeamento: ' + (err.message || String(err)), 'error');
+        showToast('Erro na atualização: ' + (err.message || String(err)), 'error');
       } finally {
         btnFetchFirstDate.disabled = false;
         if (selectIndexBulkFetch) selectIndexBulkFetch.disabled = false;
+        if (btnOriginalLabel) btnOriginalLabel.textContent = 'Atualizar 1ª Data do Índice';
       }
     });
   }
@@ -3258,6 +3261,35 @@
       }
       if (typeof status !== 'undefined' && status) {
         status.textContent = `[${current}/${total}] ${ticker}: 1ª data Yahoo = ${fmtShortDate(firstDate)}`;
+      }
+    });
+  }
+
+  if (window.api.onIndexDateProgress) {
+    window.api.onIndexDateProgress((data) => {
+      if (!data || !data.ticker) return;
+      const { ticker, current, total } = data;
+      const pct = total > 0 ? Math.round(current / total * 100) : 0;
+      if (indexBulkProgressLabel) {
+        const idxLabel = currentIndexBulkLabel || '';
+        const label = data.firstDate
+          ? `A atualizar ${idxLabel}: [${current}/${total}] ${ticker} -> ${fmtShortDate(data.firstDate)} (${pct}%)`
+          : `A atualizar ${idxLabel}: [${current}/${total}] ${ticker} (sem 1ª data) (${pct}%)`;
+        indexBulkProgressLabel.textContent = label;
+      }
+      if (indexBulkProgressFill) indexBulkProgressFill.style.width = pct + '%';
+      if (data.firstDate) {
+        const item = watchlistEl.querySelector(`.watchlist-item[data-ticker="${CSS.escape(ticker)}"]`);
+        if (item) {
+          item.dataset.firstDate = fmtShortDate(data.firstDate);
+          const pillFirst = item.querySelector('.wl-pill-first');
+          if (pillFirst) {
+            pillFirst.textContent = fmtShortDate(data.firstDate);
+            pillFirst.classList.add('synced-green');
+          }
+          const wlEntry = watchlist.find(w => w.ticker === ticker);
+          if (wlEntry) wlEntry.first_date = data.firstDate;
+        }
       }
     });
   }
