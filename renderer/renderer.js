@@ -830,14 +830,21 @@
       try {
         const res = await window.api.updateIndexFirstDates(idx);
         if (res && res.success) {
-          const updated = res.updatedCount || 0;
+          const updated = res.count ?? res.updatedCount ?? 0;
           const msg = `Primeiras datas atualizadas com sucesso para ${updated} ativos do índice ${idxLabel}!`;
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = msg;
           if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
           if (typeof status !== 'undefined' && status) status.textContent = msg;
           if (btnOriginalLabel) btnOriginalLabel.textContent = '✅ Concluído!';
           showToast(msg, 'success');
-          renderWatchlist();
+          const refreshed = await window.api.listTickers();
+          if (refreshed && refreshed.ok) {
+            watchlist = refreshed.custom || [];
+            renderWatchlist();
+            populateIndexBulkFetchDropdown();
+          } else {
+            renderWatchlist();
+          }
         } else {
           const errMsg = (res && res.message) || (res && res.error) || 'Erro desconhecido';
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + errMsg;

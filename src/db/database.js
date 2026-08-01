@@ -174,7 +174,11 @@ class DB {
         this.db.exec('ALTER TABLE stocks ADD COLUMN full_history_fetched INTEGER DEFAULT 0');
       }
       if (!stockColsSet.has('first_date')) {
-        this.db.exec('ALTER TABLE stocks ADD COLUMN first_date TEXT');
+        try {
+          this.db.exec('ALTER TABLE stocks ADD COLUMN first_date TEXT');
+        } catch (_) {
+          // Another process may have added the column between PRAGMA and ALTER.
+        }
       }
 
       this._migrateRecalculateSLTP();
@@ -641,9 +645,11 @@ class DB {
   }
 
   updateStockFirstDate(ticker, firstDate) {
+    const symbol = String(ticker || '').trim();
+    const baseSymbol = symbol.replace(/\.[A-Z]{1,4}$/i, '');
     return this.db.prepare(
       'UPDATE stocks SET first_date = ? WHERE LOWER(ticker) = LOWER(?) OR LOWER(ticker) = LOWER(?)'
-    ).run(firstDate || null, ticker, ticker);
+    ).run(firstDate || null, symbol, baseSymbol);
   }
 
   getFullHistoryFetched(ticker) {
@@ -812,7 +818,7 @@ class DB {
     };
   }
 
-  getTickersByIndex(indexName = null) {
+  getTickersForIndex(indexName = null) {
     if (!indexName || indexName === 'ALL') {
       return this.db.prepare('SELECT ticker FROM stocks ORDER BY ticker ASC').all().map(r => r.ticker);
     }
@@ -856,7 +862,14 @@ class DB {
       ORDER BY ticker ASC
     `).all(raw, cleanIndex, ...likeParams);
 
-    return rows.map(r => r.ticker);
+    if (rows.length > 0) return rows.map(r => r.ticker);
+
+    // Do not block the user when legacy rows use an unexpected index label.
+    return this.db.prepare('SELECT ticker FROM stocks ORDER BY ticker ASC').all().map(r => r.ticker);
+  }
+
+  getTickersByIndex(indexName = null) {
+    return this.getTickersForIndex(indexName);
   }
 
   getCustomTickersByIndex(indexName = null) {

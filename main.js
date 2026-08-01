@@ -1422,14 +1422,16 @@ app.whenReady().then(async () => {
       }
     });
 
-    ipcMain.handle('update-first-dates-by-index', async (event, indexName) => {
+    ipcMain.handle('UPDATE_INDEX_FIRST_DATES', async (event, indexName) => {
       const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
       if (!index) return { success: false, message: 'missing-index-name' };
 
       const sleep = ms => new Promise(res => setTimeout(res, ms));
       const USER_AGENT = 'Mozilla/5.0';
-      const normalizedIndex = index.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const indexSuffix = INDEX_SUFFIX_MAP[normalizedIndex] || '';
+      const suffixIndex = index.split(/[—–|]/).pop().trim();
+      const normalizedIndex = suffixIndex.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const indexSuffix = INDEX_SUFFIX_MAP[normalizedIndex] ||
+        (normalizedIndex.includes('psi') ? '.LS' : '');
 
       const resolveTicker = (rawTicker) => {
         const t = String(rawTicker || '').trim().toUpperCase();
@@ -1455,10 +1457,10 @@ app.whenReady().then(async () => {
       };
 
       try {
-        const tickers = db.getTickersByIndex(index);
+        const tickers = db.getTickersForIndex(index);
         console.log(`[DEBUG] Pesquisa para o índice "${index}": encontrados ${tickers ? tickers.length : 0} tickers.`);
         if (!tickers || tickers.length === 0) {
-          return { success: false, message: `Nenhum ativo encontrado na BD para o índice "${index}". Verifica se a coluna index_name na tabela stocks corresponde a este nome.` };
+          return { success: false, message: 'Nenhum ativo encontrado para atualizar.' };
         }
 
         const total = tickers.length;
@@ -1474,16 +1476,16 @@ app.whenReady().then(async () => {
             try {
               firstDate = await fetchFirstDate(ticker);
               if (firstDate) {
-                db.updateStockFirstDate(rawTicker, firstDate);
+                db.updateStockFirstDate(ticker, firstDate);
                 updatedCount++;
               }
             } catch (err) {
               error = err.message || String(err);
-              console.error(`[update-first-dates-by-index] Erro para ${ticker}:`, err);
+              console.error(`[UPDATE_INDEX_FIRST_DATES] Erro para ${ticker}:`, err);
             }
           }
           if (event.sender && !event.sender.isDestroyed()) {
-            event.sender.send('index-date-progress', {
+            event.sender.send('UPDATE_INDEX_DATE_PROGRESS', {
               current,
               total,
               ticker: ticker || rawTicker,
@@ -1494,9 +1496,9 @@ app.whenReady().then(async () => {
           if (current < total) await sleep(200);
         }
 
-        return { success: true, updatedCount };
+        return { success: true, count: updatedCount };
       } catch (error) {
-        console.error('[update-first-dates-by-index] Falha:', error);
+        console.error('[UPDATE_INDEX_FIRST_DATES] Falha:', error);
         return { success: false, error: error.message || String(error) };
       }
     });
