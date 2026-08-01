@@ -25,6 +25,25 @@ for (const idx of tickerLists.WORLD_INDICES || []) {
   indexNames[idx.id] = idx.name;
 }
 
+// Mapeamento de sufixos de bolsa do Yahoo Finance por índice (para interpolar
+// tickers sem sufixo, ex: BCP -> BCP.LS para o índice PSI)
+const INDEX_SUFFIX_MAP = {
+  psi: '.LS', psi20: '.LS',
+  ibex: '.MC', ibex35: '.MC',
+  dax: '.DE', dax40: '.DE',
+  cac: '.PA', cac40: '.PA',
+  aex: '.AS', aex25: '.AS',
+  smi: '.SW', six: '.SW',
+  bel20: '.BR',
+  omxs30: '.ST',
+  omxc20: '.CO',
+  ftsemib: '.MI',
+  ftse: '.L', ftse100: '.L',
+  nikkei: '.T', nikkei30: '.T', nikkei225: '.T',
+  hangseng: '.HK', hangseng30: '.HK',
+  sp500: '', spx: ''
+};
+
 
 let mainWindow = null;
 let db = null;
@@ -1082,7 +1101,7 @@ app.whenReady().then(async () => {
       const sleep = ms => new Promise(res => setTimeout(res, ms));
 
       try {
-        const tickers = db.getTickersByIndex(indexFilter || null);
+        const tickers = db.getCustomTickersByIndex(indexFilter || null);
         if (!tickers || tickers.length === 0) {
           return { ok: true, totalStocks: 0, updatedCount: 0, totalNewCandles: 0, errors: [], message: 'Nenhum ativo na lista para sincronizar.' };
         }
@@ -1403,58 +1422,81 @@ app.whenReady().then(async () => {
       }
     });
 
-    ipcMain.handle('fetch-index-first-dates', async (event, indexName) => {
+    ipcMain.handle('update-first-dates-by-index', async (event, indexName) => {
       const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
       if (!index) return { success: false, message: 'missing-index-name' };
 
       const sleep = ms => new Promise(res => setTimeout(res, ms));
-      const delayBetween = () => sleep(200 + Math.random() * 100);
+      const USER_AGENT = 'Mozilla/5.0';
+      const normalizedIndex = index.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const indexSuffix = INDEX_SUFFIX_MAP[normalizedIndex] || '';
+
+      const resolveTicker = (rawTicker) => {
+        const t = String(rawTicker || '').trim().toUpperCase();
+        if (!t) return null;
+        if (!indexSuffix) return t;
+        if (/\.\w+$/.test(t)) return t;
+        return t + indexSuffix;
+      };
+
+      const fetchFirstDate = async (ticker) => {
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=max&interval=1mo`;
+        const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
+        if (!res || !res.ok) return null;
+        const json = await res.json();
+        const resultArr = json && json.chart && Array.isArray(json.chart.result) ? json.chart.result : null;
+        const result = resultArr && resultArr.length > 0 ? resultArr[0] : null;
+        const timestamps = result && result.timestamp;
+        if (Array.isArray(timestamps) && timestamps.length > 0) {
+          const d = new Date(timestamps[0] * 1000);
+          if (!Number.isNaN(d.getTime())) return d.toISOString().split('T')[0];
+        }
+        return null;
+      };
 
       try {
-        const stocks = db.getStocksByIndex(index);
-        if (!stocks || stocks.length === 0) {
-          return { success: false, message: 'Nenhum ativo encontrado para este índice na SQLite.' };
+        const tickers = db.getTickersByIndex(index);
+        console.log(`[DEBUG] Pesquisa para o índice "${index}": encontrados ${tickers ? tickers.length : 0} tickers.`);
+        if (!tickers || tickers.length === 0) {
+          return { success: false, message: `Nenhum ativo encontrado na BD para o índice "${index}". Verifica se a coluna index_name na tabela stocks corresponde a este nome.` };
         }
 
-        const tickers = stocks.map(s => s.ticker);
         const total = tickers.length;
         let updatedCount = 0;
         let current = 0;
 
-        for (const ticker of tickers) {
+        for (const rawTicker of tickers) {
           current++;
-          try {
-            const firstDate = await yahooClient.fetchFirstTradeDate(ticker);
-            if (firstDate) {
-              db.updateStockFirstDate(ticker, firstDate);
-              updatedCount++;
-            }
-            if (event.sender && !event.sender.isDestroyed()) {
-              event.sender.send('index-date-progress', {
-                current,
-                total,
-                ticker,
-                firstDate: firstDate || null
-              });
-            }
-          } catch (err) {
-            console.error(`[fetch-index-first-dates] Erro para ${ticker}:`, err);
-            if (event.sender && !event.sender.isDestroyed()) {
-              event.sender.send('index-date-progress', {
-                current,
-                total,
-                ticker,
-                firstDate: null,
-                error: err.message || String(err)
-              });
+          const ticker = resolveTicker(rawTicker);
+          let firstDate = null;
+          let error = null;
+          if (ticker) {
+            try {
+              firstDate = await fetchFirstDate(ticker);
+              if (firstDate) {
+                db.updateStockFirstDate(rawTicker, firstDate);
+                updatedCount++;
+              }
+            } catch (err) {
+              error = err.message || String(err);
+              console.error(`[update-first-dates-by-index] Erro para ${ticker}:`, err);
             }
           }
-          if (current < total) await delayBetween();
+          if (event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('index-date-progress', {
+              current,
+              total,
+              ticker: ticker || rawTicker,
+              firstDate,
+              error
+            });
+          }
+          if (current < total) await sleep(200);
         }
 
         return { success: true, updatedCount };
       } catch (error) {
-        console.error('[fetch-index-first-dates] Falha:', error);
+        console.error('[update-first-dates-by-index] Falha:', error);
         return { success: false, error: error.message || String(error) };
       }
     });

@@ -641,7 +641,9 @@ class DB {
   }
 
   updateStockFirstDate(ticker, firstDate) {
-    return this.db.prepare('UPDATE stocks SET first_date = ? WHERE ticker = ?').run(firstDate || null, ticker);
+    return this.db.prepare(
+      'UPDATE stocks SET first_date = ? WHERE LOWER(ticker) = LOWER(?) OR LOWER(ticker) = LOWER(?)'
+    ).run(firstDate || null, ticker, ticker);
   }
 
   getFullHistoryFetched(ticker) {
@@ -811,6 +813,53 @@ class DB {
   }
 
   getTickersByIndex(indexName = null) {
+    if (!indexName || indexName === 'ALL') {
+      return this.db.prepare('SELECT ticker FROM stocks ORDER BY ticker ASC').all().map(r => r.ticker);
+    }
+
+    const raw = String(indexName).trim();
+    // Extrai o nome limpo removendo prefixos de país (ex: "EUA — S&P 500" vira "S&P 500")
+    let cleanIndex = raw;
+    if (raw.includes('—')) cleanIndex = raw.split('—')[1].trim();
+    if (raw.includes('–')) cleanIndex = raw.split('–')[1].trim();
+    if (raw.includes('|')) {
+      const parts = raw.split('|');
+      cleanIndex = parts[1] ? parts[1].trim() : parts[0].trim();
+    }
+    // Remove caracteres especiais para comparação insensível a maiúsculas/hífens/espaços/&
+    const normalized = cleanIndex.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    if (!normalized) {
+      return this.db.prepare('SELECT ticker FROM stocks ORDER BY ticker ASC').all().map(r => r.ticker);
+    }
+
+    // Padrões LIKE: o nome completo normalizado e, se houver sufixo entre parênteses
+    // (ex: "PSI (Portugal)"), o token antes do parêntesis
+    const likePatterns = new Set([`%${normalized}%`]);
+    const parenIdx = cleanIndex.indexOf('(');
+    if (parenIdx > 0) {
+      const head = cleanIndex.slice(0, parenIdx).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (head) likePatterns.add(`%${head}%`);
+    }
+
+    const likeClauses = [];
+    const likeParams = [];
+    for (const pattern of likePatterns) {
+      likeClauses.push(`REPLACE(REPLACE(REPLACE(LOWER(TRIM(index_name)), '-', ''), ' ', ''), '&', '') LIKE ?`);
+      likeParams.push(pattern);
+    }
+
+    const rows = this.db.prepare(`
+      SELECT ticker FROM stocks
+      WHERE LOWER(TRIM(index_name)) = LOWER(TRIM(?))
+         OR LOWER(TRIM(index_name)) = LOWER(TRIM(?))
+         OR ${likeClauses.join(' OR ')}
+      ORDER BY ticker ASC
+    `).all(raw, cleanIndex, ...likeParams);
+
+    return rows.map(r => r.ticker);
+  }
+
+  getCustomTickersByIndex(indexName = null) {
     if (indexName) {
       return this.db.prepare(
         'SELECT ticker FROM custom_tickers WHERE UPPER(index_name) = UPPER(?) ORDER BY ticker'
@@ -828,7 +877,7 @@ class DB {
   checkListFreshness(indexName = null) {
     const expectedDate = this.getLastExpectedTradingDay();
 
-    const tickers = this.getTickersByIndex(indexName);
+    const tickers = this.getCustomTickersByIndex(indexName);
     if (tickers.length === 0) {
       return { isUpdated: false, maxStoredDate: null, expectedDate, outdatedTickers: [] };
     }
