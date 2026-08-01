@@ -9,7 +9,8 @@ const ALLOWED_EVENTS = new Set([
   'scanner-sync-status',
   'ticker:synced',
   'sync-all-progress',
-  'sync-all-done'
+  'sync-all-done',
+  'index-download-progress'
 ]);
 
 contextBridge.exposeInMainWorld('api', {
@@ -43,6 +44,12 @@ contextBridge.exposeInMainWorld('api', {
   purgeInactiveStocks: (daysCutoff = 60) => ipcRenderer.invoke('db:purgeInactive', { daysCutoff }),
   syncAllListStocks: (indexFilter) => ipcRenderer.invoke('sync-all-list-stocks', indexFilter),
   checkListFreshness: (indexFilter) => ipcRenderer.invoke('check-list-freshness', indexFilter),
+  downloadIndexFullHistory: (indexName) => ipcRenderer.invoke('download-full-history-for-index', indexName),
+  onIndexDownloadProgress: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('index-download-progress', handler);
+    return () => ipcRenderer.removeListener('index-download-progress', handler);
+  },
   importHistoricalCsv: () => ipcRenderer.invoke('import-historical-csv'),
   importHistoricalData: (data) => ipcRenderer.invoke('import-historical-data', data),
   on: (channel, callback) => {

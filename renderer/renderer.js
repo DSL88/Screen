@@ -74,6 +74,11 @@
   const hoverCardName = document.getElementById('hover-card-name');
   const hoverCardTicker = document.getElementById('hover-card-ticker');
   const hoverCardFirstDate = document.getElementById('hover-card-first-date');
+  const selectIndexBulkFetch = document.getElementById('select-index-bulk-fetch');
+  const btnFetchIndexHistory = document.getElementById('btn-fetch-index-history');
+  const indexBulkProgress = document.getElementById('index-bulk-progress');
+  const indexBulkProgressLabel = document.getElementById('index-bulk-progress-label');
+  const indexBulkProgressFill = document.getElementById('index-bulk-progress-fill');
 
   function positionHoverCard(e) {
     if (!hoverCard) return;
@@ -188,6 +193,7 @@
   }
 
   let watchlist = [];
+  let currentIndexBulkLabel = '';
   let searchDebounceId = null;
   let searchSeq = 0;
   let running = false;
@@ -717,6 +723,69 @@
     modalIndexSelect.appendChild(groupCustom);
   }
 
+  function populateIndexBulkFetchDropdown() {
+    if (!selectIndexBulkFetch) return;
+    const currentIndexes = new Map();
+    for (const t of watchlist) {
+      const idxId = (t.indexId || t.indexName || '').trim().toUpperCase();
+      if (!idxId || idxId === 'CUSTOM') continue;
+      if (!currentIndexes.has(idxId)) {
+        currentIndexes.set(idxId, t.indexName || idxId);
+      }
+    }
+    const previous = selectIndexBulkFetch.value;
+    selectIndexBulkFetch.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    placeholder.textContent = '-- Seleciona o Índice --';
+    selectIndexBulkFetch.appendChild(placeholder);
+    for (const [idxId, idxName] of currentIndexes) {
+      const opt = document.createElement('option');
+      opt.value = idxId;
+      opt.textContent = idxName || idxId;
+      selectIndexBulkFetch.appendChild(opt);
+    }
+    if (previous && currentIndexes.has(previous)) {
+      selectIndexBulkFetch.value = previous;
+    }
+  }
+
+  if (btnFetchIndexHistory) {
+    btnFetchIndexHistory.addEventListener('click', async () => {
+      const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
+      if (!idx) { showToast('Seleciona um índice da lista primeiro.', 'error'); return; }
+      const idxLabel = (selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0])
+        ? selectIndexBulkFetch.selectedOptions[0].textContent : idx;
+      currentIndexBulkLabel = idxLabel;
+      btnFetchIndexHistory.disabled = true;
+      if (indexBulkProgress) indexBulkProgress.hidden = false;
+      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A descarregar histórico do Índice ${idxLabel}: iniciando...`;
+      if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
+      try {
+        const res = await window.api.downloadIndexFullHistory(idx);
+        if (res && res.ok) {
+          const msg = res.total === 0
+            ? (res.message || `Sem ativos para ${idxLabel}.`)
+            : `Concluído: ${res.updated}/${res.total} com histórico total (${res.errorCount || 0} erros).`;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = msg;
+          if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
+          showToast(msg, res.errorCount > 0 ? 'error' : 'success');
+        } else {
+          const errMsg = res && res.error ? res.error : 'Erro desconhecido';
+          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + errMsg;
+          showToast('Erro na descarga: ' + errMsg, 'error');
+        }
+      } catch (err) {
+        if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + (err.message || String(err));
+        showToast('Erro na descarga: ' + (err.message || String(err)), 'error');
+      } finally {
+        btnFetchIndexHistory.disabled = false;
+      }
+    });
+  }
+
   function openAddModal() {
     if (!modalAdd) return;
     populateIndexDropdown();
@@ -1146,6 +1215,7 @@
       if (res && res.ok) {
         watchlist = res.custom || [];
         renderWatchlist();
+        populateIndexBulkFetchDropdown();
       }
 
       const paramsRes = await window.api.getParams();
@@ -3032,4 +3102,31 @@
       status.textContent = `Sincronização concluída: ${p.updatedCount} atualizados, ${p.errorCount} erros.`;
     }
   });
+
+  if (window.api.onIndexDownloadProgress) {
+    window.api.onIndexDownloadProgress((p) => {
+      if (!p) return;
+      if (p.status === 'done' && !p.ticker) {
+        if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
+        return;
+      }
+      if (!p.ticker) return;
+      const pct = p.total > 0 ? Math.round(p.current / p.total * 100) : 0;
+      const idxLabel = currentIndexBulkLabel || '';
+      if (indexBulkProgressLabel) {
+        indexBulkProgressLabel.textContent =
+          `A descarregar histórico do Índice ${idxLabel}: Processando ${p.current}/${p.total} (${p.ticker}) - ${pct}%...`;
+      }
+      if (indexBulkProgressFill) indexBulkProgressFill.style.width = pct + '%';
+      if (p.status === 'updated' && p.summary) {
+        void updateWatchlistBadge(p.ticker, p.summary);
+      } else if (p.status === 'updated' && p.firstDate) {
+        const item = watchlistEl.querySelector(`.watchlist-item[data-ticker="${CSS.escape(p.ticker)}"]`);
+        if (item) {
+          item.dataset.firstDate = p.firstDate ? fmtShortDate(p.firstDate) : 'Sem Registos';
+          item.classList.add('card-synced');
+        }
+      }
+    });
+  }
 })();
