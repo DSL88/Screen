@@ -591,4 +591,29 @@ async function fetchIncrementalYahooHistory(ticker, lastStoredDate) {
   }
 }
 
-module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory, buildIncrementalPeriod1 };
+async function fetchFirstTradeDate(ticker) {
+  try {
+    await sleep(1200 + Math.random() * 800);
+    const normalizedTicker = normalizeTicker(ticker);
+    const result = await yahooFinance.chart(
+      normalizedTicker,
+      { period1: new Date(0), interval: '1mo' },
+      { fetchOptions: { headers: { 'User-Agent': USER_AGENT } } }
+    );
+    let firstDate = null;
+    if (result && result.meta && result.meta.firstTradeDate) {
+      const d = result.meta.firstTradeDate instanceof Date ? result.meta.firstTradeDate : new Date(result.meta.firstTradeDate);
+      if (!Number.isNaN(d.getTime())) firstDate = d.toISOString().slice(0, 10);
+    }
+    if (!firstDate && result && Array.isArray(result.quotes) && result.quotes.length > 0) {
+      const q = result.quotes[0].date;
+      if (q instanceof Date && !Number.isNaN(q.getTime())) firstDate = q.toISOString().slice(0, 10);
+    }
+    return firstDate;
+  } catch (err) {
+    console.warn(`[yahooClient] fetchFirstTradeDate(${ticker}): ${err && err.message ? err.message : err}`);
+    return null;
+  }
+}
+
+module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory, buildIncrementalPeriod1, fetchFirstTradeDate };

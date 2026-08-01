@@ -599,7 +599,8 @@ app.whenReady().then(async () => {
           ultimaData: (summary && summary.lastDate) || null,
           totalVelas: (summary && summary.totalCandles) || 0,
           inativo: !!inativo,
-          fullHistoryFetched: !!(summary && summary.fullHistoryFetched)
+          fullHistoryFetched: !!(summary && summary.fullHistoryFetched),
+          first_date: stockRecord?.first_date || null
         };
       });
       return { ok: true, custom: enrichedCustom };
@@ -1268,6 +1269,83 @@ app.whenReady().then(async () => {
             updated,
             errorCount: errors.length,
             firstDate: null
+          });
+        }
+
+        return { ok: true, total, updated, errorCount: errors.length, errors };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('fetch-first-date-index', async (_event, indexName) => {
+      const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
+      if (!index) return { ok: false, error: 'missing-index-name' };
+      if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'window-unavailable' };
+
+      const CHUNK_SIZE = 3;
+      const sleep = ms => new Promise(res => setTimeout(res, ms));
+
+      try {
+        const stocks = db.getStocksByIndex(index);
+        if (!stocks || stocks.length === 0) {
+          return { ok: true, total: 0, updated: 0, errorCount: 0, errors: [], message: 'Nenhum ativo para este índice na SQLite.' };
+        }
+
+        const tickers = stocks.map(s => s.ticker);
+        const total = tickers.length;
+        const errors = [];
+        let updated = 0;
+        let completed = 0;
+
+        for (let i = 0; i < tickers.length; i += CHUNK_SIZE) {
+          const chunk = tickers.slice(i, i + CHUNK_SIZE);
+
+          const results = await Promise.all(chunk.map(async (ticker) => {
+            try {
+              const firstDate = await yahooClient.fetchFirstTradeDate(ticker);
+              if (firstDate) {
+                return { ticker, firstDate, status: 'done' };
+              }
+              return { ticker, firstDate: null, status: 'skipped' };
+            } catch (err) {
+              return { ticker, firstDate: null, status: 'error', error: err.message || String(err) };
+            }
+          }));
+
+          for (const r of results) {
+            if (r.status === 'done') {
+              db.setStockFirstDate(r.ticker, r.firstDate);
+              updated++;
+            } else if (r.status === 'error') {
+              errors.push({ ticker: r.ticker, error: r.error });
+            }
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('first-date-fetch-progress', {
+                current: completed,
+                total,
+                ticker: r.ticker,
+                firstDate: r.firstDate || null,
+                status: r.status,
+                error: r.error || null
+              });
+            }
+            completed++;
+          }
+
+          if (i + CHUNK_SIZE < tickers.length) {
+            await sleep(200 + Math.random() * 300);
+          }
+        }
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('first-date-fetch-progress', {
+            current: total,
+            total,
+            ticker: '',
+            status: 'done',
+            updated,
+            errorCount: errors.length
           });
         }
 

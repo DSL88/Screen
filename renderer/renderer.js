@@ -76,6 +76,7 @@
   const hoverCardFirstDate = document.getElementById('hover-card-first-date');
   const selectIndexBulkFetch = document.getElementById('select-index-bulk-fetch');
   const btnFetchIndexHistory = document.getElementById('btn-fetch-index-history');
+  const btnFetchFirstDate = document.getElementById('btn-fetch-index-first-date');
   const indexBulkProgress = document.getElementById('index-bulk-progress');
   const indexBulkProgressLabel = document.getElementById('index-bulk-progress-label');
   const indexBulkProgressFill = document.getElementById('index-bulk-progress-fill');
@@ -353,7 +354,11 @@
         item.className = 'watchlist-item is-clickable' + (t.inativo ? ' is-inactive' : '') + (syncState ? ' ' + syncState : '');
         item.dataset.ticker = t.ticker;
         item.dataset.name = t.name || t.ticker;
-        item.dataset.firstDate = (t.temHistorico && t.primeiroRegisto) ? fmtShortDate(t.primeiroRegisto) : 'Sem Registos';
+        item.dataset.firstDate = t.first_date
+          ? fmtShortDate(t.first_date)
+          : (t.temHistorico && t.primeiroRegisto)
+            ? fmtShortDate(t.primeiroRegisto)
+            : 'Pendente';
         if (highlightTicker && t.ticker === highlightTicker) {
           item.classList.add('just-added');
         }
@@ -413,11 +418,18 @@
   }
 
   function renderHistoryBadgeBadge(t) {
-    if (t.temHistorico && t.primeiroRegisto && t.ultimaData) {
-      return `<span class="wl-history-pills" data-ticker="${escapeHtml(t.ticker)}">
-        <span class="wl-pill wl-pill-first" title="Primeiro registo: ${t.primeiroRegisto}">${fmtShortDate(t.primeiroRegisto)}</span>
-        <span class="wl-pill wl-pill-last" title="Última atualização: ${t.ultimaData} · ${t.totalVelas} velas">${fmtShortDate(t.ultimaData)}</span>
-      </span>`;
+    const firstShown = t.first_date || (t.temHistorico ? t.primeiroRegisto : null);
+    if (firstShown || (t.temHistorico && t.ultimaData)) {
+      const pills = [];
+      if (firstShown) {
+        pills.push(`<span class="wl-pill wl-pill-first" title="Primeiro registo: ${firstShown}">${fmtShortDate(firstShown)}</span>`);
+      }
+      if (t.ultimaData) {
+        pills.push(`<span class="wl-pill wl-pill-last" title="Última atualização: ${t.ultimaData} · ${t.totalVelas} velas">${fmtShortDate(t.ultimaData)}</span>`);
+      }
+      if (pills.length > 0) {
+        return `<span class="wl-history-pills" data-ticker="${escapeHtml(t.ticker)}">${pills.join('')}</span>`;
+      }
     }
     return `<span class="wl-history-pills" data-ticker="${escapeHtml(t.ticker)}">
       <span class="wl-pill wl-pill-empty" title="Sem histórico local">—</span>
@@ -453,7 +465,9 @@
 
     const updated = watchlist.find(w => w.ticker === ticker);
     if (!updated) return;
-    item.dataset.firstDate = (updated.temHistorico && updated.primeiroRegisto) ? fmtShortDate(updated.primeiroRegisto) : 'Sem Registos';
+    item.dataset.firstDate = updated.first_date
+      ? fmtShortDate(updated.first_date)
+      : (updated.temHistorico && updated.primeiroRegisto) ? fmtShortDate(updated.primeiroRegisto) : 'Pendente';
     const newHtml = renderHistoryBadgeBadge(updated);
     const temp = document.createElement('div');
     temp.innerHTML = newHtml.trim();
@@ -782,6 +796,40 @@
         showToast('Erro na descarga: ' + (err.message || String(err)), 'error');
       } finally {
         btnFetchIndexHistory.disabled = false;
+      }
+    });
+  }
+
+  if (btnFetchFirstDate) {
+    btnFetchFirstDate.addEventListener('click', async () => {
+      const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
+      if (!idx) { showToast('Seleciona um índice da lista primeiro.', 'error'); return; }
+      const idxLabel = (selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0])
+        ? selectIndexBulkFetch.selectedOptions[0].textContent : idx;
+      currentIndexBulkLabel = idxLabel;
+      btnFetchFirstDate.disabled = true;
+      if (indexBulkProgress) indexBulkProgress.hidden = false;
+      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A mapear 1ª data do Índice ${idxLabel}: iniciando...`;
+      if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
+      try {
+        const res = await window.api.fetchIndexFirstDate(idx);
+        if (res && res.ok) {
+          const msg = res.total === 0
+            ? (res.message || `Sem ativos para ${idxLabel}.`)
+            : `Concluído: ${res.updated}/${res.total} com 1ª data mapeada (${res.errorCount || 0} erros).`;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = msg;
+          if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
+          showToast(msg, res.errorCount > 0 ? 'error' : 'success');
+        } else {
+          const errMsg = res && res.error ? res.error : 'Erro desconhecido';
+          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + errMsg;
+          showToast('Erro no mapeamento: ' + errMsg, 'error');
+        }
+      } catch (err) {
+        if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + (err.message || String(err));
+        showToast('Erro no mapeamento: ' + (err.message || String(err)), 'error');
+      } finally {
+        btnFetchFirstDate.disabled = false;
       }
     });
   }
@@ -3128,6 +3176,33 @@
         if (item) {
           item.dataset.firstDate = p.firstDate ? fmtShortDate(p.firstDate) : 'Sem Registos';
           item.classList.add('card-synced');
+        }
+      }
+    });
+  }
+
+  if (window.api.onFirstDateProgress) {
+    window.api.onFirstDateProgress((p) => {
+      if (!p) return;
+      if (p.status === 'done' && !p.ticker) {
+        if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
+        return;
+      }
+      if (!p.ticker) return;
+      const pct = p.total > 0 ? Math.round(p.current / p.total * 100) : 0;
+      if (indexBulkProgressLabel) {
+        indexBulkProgressLabel.textContent =
+          `A mapear 1ª data do Índice ${currentIndexBulkLabel || ''}: Processando ${p.current}/${p.total} (${p.ticker}) - ${pct}%...`;
+      }
+      if (indexBulkProgressFill) indexBulkProgressFill.style.width = pct + '%';
+      if (p.firstDate) {
+        const item = watchlistEl.querySelector(`.watchlist-item[data-ticker="${CSS.escape(p.ticker)}"]`);
+        if (item) {
+          item.dataset.firstDate = fmtShortDate(p.firstDate);
+          const pillFirst = item.querySelector('.wl-pill-first');
+          if (pillFirst) pillFirst.textContent = fmtShortDate(p.firstDate);
+          const wlEntry = watchlist.find(w => w.ticker === p.ticker);
+          if (wlEntry) wlEntry.first_date = p.firstDate;
         }
       }
     });
