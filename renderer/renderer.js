@@ -2963,10 +2963,11 @@
     const lastEl = document.getElementById('asset-detail-last-date');
     const candlesEl = document.getElementById('asset-detail-total-candles');
 
-    if (hasData) {
+    const hasFirstDateMetadata = !!summary.firstDate;
+    if (hasData || hasFirstDateMetadata) {
       if (historySummaryZone) historySummaryZone.style.display = 'block';
       if (firstEl) firstEl.textContent = fmtDate(summary.firstDate);
-      if (lastEl) lastEl.textContent = fmtDate(summary.lastDate);
+      if (lastEl) lastEl.textContent = hasData ? fmtDate(summary.lastDate) : '—';
       if (candlesEl) candlesEl.textContent = summary.totalCandles != null ? Number(summary.totalCandles).toLocaleString('pt-PT') : '—';
     } else {
       if (historySummaryZone) historySummaryZone.style.display = 'none';
