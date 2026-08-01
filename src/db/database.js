@@ -806,9 +806,10 @@ class DB {
   }
 
   getHistoricalSummary(ticker) {
+    const symbol = canonicalTicker(ticker);
     const row = this.db.prepare(`
       SELECT 
-        h.MIN_date as first_date,
+        COALESCE(s.first_date, h.MIN_date) as first_date,
         h.MAX_date as last_date,
         h.total_candles,
         COALESCE(s.full_history_fetched, 0) as full_history_fetched
@@ -821,10 +822,16 @@ class DB {
         WHERE ticker = ?
       ) h
       LEFT JOIN stocks s ON s.ticker = ?
-    `).get(ticker, ticker);
+    `).get(symbol, symbol);
 
     if (!row || row.total_candles === 0) {
-      return { hasData: false, firstDate: null, lastDate: null, totalCandles: 0, fullHistoryFetched: false };
+      return {
+        hasData: false,
+        firstDate: row?.first_date || null,
+        lastDate: null,
+        totalCandles: 0,
+        fullHistoryFetched: false
+      };
     }
 
     return {
@@ -852,19 +859,21 @@ class DB {
     `).all(...tickers);
 
     const fetchedRows = this.db.prepare(`
-      SELECT ticker, full_history_fetched FROM stocks WHERE ticker IN (${placeholders})
+      SELECT ticker, first_date, full_history_fetched FROM stocks WHERE ticker IN (${placeholders})
     `).all(...tickers);
 
     const fetchedMap = {};
+    const firstDateMap = {};
     for (const r of fetchedRows) {
       fetchedMap[r.ticker] = !!r.full_history_fetched;
+      firstDateMap[r.ticker] = r.first_date || null;
     }
 
     const result = {};
     for (const row of rows) {
       result[row.ticker] = {
         hasData: row.total_candles > 0,
-        firstDate: row.first_date || null,
+        firstDate: firstDateMap[row.ticker] || row.first_date || null,
         lastDate: row.last_date || null,
         totalCandles: row.total_candles || 0,
         fullHistoryFetched: fetchedMap[row.ticker] || false
