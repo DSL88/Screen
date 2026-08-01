@@ -1366,6 +1366,43 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('sync-index-first-dates', async (event, indexName) => {
+      try {
+        const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
+        if (!index) return { success: false, message: 'missing-index-name' };
+        const stocks = db.getStocksByIndex(index);
+        if (!stocks || stocks.length === 0) {
+          return { success: false, message: `Nenhuma ação encontrada para o índice: ${index}` };
+        }
+        let processed = 0;
+        const total = stocks.length;
+        for (const stock of stocks) {
+          processed++;
+          try {
+            const firstDate = await yahooClient.fetchFirstTradeDate(stock.ticker);
+            if (firstDate) {
+              db.updateStockFirstDate(stock.ticker, firstDate);
+              if (event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('index-first-date-progress', {
+                  ticker: stock.ticker,
+                  firstDate,
+                  current: processed,
+                  total
+                });
+              }
+            }
+          } catch (err) {
+            console.error(`Erro ao obter 1ª data no Yahoo para ${stock.ticker}:`, err);
+          }
+          await new Promise(r => setTimeout(r, 200));
+        }
+        return { success: true, count: processed };
+      } catch (error) {
+        console.error('Falha na sincronização do índice:', error);
+        return { success: false, error: error.message || String(error) };
+      }
+    });
+
     createWindow();
   } catch (err) {
     console.error('Fatal init error:', err);

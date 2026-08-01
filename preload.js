@@ -11,7 +11,8 @@ const ALLOWED_EVENTS = new Set([
   'sync-all-progress',
   'sync-all-done',
   'index-download-progress',
-  'first-date-fetch-progress'
+  'first-date-fetch-progress',
+  'index-first-date-progress'
 ]);
 
 contextBridge.exposeInMainWorld('api', {
@@ -52,6 +53,12 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('index-download-progress', handler);
   },
   fetchIndexFirstDate: (indexName) => ipcRenderer.invoke('fetch-first-date-index', indexName),
+  syncIndexFirstDates: (indexName) => ipcRenderer.invoke('sync-index-first-dates', indexName),
+  onIndexFirstDateProgress: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('index-first-date-progress', handler);
+    return () => ipcRenderer.removeListener('index-first-date-progress', handler);
+  },
   checkIndexStatus: (indexName) => ipcRenderer.invoke('check-index-status', indexName),
   onFirstDateProgress: (callback) => {
     const handler = (_event, data) => callback(data);

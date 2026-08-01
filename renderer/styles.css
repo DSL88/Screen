@@ -1025,6 +1025,10 @@ body {
   border: 1px solid rgba(99, 102, 241, 0.20);
   color: var(--accent-hover);
 }
+.synced-green {
+  color: #089981;
+  font-weight: 600;
+}
 .wl-pill-last {
   background: var(--bull-soft);
   border: 1px solid rgba(52, 211, 153, 0.20);
