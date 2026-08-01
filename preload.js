@@ -14,12 +14,14 @@ const ALLOWED_EVENTS = new Set([
   'first-date-fetch-progress',
   'index-first-date-progress',
   'index-date-progress',
-  'UPDATE_INDEX_DATE_PROGRESS'
+  'UPDATE_INDEX_DATE_PROGRESS',
+  'country-index-progress'
 ]);
 
 contextBridge.exposeInMainWorld('api', {
   startScan: (tickers, params) => ipcRenderer.invoke('scan:start', { tickers, params }),
   cancelScan: (runId) => ipcRenderer.invoke('scan:cancel', { runId }),
+  cancelIndexOperation: (operationId) => ipcRenderer.invoke('index:cancel', { operationId }),
   searchTicker: (query, limit) => ipcRenderer.invoke('ticker:search', { query, limit }),
   addTicker: (t) => ipcRenderer.invoke('ticker:add', t),
   addBulkTickers: (tickers) => ipcRenderer.invoke('ticker:addBulk', { tickers }),
@@ -48,31 +50,49 @@ contextBridge.exposeInMainWorld('api', {
   purgeInactiveStocks: (daysCutoff = 60) => ipcRenderer.invoke('db:purgeInactive', { daysCutoff }),
   syncAllListStocks: (indexFilter) => ipcRenderer.invoke('sync-all-list-stocks', indexFilter),
   checkListFreshness: (indexFilter) => ipcRenderer.invoke('check-list-freshness', indexFilter),
-  downloadIndexFullHistory: (indexName) => ipcRenderer.invoke('download-full-history-for-index', indexName),
+  downloadIndexFullHistory: (indexId, operationId) => ipcRenderer.invoke('download-full-history-for-index', { indexId, operationId }),
   onIndexDownloadProgress: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('index-download-progress', handler);
     return () => ipcRenderer.removeListener('index-download-progress', handler);
   },
-  fetchIndexFirstDate: (indexName) => ipcRenderer.invoke('fetch-first-date-index', indexName),
-  fetchIndexFirstDates: (indexName) => ipcRenderer.invoke('UPDATE_INDEX_FIRST_DATES', indexName),
-  updateIndexFirstDates: (indexName) => ipcRenderer.invoke('UPDATE_INDEX_FIRST_DATES', indexName),
-  syncIndexFirstDates: (indexName) => ipcRenderer.invoke('sync-index-first-dates', indexName),
+  // One canonical main-process handler; these aliases exist only for old UI callers.
+  fetchIndexFirstDate: (indexId, operationId) => ipcRenderer.invoke('UPDATE_INDEX_FIRST_DATES', { indexId, operationId }),
+  fetchIndexFirstDates: (indexId, operationId) => ipcRenderer.invoke('UPDATE_INDEX_FIRST_DATES', { indexId, operationId }),
+  updateIndexFirstDates: (indexId, operationId) => ipcRenderer.invoke('UPDATE_INDEX_FIRST_DATES', { indexId, operationId }),
+  fetchAndAddCountryIndexStocks: (country, operationId) => ipcRenderer.invoke('fetch-and-add-country-index-stocks', { country, operationId }),
+  onCountryIndexProgress: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('country-index-progress', handler);
+    return () => ipcRenderer.removeListener('country-index-progress', handler);
+  },
+  syncIndexFirstDates: (indexId, operationId) => ipcRenderer.invoke('UPDATE_INDEX_FIRST_DATES', { indexId, operationId }),
   onIndexDateProgress: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('UPDATE_INDEX_DATE_PROGRESS', handler);
     return () => ipcRenderer.removeListener('UPDATE_INDEX_DATE_PROGRESS', handler);
   },
+  onIndexOperationProgress: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('index-download-progress', handler);
+    ipcRenderer.on('UPDATE_INDEX_DATE_PROGRESS', handler);
+    ipcRenderer.on('country-index-progress', handler);
+    return () => {
+      ipcRenderer.removeListener('index-download-progress', handler);
+      ipcRenderer.removeListener('UPDATE_INDEX_DATE_PROGRESS', handler);
+      ipcRenderer.removeListener('country-index-progress', handler);
+    };
+  },
   onIndexFirstDateProgress: (callback) => {
     const handler = (_event, data) => callback(data);
-    ipcRenderer.on('index-first-date-progress', handler);
-    return () => ipcRenderer.removeListener('index-first-date-progress', handler);
+    ipcRenderer.on('UPDATE_INDEX_DATE_PROGRESS', handler);
+    return () => ipcRenderer.removeListener('UPDATE_INDEX_DATE_PROGRESS', handler);
   },
   checkIndexStatus: (indexName) => ipcRenderer.invoke('check-index-status', indexName),
   onFirstDateProgress: (callback) => {
     const handler = (_event, data) => callback(data);
-    ipcRenderer.on('first-date-fetch-progress', handler);
-    return () => ipcRenderer.removeListener('first-date-fetch-progress', handler);
+    ipcRenderer.on('UPDATE_INDEX_DATE_PROGRESS', handler);
+    return () => ipcRenderer.removeListener('UPDATE_INDEX_DATE_PROGRESS', handler);
   },
   importHistoricalCsv: () => ipcRenderer.invoke('import-historical-csv'),
   importHistoricalData: (data) => ipcRenderer.invoke('import-historical-data', data),

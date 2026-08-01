@@ -6,6 +6,9 @@ const os = require('os');
 const Database = require('./src/db/database');
 const yahooClient = require('./src/data/yahooClient');
 const tickerLists = require('./src/data/tickerLists');
+const { getCountryIndex } = require('./src/data/countryIndexMap');
+const wikipediaScraper = require('./src/services/wikipediaScraper');
+const marketDataService = require('./src/services/marketDataService');
 const { isIncrementalUpToDate, addDays } = require('./src/utils/dateUtils');
 const { parseFile, importFromCsvFile } = require('./src/importer/historicalImporter');
 
@@ -25,29 +28,68 @@ for (const idx of tickerLists.WORLD_INDICES || []) {
   indexNames[idx.id] = idx.name;
 }
 
-// Mapeamento de sufixos de bolsa do Yahoo Finance por índice (para interpolar
-// tickers sem sufixo, ex: BCP -> BCP.LS para o índice PSI)
-const INDEX_SUFFIX_MAP = {
-  psi: '.LS', psi20: '.LS',
-  ibex: '.MC', ibex35: '.MC',
-  dax: '.DE', dax40: '.DE',
-  cac: '.PA', cac40: '.PA',
-  aex: '.AS', aex25: '.AS',
-  smi: '.SW', six: '.SW',
-  bel20: '.BR',
-  omxs30: '.ST',
-  omxc20: '.CO',
-  ftsemib: '.MI',
-  ftse: '.L', ftse100: '.L',
-  nikkei: '.T', nikkei30: '.T', nikkei225: '.T',
-  hangseng: '.HK', hangseng30: '.HK',
-  sp500: '', spx: ''
-};
-
-
 let mainWindow = null;
 let db = null;
 let scannerWorker = null;
+let activePipelineOperation = null;
+
+function operationId(prefix) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function beginPipelineOperation(type, requestedId) {
+  if (activePipelineOperation) {
+    return {
+      busy: true,
+      result: {
+        ok: false,
+        success: false,
+        status: 'failed',
+        error: 'operation-in-progress',
+        operationId: activePipelineOperation.operationId,
+        operationType: activePipelineOperation.type
+      }
+    };
+  }
+  const operation = {
+    type,
+    operationId: requestedId || operationId(type.replace(/[^a-z0-9]+/gi, '-')),
+    cancelled: false
+  };
+  activePipelineOperation = operation;
+  return { operation };
+}
+
+function finishPipelineOperation(operation) {
+  if (activePipelineOperation === operation) activePipelineOperation = null;
+}
+
+function isPipelineCancelled(operation) {
+  return !!operation.cancelled;
+}
+
+function sendPipelineProgress(event, channel, payload) {
+  const sender = event && event.sender;
+  if (sender && !sender.isDestroyed()) sender.send(channel, payload);
+  else if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+function operationStatus(total, errors, cancelled, processed = total, successful = 0) {
+  if (cancelled) return successful > 0 ? 'partial' : 'failed';
+  if (errors.length === 0 && processed >= total) return 'success';
+  if (processed >= total && successful === 0) return 'failed';
+  return processed > 0 ? 'partial' : 'failed';
+}
+
+function indexInput(value) {
+  if (value && typeof value === 'object') {
+    return {
+      index: String(value.indexId || value.indexName || value.index || '').trim(),
+      operationId: value.operationId
+    };
+  }
+  return { index: typeof value === 'string' ? value.trim() : '', operationId: null };
+}
 
 // ═══════════════════════════════════════════════════════════
 //  Worker Thread — gestão do scanner fora do Main Process
@@ -387,6 +429,26 @@ app.whenReady().then(async () => {
   try {
     db = new Database(app.getPath('userData'));
     await db.init();
+
+    // All index imports share one mutex.  Cancellation is cooperative: an
+    // in-flight HTTP request is allowed to finish, but its result is never
+    // persisted after cancellation.
+    ipcMain.handle('index:cancel', async (_event, payload) => {
+      const requestedId = payload && (payload.operationId || payload.runId);
+      if (!activePipelineOperation) {
+        return { ok: false, status: 'failed', error: 'no-operation' };
+      }
+      if (requestedId && requestedId !== activePipelineOperation.operationId) {
+        return { ok: false, status: 'failed', error: 'operation-not-found' };
+      }
+      activePipelineOperation.cancelled = true;
+      return {
+        ok: true,
+        status: 'partial',
+        operationId: activePipelineOperation.operationId,
+        cancelled: true
+      };
+    });
 
     // ═══════════════════════════════════════════════════════
     //  SCAN — Execução via Worker Thread
@@ -757,6 +819,9 @@ app.whenReady().then(async () => {
       if (!payload || !payload.ticker || (!payload.filePath && !payload.fileData)) {
         return { ok: false, error: 'missing-ticker-or-file' };
       }
+      const lock = beginPipelineOperation('file-import', payload.operationId);
+      if (lock.busy) return lock.result;
+      const operation = lock.operation;
 
       let tmpPath = null;
 
@@ -772,7 +837,7 @@ app.whenReady().then(async () => {
         }
 
         if (!filePath) {
-          return { ok: false, error: 'missing-ticker-or-file' };
+          return { ok: false, success: false, status: 'failed', error: 'missing-ticker-or-file' };
         }
 
         const ticker = payload.ticker.toUpperCase().trim();
@@ -784,10 +849,13 @@ app.whenReady().then(async () => {
           indexName: payload.indexName || ''
         });
 
-        const parseResult = parseFile(filePath);
-        if (!parseResult.ok) {
-          return { ok: false, error: parseResult.error };
-        }
+         const parseResult = parseFile(filePath);
+         if (!parseResult.ok) {
+            return { ok: false, success: false, status: 'failed', error: parseResult.error };
+         }
+         if (isPipelineCancelled(operation)) {
+           return { ok: false, success: false, status: 'partial', cancelled: true, errors: [] };
+         }
 
         const result = db.saveHistoricalCandlesFromImport(ticker, parseResult.candles);
         const count = result.changes;
@@ -808,6 +876,8 @@ app.whenReady().then(async () => {
 
         return {
           ok: true,
+          success: true,
+          status: 'success',
           count,
           ticker,
           firstDate,
@@ -817,12 +887,13 @@ app.whenReady().then(async () => {
         };
       } catch (err) {
         console.error('[import:bulk] Error:', err.message);
-        return { ok: false, error: err.message || String(err) };
+         return { ok: false, success: false, status: 'failed', error: err.message || String(err) };
       } finally {
         // Clean up temp file
         if (tmpPath) {
           try { fs.unlinkSync(tmpPath); } catch (_) { /* ignore */ }
         }
+        finishPipelineOperation(operation);
       }
     });
 
@@ -835,11 +906,17 @@ app.whenReady().then(async () => {
       }
 
       const ticker = payload.ticker.toUpperCase().trim();
+      const lock = beginPipelineOperation('file-import', payload.operationId);
+      if (lock.busy) return lock.result;
+      const operation = lock.operation;
 
       try {
         const parseResult = parseFile(payload.filePath);
         if (!parseResult.ok) {
           return { ok: false, error: parseResult.error };
+        }
+        if (isPipelineCancelled(operation)) {
+          return { ok: false, success: false, status: 'partial', cancelled: true, errors: [] };
         }
 
         db.upsertStock({
@@ -867,6 +944,8 @@ app.whenReady().then(async () => {
 
         return {
           ok: true,
+          success: true,
+          status: 'success',
           count,
           ticker,
           firstDate,
@@ -876,7 +955,9 @@ app.whenReady().then(async () => {
         };
       } catch (err) {
         console.error('[import-historical-data] Error:', err.message);
-        return { ok: false, error: err.message || String(err) };
+        return { ok: false, success: false, status: 'failed', error: err.message || String(err) };
+      } finally {
+        finishPipelineOperation(operation);
       }
     });
 
@@ -899,11 +980,14 @@ app.whenReady().then(async () => {
       }
 
       const filePath = result.filePaths[0];
+      const lock = beginPipelineOperation('file-import', null);
+      if (lock.busy) return lock.result;
+      const operation = lock.operation;
 
       try {
         const importResult = await importFromCsvFile(filePath, db);
         if (!importResult.ok) {
-          return { ok: false, error: importResult.error };
+          return { ok: false, success: false, status: 'failed', error: importResult.error };
         }
 
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -918,6 +1002,8 @@ app.whenReady().then(async () => {
 
         return {
           ok: true,
+          success: true,
+          status: 'success',
           inserted: importResult.inserted,
           skipped: importResult.skipped,
           firstDate: importResult.firstDate,
@@ -926,7 +1012,9 @@ app.whenReady().then(async () => {
         };
       } catch (err) {
         console.error('[import-historical-csv] Error:', err.message);
-        return { ok: false, error: err.message || String(err) };
+        return { ok: false, success: false, status: 'failed', error: err.message || String(err) };
+      } finally {
+        finishPipelineOperation(operation);
       }
     });
 
@@ -1025,12 +1113,19 @@ app.whenReady().then(async () => {
     ipcMain.handle('download-full-yahoo-history', async (_event, payload) => {
       const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
       if (!ticker) return { ok: false, error: 'missing-ticker' };
+      const lock = beginPipelineOperation('ticker-full-history', payload && payload.operationId);
+      if (lock.busy) return lock.result;
+      const operation = lock.operation;
       try {
         const candles = await yahooClient.fetchFullYahooHistory(ticker);
+        if (isPipelineCancelled(operation)) {
+          return { ok: false, success: false, status: 'partial', operationId: operation.operationId,
+            ticker, cancelled: true, errors: [] };
+        }
         if (candles && candles.length > 0) {
           const result = db.saveHistoricalCandlesFromImport(ticker, candles);
           db.cacheOHLCV(ticker, candles);
-          try { db.setFullHistoryFetched(ticker); } catch (_e) { /* ignore */ }
+          db.setFullHistoryFetched(ticker);
           const newSummary = db.getHistoricalSummary(ticker);
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('ticker:synced', {
@@ -1041,14 +1136,20 @@ app.whenReady().then(async () => {
           }
           return {
             ok: true,
+            success: true,
+            status: 'success',
+            operationId: operation.operationId,
             ticker,
             totalCandles: newSummary ? newSummary.totalCandles : result.changes,
             summary: newSummary
           };
         }
-        return { ok: true, ticker, totalCandles: 0, summary: null };
+        return { ok: false, success: false, status: 'failed', operationId: operation.operationId,
+          ticker, totalCandles: 0, summary: null, error: 'empty-history' };
       } catch (err) {
         return { ok: false, error: err.message || String(err) };
+      } finally {
+        finishPipelineOperation(operation);
       }
     });
 
@@ -1095,15 +1196,21 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('sync-all-list-stocks', async (_event, indexFilter) => {
       if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'window-unavailable' };
+      const requested = indexInput(indexFilter);
+      const lock = beginPipelineOperation('index-incremental-sync', requested.operationId);
+      if (lock.busy) return lock.result;
+      const operation = lock.operation;
+      const filter = requested.index || null;
 
       const SYNC_CHUNK_SIZE = 5;
       const SYNC_IPC_BATCH = 10;
       const sleep = ms => new Promise(res => setTimeout(res, ms));
 
       try {
-        const tickers = db.getCustomTickersByIndex(indexFilter || null);
+        const tickers = db.getCustomTickersByIndex(filter);
         if (!tickers || tickers.length === 0) {
-          return { ok: true, totalStocks: 0, updatedCount: 0, totalNewCandles: 0, errors: [], message: 'Nenhum ativo na lista para sincronizar.' };
+          return { ok: false, success: false, status: 'failed', totalStocks: 0, updatedCount: 0,
+            totalNewCandles: 0, errors: [], error: 'no-stocks', message: 'Nenhum ativo na lista para sincronizar.' };
         }
 
         let updatedCount = 0;
@@ -1114,6 +1221,7 @@ app.whenReady().then(async () => {
         let completed = 0;
 
         for (let i = 0; i < tickers.length; i += SYNC_CHUNK_SIZE) {
+          if (isPipelineCancelled(operation)) break;
           const chunk = tickers.slice(i, i + SYNC_CHUNK_SIZE);
 
           const results = await Promise.all(chunk.map(async (ticker) => {
@@ -1135,7 +1243,9 @@ app.whenReady().then(async () => {
           }));
 
           const updatedEntries = results.filter(r => r.status === 'updated');
-          if (updatedEntries.length > 0) {
+          if (isPipelineCancelled(operation)) {
+            for (const result of updatedEntries) result.status = 'cancelled';
+          } else if (updatedEntries.length > 0) {
             const saved = db.saveHistoricalCandlesBatch(updatedEntries.map(r => ({ ticker: r.ticker, candles: r.candles })));
             totalNewCandles += saved.changes;
             updatedCount += updatedEntries.length;
@@ -1169,17 +1279,23 @@ app.whenReady().then(async () => {
           }
         }
 
+        const status = operationStatus(tickers.length, errors, operation.cancelled, completed, updatedCount);
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('sync-all-done', {
             totalStocks: tickers.length,
             updatedCount,
             totalNewCandles,
-            errorCount: errors.length
+            errorCount: errors.length,
+            status: 'done',
+            state: status,
+            cancelled: operation.cancelled
           });
         }
 
         return {
-          ok: true,
+          ok: status !== 'failed',
+          success: status !== 'failed',
+          status,
           totalStocks: tickers.length,
           updatedCount,
           totalNewCandles,
@@ -1187,35 +1303,48 @@ app.whenReady().then(async () => {
         };
       } catch (err) {
         return { ok: false, error: err.message || String(err) };
+      } finally {
+        finishPipelineOperation(operation);
       }
     });
 
-    ipcMain.handle('download-full-history-for-index', async (_event, indexName) => {
-      const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
-      if (!index) return { ok: false, error: 'missing-index-name' };
+    ipcMain.handle('download-full-history-for-index', async (event, input) => {
+      const { index, operationId: requestedId } = indexInput(input);
+      if (!index) return { ok: false, success: false, status: 'failed', error: 'missing-index-name' };
       if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'window-unavailable' };
+      const lock = beginPipelineOperation('index-full-history', requestedId);
+      if (lock.busy) return lock.result;
+      const operation = lock.operation;
 
       const CHUNK_SIZE = 3;
       const sleep = ms => new Promise(res => setTimeout(res, ms));
+      const errors = [];
+      let completed = 0;
+      let total = 0;
+      let updated = 0;
 
       try {
         const stocks = db.getStocksByIndex(index);
         if (!stocks || stocks.length === 0) {
-          return { ok: true, total: 0, updated: 0, errorCount: 0, errors: [], message: 'Nenhum ativo para este índice na SQLite.' };
+          sendPipelineProgress(event, 'index-download-progress', {
+            operationId: operation.operationId, indexId: index, current: 0, total: 0,
+            ticker: '', status: 'done', state: 'failed', errorCount: 0
+          });
+          return { ok: false, success: false, status: 'failed', operationId: operation.operationId,
+            total: 0, updated: 0, errorCount: 0, errors: [], error: 'no-stocks' };
         }
 
         const tickers = stocks.map(s => s.ticker);
-        const total = tickers.length;
-        const errors = [];
-        let updated = 0;
-        let completed = 0;
+        total = tickers.length;
 
         for (let i = 0; i < tickers.length; i += CHUNK_SIZE) {
+          if (isPipelineCancelled(operation)) break;
           const chunk = tickers.slice(i, i + CHUNK_SIZE);
 
           const results = await Promise.all(chunk.map(async (ticker, chunkIdx) => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('index-download-progress', {
+                operationId: operation.operationId, indexId: index,
                 current: completed + chunkIdx + 1,
                 total,
                 ticker,
@@ -1224,6 +1353,7 @@ app.whenReady().then(async () => {
             }
             try {
               const candles = await yahooClient.fetchFullYahooHistory(ticker);
+              if (isPipelineCancelled(operation)) return { ticker, status: 'cancelled' };
               if (!candles || candles.length === 0) {
                 return { ticker, status: 'noop' };
               }
@@ -1234,21 +1364,23 @@ app.whenReady().then(async () => {
           }));
 
           const updatedEntries = results.filter(r => r.status === 'updated');
-          if (updatedEntries.length > 0) {
+          for (const r of updatedEntries) {
             try {
-              db.saveHistoricalCandlesBatch(updatedEntries.map(r => ({ ticker: r.ticker, candles: r.candles })));
-              for (const r of updatedEntries) {
-                db.cacheOHLCV(r.ticker, r.candles);
-                try { db.setFullHistoryFetched(r.ticker); } catch (_) {}
-                r.summary = db.getHistoricalSummary(r.ticker);
-              }
-            } catch (err) {
-              const message = err.message || String(err);
-              for (const r of updatedEntries) {
-                r.status = 'error';
-                r.error = message;
+              if (isPipelineCancelled(operation)) {
+                r.status = 'cancelled';
                 delete r.candles;
+                continue;
               }
+              // Persist and mark only this ticker after its complete history
+              // has been fetched and persisted successfully.
+              db.saveHistoricalCandlesFromImport(r.ticker, r.candles);
+              db.cacheOHLCV(r.ticker, r.candles);
+              db.setFullHistoryFetched(r.ticker);
+              r.summary = db.getHistoricalSummary(r.ticker);
+            } catch (err) {
+              r.status = 'error';
+              r.error = err.message || String(err);
+              delete r.candles;
             }
           }
 
@@ -1257,120 +1389,61 @@ app.whenReady().then(async () => {
           for (const r of results) {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('index-download-progress', {
+                operationId: operation.operationId,
+                indexId: index,
                 current: completed,
                 total,
                 ticker: r.ticker,
                 status: r.status,
+                state: r.status === 'updated' ? 'success' : (r.status === 'error' ? 'failed' : r.status),
                 summary: r.summary || null,
                 firstDate: (r.summary && r.summary.firstDate) || null,
                 candles: (r.candles && r.candles.length) || 0,
                 error: r.error || null
               });
             }
-            if (r.status === 'error') {
+            if (r.status === 'error' || r.status === 'noop') {
+              if (r.status === 'noop') r.error = 'empty-history';
               errors.push({ ticker: r.ticker, error: r.error });
             } else if (r.status === 'updated') {
               updated++;
             }
           }
 
-          if (i + CHUNK_SIZE < tickers.length) {
+          if (i + CHUNK_SIZE < tickers.length && !isPipelineCancelled(operation)) {
             await sleep(200 + Math.random() * 300);
           }
         }
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('index-download-progress', {
-            current: total,
+            operationId: operation.operationId,
+            indexId: index,
+            current: completed,
             total,
             ticker: '',
             status: 'done',
+            state: operationStatus(total, errors, operation.cancelled, completed, updated),
             updated,
             errorCount: errors.length,
             firstDate: null
           });
         }
 
-        return { ok: true, total, updated, errorCount: errors.length, errors };
+        const status = operationStatus(total, errors, operation.cancelled, completed, updated);
+        return { ok: status !== 'failed', success: status !== 'failed', status,
+          operationId: operation.operationId, total, updated, errorCount: errors.length,
+          errors, cancelled: operation.cancelled };
       } catch (err) {
-        return { ok: false, error: err.message || String(err) };
-      }
-    });
-
-    ipcMain.handle('fetch-first-date-index', async (_event, indexName) => {
-      const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
-      if (!index) return { ok: false, error: 'missing-index-name' };
-      if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'window-unavailable' };
-
-      const CHUNK_SIZE = 3;
-      const sleep = ms => new Promise(res => setTimeout(res, ms));
-
-      try {
-        const stocks = db.getStocksByIndex(index);
-        if (!stocks || stocks.length === 0) {
-          return { ok: true, total: 0, updated: 0, errorCount: 0, errors: [], message: 'Nenhum ativo para este índice na SQLite.' };
-        }
-
-        const tickers = stocks.map(s => s.ticker);
-        const total = tickers.length;
-        const errors = [];
-        let updated = 0;
-        let completed = 0;
-
-        for (let i = 0; i < tickers.length; i += CHUNK_SIZE) {
-          const chunk = tickers.slice(i, i + CHUNK_SIZE);
-
-          const results = await Promise.all(chunk.map(async (ticker) => {
-            try {
-              const firstDate = await yahooClient.fetchFirstTradeDate(ticker);
-              if (firstDate) {
-                return { ticker, firstDate, status: 'done' };
-              }
-              return { ticker, firstDate: null, status: 'skipped' };
-            } catch (err) {
-              return { ticker, firstDate: null, status: 'error', error: err.message || String(err) };
-            }
-          }));
-
-          for (const r of results) {
-            if (r.status === 'done') {
-              db.updateStockFirstDate(r.ticker, r.firstDate);
-              updated++;
-            } else if (r.status === 'error') {
-              errors.push({ ticker: r.ticker, error: r.error });
-            }
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('first-date-fetch-progress', {
-                current: completed,
-                total,
-                ticker: r.ticker,
-                firstDate: r.firstDate || null,
-                status: r.status,
-                error: r.error || null
-              });
-            }
-            completed++;
-          }
-
-          if (i + CHUNK_SIZE < tickers.length) {
-            await sleep(200 + Math.random() * 300);
-          }
-        }
-
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('first-date-fetch-progress', {
-            current: total,
-            total,
-            ticker: '',
-            status: 'done',
-            updated,
-            errorCount: errors.length
-          });
-        }
-
-        return { ok: true, total, updated, errorCount: errors.length, errors };
-      } catch (err) {
-        return { ok: false, error: err.message || String(err) };
+        const error = err.message || String(err);
+        errors.push({ ticker: null, error });
+        sendPipelineProgress(event, 'index-download-progress', {
+          operationId: operation.operationId, indexId: index, current: 0, total: 0,
+          ticker: '', status: 'done', state: 'failed', error, errorCount: errors.length
+        });
+        return { ok: false, success: false, status: 'failed', operationId: operation.operationId, errors, error };
+      } finally {
+        finishPipelineOperation(operation);
       }
     });
 
@@ -1385,44 +1458,78 @@ app.whenReady().then(async () => {
       }
     });
 
-    ipcMain.handle('sync-index-first-dates', async (event, indexName) => {
+    ipcMain.handle('UPDATE_INDEX_FIRST_DATES', async (event, input) => {
+      const { index, operationId: requestedId } = indexInput(input);
+      if (!index) return { ok: false, success: false, status: 'failed', error: 'missing-index-name' };
+      if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, success: false, status: 'failed', error: 'window-unavailable' };
+      const lock = beginPipelineOperation('index-first-date', requestedId);
+      if (lock.busy) return lock.result;
+      const operation = lock.operation;
+      const errors = [];
+      let updated = 0;
+      let completed = 0;
+      let total = 0;
+      const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+      const emit = payload => sendPipelineProgress(event, 'UPDATE_INDEX_DATE_PROGRESS', {
+        operationId: operation.operationId, indexId: index, ...payload
+      });
+
       try {
-        const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
-        if (!index) return { success: false, message: 'missing-index-name' };
         const stocks = db.getStocksByIndex(index);
-        if (!stocks || stocks.length === 0) {
-          return { success: false, message: `Nenhuma ação encontrada para o índice: ${index}` };
+        total = stocks.length;
+        if (total === 0) {
+          emit({ current: 0, total: 0, ticker: '', status: 'done', state: 'failed', errorCount: 0 });
+          return { ok: false, success: false, status: 'failed', operationId: operation.operationId,
+            total: 0, updated: 0, errors: [], error: 'no-stocks' };
         }
-        let processed = 0;
-        const total = stocks.length;
         for (const stock of stocks) {
-          processed++;
+          if (isPipelineCancelled(operation)) break;
+          const ticker = stock.ticker;
+          let firstDate = null;
+          let status = 'skipped';
+          let error = null;
           try {
-            const firstDate = await yahooClient.fetchFirstTradeDate(stock.ticker);
+            firstDate = await yahooClient.fetchFirstTradeDate(ticker);
+            if (isPipelineCancelled(operation)) break;
             if (firstDate) {
-              db.updateStockFirstDate(stock.ticker, firstDate);
-              if (event.sender && !event.sender.isDestroyed()) {
-                event.sender.send('index-first-date-progress', {
-                  ticker: stock.ticker,
-                  firstDate,
-                  current: processed,
-                  total
-                });
-              }
+              db.updateStockFirstDate(ticker, firstDate);
+              updated++;
+              status = 'success';
+            } else {
+              status = 'failed';
+              error = 'first-date-unavailable';
+              errors.push({ ticker, error });
             }
           } catch (err) {
-            console.error(`Erro ao obter 1ª data no Yahoo para ${stock.ticker}:`, err);
+            status = 'failed';
+            error = err.message || String(err);
+            errors.push({ ticker, error });
           }
-          await new Promise(r => setTimeout(r, 200));
+          completed++;
+          emit({ current: completed, total, ticker, firstDate, status, state: status, error });
+          if (completed < total && !isPipelineCancelled(operation)) await sleep(200);
         }
-        return { success: true, count: processed };
-      } catch (error) {
-        console.error('Falha na sincronização do índice:', error);
-        return { success: false, error: error.message || String(error) };
+        const finalStatus = operationStatus(total, errors, operation.cancelled, completed, updated);
+        emit({ current: completed, total, ticker: '', status: 'done', state: finalStatus,
+          errorCount: errors.length, cancelled: operation.cancelled, updated });
+        return { ok: finalStatus !== 'failed', success: finalStatus !== 'failed', status: finalStatus,
+          operationId: operation.operationId, total, updated, count: updated,
+          errorCount: errors.length, errors, cancelled: operation.cancelled };
+      } catch (err) {
+        const error = err.message || String(err);
+        errors.push({ ticker: null, error });
+        emit({ current: completed, total, ticker: '', status: 'done', state: 'failed', error, errorCount: errors.length });
+        return { ok: false, success: false, status: 'failed', operationId: operation.operationId,
+          total, updated, count: updated, errors, error };
+      } finally {
+        finishPipelineOperation(operation);
       }
     });
 
-    ipcMain.handle('UPDATE_INDEX_FIRST_DATES', async (event, indexName) => {
+    /* Legacy implementation removed in favour of the single canonical
+       UPDATE_INDEX_FIRST_DATES handler above.
+    // historical implementation intentionally kept in this comment for migration reference
+    legacyHandler('UPDATE_INDEX_FIRST_DATES', async (event, indexName) => {
       const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
       if (!index) return { success: false, message: 'missing-index-name' };
 
@@ -1500,6 +1607,133 @@ app.whenReady().then(async () => {
       } catch (error) {
         console.error('[UPDATE_INDEX_FIRST_DATES] Falha:', error);
         return { success: false, error: error.message || String(error) };
+      }
+    });
+
+    });
+    */
+
+    ipcMain.handle('fetch-and-add-country-index-stocks', async (event, input) => {
+      const country = input && typeof input === 'object' ? input.country : input;
+      const mapping = getCountryIndex(country);
+      if (!mapping) {
+        return { ok: false, success: false, status: 'failed', message: `País sem índice oficial configurado: ${country || 'desconhecido'}.` };
+      }
+      const requestedId = input && typeof input === 'object' ? input.operationId : null;
+      const lock = beginPipelineOperation('country-index-import', requestedId);
+      if (lock.busy) return lock.result;
+      const operation = lock.operation;
+
+      try {
+        const constituents = await wikipediaScraper.getIndexConstituents(country);
+        if (!constituents || constituents.length === 0) {
+          sendPipelineProgress(event, 'country-index-progress', {
+            operationId: operation.operationId, current: 0, total: 0, ticker: '',
+            status: 'done', state: 'failed', errorCount: 0
+          });
+          return { ok: false, success: false, status: 'failed', operationId: operation.operationId,
+            message: `Não foi possível obter constituintes para o índice ${mapping.indexName}.`, errors: [] };
+        }
+
+        const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+        const total = constituents.length;
+        const indexId = db.canonicalIndexId(mapping.indexName);
+        const stocks = [];
+        const errors = [];
+
+        for (let i = 0; i < total; i++) {
+          if (isPipelineCancelled(operation)) break;
+          const constituent = constituents[i];
+          const ticker = String(constituent.ticker || '').trim().toUpperCase();
+          let name = constituent.name || ticker;
+          let firstDate = null;
+          let error = null;
+
+          try {
+            const history = await marketDataService.fetchStockHistory(ticker);
+            if (isPipelineCancelled(operation)) break;
+            if (history.length > 0) {
+              firstDate = history[0].date;
+              db.saveHistoricalCandlesFromImport(ticker, history);
+            } else {
+              error = 'empty-history';
+              errors.push({ ticker, error });
+            }
+          } catch (err) {
+            error = err.message || String(err);
+            errors.push({ ticker, error });
+            console.error(`[fetch-and-add-country-index-stocks] ${ticker}:`, error);
+          }
+
+          if (isPipelineCancelled(operation)) break;
+
+          db.upsertStock({
+            ticker,
+            name,
+            country: String(country || '').trim(),
+            indexName: mapping.indexName,
+            firstDate
+          });
+          db.addCustomTicker({
+            ticker,
+            name,
+            country: String(country || '').trim(),
+            indexName: mapping.indexName,
+            exchange: '',
+            type: 'EQUITY'
+          });
+
+          const item = { ticker, name, country, indexName: mapping.indexName, firstDate, error };
+          stocks.push(item);
+          if (event.sender && !event.sender.isDestroyed()) {
+              event.sender.send('country-index-progress', {
+                operationId: operation.operationId,
+              current: i + 1,
+              total,
+              ticker,
+                name,
+                firstDate,
+                indexId,
+                indexName: mapping.indexName,
+                status: error ? 'failed' : (firstDate ? 'success' : 'skipped'),
+                state: error ? 'failed' : (firstDate ? 'success' : 'skipped'),
+                error
+            });
+          }
+          if (i < total - 1) await sleep(200);
+        }
+
+        const processed = stocks.length;
+        const status = operationStatus(total, errors, operation.cancelled, processed, stocks.length);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('country-index-progress', {
+            operationId: operation.operationId, current: processed, total, ticker: '',
+            status: 'done', state: status, errorCount: errors.length, cancelled: operation.cancelled
+          });
+        }
+        return {
+          ok: status !== 'failed',
+          success: status !== 'failed',
+          status,
+          operationId: operation.operationId,
+          count: stocks.length,
+          total,
+          country,
+          indexId,
+          indexName: mapping.indexName,
+          stocks,
+          errors
+        };
+      } catch (error) {
+        console.error(`[fetch-and-add-country-index-stocks] Falha para ${country}:`, error);
+        sendPipelineProgress(event, 'country-index-progress', {
+          operationId: operation.operationId, current: 0, total: 0, ticker: '',
+          status: 'done', state: 'failed', errorCount: 1, error: error.message || String(error)
+        });
+        return { ok: false, success: false, status: 'failed', operationId: operation.operationId,
+          message: error.message || String(error), errors: [{ ticker: null, error: error.message || String(error) }] };
+      } finally {
+        finishPipelineOperation(operation);
       }
     });
 

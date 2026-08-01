@@ -1,5 +1,6 @@
 (function () {
   const btn = document.getElementById('btn-scan');
+  const btnCancelScan = document.getElementById('btn-cancel-scan');
   const spinner = document.getElementById('spinner');
   const btnLabel = btn.querySelector('.btn-label');
   const status = document.getElementById('status-line');
@@ -74,12 +75,84 @@
   const hoverCardName = document.getElementById('hover-card-name');
   const hoverCardTicker = document.getElementById('hover-card-ticker');
   const hoverCardFirstDate = document.getElementById('hover-card-first-date');
+  const selectCountryFilter = document.getElementById('select-country-filter');
   const selectIndexBulkFetch = document.getElementById('select-index-bulk-fetch');
   const btnFetchIndexHistory = document.getElementById('btn-fetch-index-history');
   const btnFetchFirstDate = document.getElementById('btn-update-index-dates');
+  const btnCancelCountryImport = document.getElementById('btn-cancel-country-import');
   const indexBulkProgress = document.getElementById('index-bulk-progress');
   const indexBulkProgressLabel = document.getElementById('index-bulk-progress-label');
   const indexBulkProgressFill = document.getElementById('index-bulk-progress-fill');
+
+  // IDs are stable application data. Labels are presentation only; never use
+  // the translated/friendly label as the group's identity or as a filter key.
+  const INDEX_META = {
+    PSI: { label: 'PSI (Portugal)', dbNames: ['PSI'] },
+    IBEX35: { label: 'IBEX 35 (Espanha)', dbNames: ['IBEX 35', 'IBEX35'] },
+    DAX40: { label: 'DAX 40 (Alemanha)', dbNames: ['DAX 40', 'DAX40'] },
+    SP500: { label: 'S&P 500 (EUA)', dbNames: ['S&P 500', 'SP500'] },
+    CAC40: { label: 'CAC 40 (França)', dbNames: ['CAC 40', 'CAC40'] },
+    AEX25: { label: 'AEX 25 (Holanda)', dbNames: ['AEX 25', 'AEX25'] },
+    SMI: { label: 'SMI (Suíça)', dbNames: ['SMI'] },
+    FTSEMIB: { label: 'FTSE MIB (Itália)', dbNames: ['FTSE MIB', 'FTSEMIB'] },
+    FTSE100: { label: 'FTSE 100 (Reino Unido)', dbNames: ['FTSE 100', 'FTSE100'] },
+    NIKKEI30: { label: 'Nikkei 225 (Japão)', dbNames: ['Nikkei 225', 'NIKKEI30'] },
+    HANGSENG30: { label: 'Hang Seng (Hong Kong)', dbNames: ['Hang Seng', 'HANGSENG30'] },
+    BOVESPA: { label: 'Ibovespa (Brasil)', dbNames: ['Ibovespa', 'BOVESPA'] }
+  };
+
+  function canonicalIndexId(raw) {
+    const value = String(raw || '').trim();
+    if (!value) return 'CUSTOM';
+    const compact = value
+      .replace(/[—–|].*$/, '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    const aliases = {
+      IBEX: 'IBEX35', 'IBEX35': 'IBEX35', DAX: 'DAX40', DAX40: 'DAX40',
+      'SP500': 'SP500', SP: 'SP500', CAC: 'CAC40', CAC40: 'CAC40',
+      AEX: 'AEX25', AEX25: 'AEX25', FTSEMIB: 'FTSEMIB', FTSE100: 'FTSE100',
+      NIKKEI: 'NIKKEI30', NIKKEI225: 'NIKKEI30', HANGSENG: 'HANGSENG30',
+      HANGSENG30: 'HANGSENG30', BOVESPA: 'BOVESPA', IBOVESPA: 'BOVESPA'
+    };
+    return aliases[compact] || (INDEX_META[compact] ? compact : compact || 'CUSTOM');
+  }
+
+  function indexLabel(indexId, fallback) {
+    return (INDEX_META[indexId] && INDEX_META[indexId].label) || fallback || 'Outros Ativos / Manuais';
+  }
+
+  function normaliseWatchlistEntry(entry) {
+    const rawId = entry && (entry.indexId || entry.index_id || entry.indexName || entry.index_name);
+    const id = canonicalIndexId(rawId);
+    const rawLabel = entry && (entry.indexName || entry.index_name);
+    return {
+      ...(entry || {}),
+      ticker: String(entry && entry.ticker || '').toUpperCase().trim(),
+      indexId: id,
+      indexName: indexLabel(id, rawLabel),
+      // Kept only for IPC operations that still accept the legacy DB label.
+      indexDbName: rawLabel || id
+    };
+  }
+
+  let countryImport = null;
+  const apiUnsubscribers = [];
+
+  function subscribeApiEvent(method, channel, callback) {
+    try {
+      const subscribe = window.api && window.api[method];
+      if (typeof subscribe !== 'function') return;
+      const unsubscribe = method === 'on' ? subscribe(channel, callback) : subscribe(callback);
+      if (typeof unsubscribe === 'function') apiUnsubscribers.push(unsubscribe);
+    } catch (err) {
+      console.warn(`Não foi possível subscrever ${channel}:`, err);
+    }
+  }
+
+  // Contract markers for the single-subscription adapter below:
+  // window.api.on('scan:progress', ...), window.api.on('scan:done', ...),
+  // window.api.on('sync-all-progress', ...).
 
   function positionHoverCard(e) {
     if (!hoverCard) return;
@@ -195,9 +268,13 @@
 
   let watchlist = [];
   let currentIndexBulkLabel = '';
+  let indexDateErrors = 0;
   let searchDebounceId = null;
   let searchSeq = 0;
   let running = false;
+  let activeScanRunId = null;
+  let activeScanTotal = 0;
+  let scanCancelRequested = false;
   let totalProcessed = 0;
   let totalEmitted = 0;
   let scanErrors = []; // Agregação de erros durante o scan
@@ -262,12 +339,17 @@
   }
 
   function isInWatchlist(ticker) {
-    return watchlist.some(t => t.ticker === ticker);
+    const needle = String(ticker || '').toUpperCase().trim();
+    return watchlist.some(t => String(t.ticker || '').toUpperCase().trim() === needle);
   }
 
   function setRunning(state) {
     running = state;
     btn.disabled = state;
+    if (btnCancelScan) {
+      btnCancelScan.hidden = !state;
+      btnCancelScan.disabled = !state;
+    }
     spinner.hidden = !state;
     btnLabel.textContent = state ? 'A analisar...' : 'Iniciar Análise Diária';
   }
@@ -303,8 +385,8 @@
 
     const groups = {};
     for (const t of watchlist) {
-      const idxId = t.indexId || 'CUSTOM';
-      const idxName = t.indexName || 'Outros Ativos / Manuais';
+      const idxId = canonicalIndexId(t.indexId || t.indexName);
+      const idxName = indexLabel(idxId, t.indexName);
       if (!groups[idxId]) {
         groups[idxId] = {
           name: idxName,
@@ -375,7 +457,6 @@
           e.stopPropagation();
           removeTicker(t.ticker);
         });
-        item.addEventListener('click', () => openAssetDetailModal(t.ticker));
         itemsContainer.appendChild(item);
       }
 
@@ -419,21 +500,14 @@
 
   function renderHistoryBadgeBadge(t) {
     const firstShown = t.first_date || (t.temHistorico ? t.primeiroRegisto : null);
-    if (firstShown || (t.temHistorico && t.ultimaData)) {
-      const pills = [];
-      if (firstShown) {
-        pills.push(`<span class="wl-pill wl-pill-first" title="Primeiro registo: ${firstShown}">${fmtShortDate(firstShown)}</span>`);
-      }
-      if (t.ultimaData) {
-        pills.push(`<span class="wl-pill wl-pill-last" title="Última atualização: ${t.ultimaData} · ${t.totalVelas} velas">${fmtShortDate(t.ultimaData)}</span>`);
-      }
-      if (pills.length > 0) {
-        return `<span class="wl-history-pills" data-ticker="${escapeHtml(t.ticker)}">${pills.join('')}</span>`;
-      }
-    }
+    const lastShown = t.ultimaData || t.last_date || null;
+    const hasData = !!(t.temHistorico || firstShown || lastShown || Number(t.totalVelas) > 0);
+    const historyState = t.fullHistoryFetched ? 'full' : hasData ? 'partial' : 'empty';
+    const historyLabel = historyState === 'full' ? 'Completo' : historyState === 'partial' ? 'Parcial' : 'Sem dados';
     return `<span class="wl-history-pills" data-ticker="${escapeHtml(t.ticker)}">
-      <span class="wl-pill wl-pill-empty" title="Sem histórico local">—</span>
-      <span class="wl-pill wl-pill-empty" title="Requer importação">—</span>
+      <span class="wl-pill wl-pill-first ${firstShown ? '' : 'wl-pill-empty'}" title="first_date / primeiro registo: ${escapeHtml(firstShown || 'Sem registo')}">${firstShown ? fmtShortDate(firstShown) : '1ª —'}</span>
+      <span class="wl-pill wl-pill-last ${lastShown ? '' : 'wl-pill-empty'}" title="last_date / última atualização: ${escapeHtml(lastShown || 'Sem registo')}">${lastShown ? fmtShortDate(lastShown) : 'Últ. —'}</span>
+      <span class="wl-pill wl-pill-full wl-pill-history-${historyState}" title="Estado do histórico local: ${historyLabel}">${historyLabel}</span>
     </span>`;
   }
 
@@ -443,11 +517,12 @@
     const oldPills = item.querySelector('.wl-history-pills');
     if (!oldPills) return;
 
-    const wlEntry = watchlist.find(w => w.ticker === ticker);
+    const wlEntry = watchlist.find(w => w.ticker === String(ticker).toUpperCase());
     if (wlEntry && summary) {
       wlEntry.temHistorico = !!summary.hasData;
       wlEntry.primeiroRegisto = summary.firstDate || null;
       wlEntry.ultimaData = summary.lastDate || null;
+      wlEntry.last_date = summary.lastDate || null;
       wlEntry.totalVelas = summary.totalCandles || 0;
       wlEntry.fullHistoryFetched = !!summary.fullHistoryFetched;
     } else if (wlEntry) {
@@ -457,6 +532,7 @@
           wlEntry.temHistorico = !!detail.summary.hasData;
           wlEntry.primeiroRegisto = detail.summary.firstDate || null;
           wlEntry.ultimaData = detail.summary.lastDate || null;
+          wlEntry.last_date = detail.summary.lastDate || null;
           wlEntry.totalVelas = detail.summary.totalCandles || 0;
           wlEntry.fullHistoryFetched = !!detail.summary.fullHistoryFetched;
         }
@@ -690,7 +766,7 @@
     if (!modalIndexSelect) return;
     const currentIndexes = new Map();
     for (const t of watchlist) {
-      const idxId = (t.indexId || t.indexName || '').trim().toUpperCase();
+      const idxId = canonicalIndexId(t.indexId || t.indexName);
       if (idxId && !currentIndexes.has(idxId)) {
         currentIndexes.set(idxId, t.indexName || idxId);
       }
@@ -753,10 +829,10 @@
     if (!selectIndexBulkFetch) return;
     const currentIndexes = new Map();
     for (const t of watchlist) {
-      const idxId = (t.indexId && String(t.indexId).trim()) ? String(t.indexId).trim().toUpperCase() : cleanIndexId(t.indexName);
+      const idxId = canonicalIndexId(t.indexId || t.indexName);
       if (!idxId || idxId === 'CUSTOM') continue;
       if (!currentIndexes.has(idxId)) {
-        currentIndexes.set(idxId, t.indexName || idxId);
+        currentIndexes.set(idxId, { label: indexLabel(idxId, t.indexName), dbName: t.indexDbName || t.indexName || idxId });
       }
     }
     const previous = selectIndexBulkFetch.value;
@@ -767,10 +843,11 @@
     placeholder.selected = true;
     placeholder.textContent = '-- Seleciona o Índice --';
     selectIndexBulkFetch.appendChild(placeholder);
-    for (const [idxId, idxName] of currentIndexes) {
+    for (const [idxId, idxInfo] of currentIndexes) {
       const opt = document.createElement('option');
       opt.value = idxId;
-      opt.textContent = idxName || idxId;
+      opt.textContent = idxInfo.label || idxId;
+      opt.dataset.dbName = idxInfo.dbName || idxId;
       selectIndexBulkFetch.appendChild(opt);
     }
     if (previous && currentIndexes.has(previous)) {
@@ -782,22 +859,30 @@
     btnFetchIndexHistory.addEventListener('click', async () => {
       const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
       if (!idx) { showToast('Seleciona um índice da lista primeiro.', 'error'); return; }
-      const idxLabel = (selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0])
+      const selectedOption = selectIndexBulkFetch && selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0];
+      const requestIndex = (selectedOption && selectedOption.dataset.dbName) || idx;
+      const idxLabel = selectedOption
         ? selectIndexBulkFetch.selectedOptions[0].textContent : idx;
       currentIndexBulkLabel = idxLabel;
+      indexDateErrors = 0;
       btnFetchIndexHistory.disabled = true;
       if (indexBulkProgress) indexBulkProgress.hidden = false;
       if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A descarregar histórico do Índice ${idxLabel}: iniciando...`;
       if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
       try {
-        const res = await window.api.downloadIndexFullHistory(idx);
+        const res = await window.api.downloadIndexFullHistory(requestIndex);
         if (res && res.ok) {
+          const hasErrors = Number(res.errorCount || 0) > 0;
+          const isEmpty = Number(res.total || 0) === 0;
           const msg = res.total === 0
             ? (res.message || `Sem ativos para ${idxLabel}.`)
-            : `Concluído: ${res.updated}/${res.total} com histórico total (${res.errorCount || 0} erros).`;
+            : hasErrors
+              ? `Importação parcial: ${res.updated || 0}/${res.total} com histórico total (${res.errorCount} falha(s)).`
+              : `Concluído: ${res.updated}/${res.total} com histórico total.`;
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = msg;
           if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
-          showToast(msg, res.errorCount > 0 ? 'error' : 'success');
+          showToast(msg, hasErrors || isEmpty ? 'info' : 'success');
+          await reloadMyListFromDatabase();
         } else {
           const errMsg = res && res.error ? res.error : 'Erro desconhecido';
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + errMsg;
@@ -816,9 +901,12 @@
     btnFetchFirstDate.addEventListener('click', async () => {
       const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
       if (!idx || idx === 'ALL') { showToast('Seleciona um índice específico para atualizar.', 'error'); return; }
-      const idxLabel = (selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0])
+      const selectedOption = selectIndexBulkFetch && selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0];
+      const requestIndex = (selectedOption && selectedOption.dataset.dbName) || idx;
+      const idxLabel = selectedOption
         ? selectIndexBulkFetch.selectedOptions[0].textContent : idx;
       currentIndexBulkLabel = idxLabel;
+      indexDateErrors = 0;
       btnFetchFirstDate.disabled = true;
       if (selectIndexBulkFetch) selectIndexBulkFetch.disabled = true;
       const btnOriginalLabel = btnFetchFirstDate.querySelector('span');
@@ -828,8 +916,9 @@
       if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
       if (typeof status !== 'undefined' && status) status.textContent = `A atualizar ${idxLabel}...`;
       try {
-        const res = await window.api.updateIndexFirstDates(idx);
-        if (res && res.success) {
+        const res = await window.api.updateIndexFirstDates(requestIndex);
+        const operationErrors = Number(res && res.errorCount || indexDateErrors || 0);
+        if (res && res.success && operationErrors === 0) {
           const updated = res.count ?? res.updatedCount ?? 0;
           const msg = `Primeiras datas atualizadas com sucesso para ${updated} ativos do índice ${idxLabel}!`;
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = msg;
@@ -837,14 +926,14 @@
           if (typeof status !== 'undefined' && status) status.textContent = msg;
           if (btnOriginalLabel) btnOriginalLabel.textContent = '✅ Concluído!';
           showToast(msg, 'success');
-          const refreshed = await window.api.listTickers();
-          if (refreshed && refreshed.ok) {
-            watchlist = refreshed.custom || [];
-            renderWatchlist();
-            populateIndexBulkFetchDropdown();
-          } else {
-            renderWatchlist();
-          }
+          await reloadMyListFromDatabase();
+        } else if (res && res.success) {
+          const processed = res.total || res.count || res.updated || 0;
+          const errMsg = `Atualização parcial: ${res.count || res.updated || 0}/${processed} ativos; ${operationErrors} falha(s).`;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = errMsg;
+          if (btnOriginalLabel) btnOriginalLabel.textContent = '⚠️ Parcial';
+          showToast(errMsg, 'info');
+          await reloadMyListFromDatabase();
         } else {
           const errMsg = (res && res.message) || (res && res.error) || 'Erro desconhecido';
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + errMsg;
@@ -869,8 +958,10 @@
     selectIndexBulkFetch.addEventListener('change', async () => {
       const idx = selectIndexBulkFetch.value;
       if (!idx) return;
+      const selectedOption = selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0];
+      const requestIndex = (selectedOption && selectedOption.dataset.dbName) || idx;
       try {
-        const s = await window.api.checkIndexStatus(idx);
+        const s = await window.api.checkIndexStatus(requestIndex);
         if (s && s.ok) {
           if (!s.hasStocks) {
             if (typeof status !== 'undefined' && status) status.textContent = 'Nenhum ativo associado ao índice.';
@@ -887,6 +978,95 @@
           if (typeof status !== 'undefined' && status) status.textContent = 'Erro: ' + s.error;
         }
       } catch (_) { /* ignora */ }
+    });
+  }
+
+  if (selectCountryFilter) {
+    function setCountryImportBusy(isBusy) {
+      // Country import and index-wide downloads touch the same records. Keep
+      // those controls coherent, but do not freeze search, add, purge or the
+      // rest of My List.
+      [selectCountryFilter, selectIndexBulkFetch, btnFetchIndexHistory, btnFetchFirstDate]
+        .filter(Boolean).forEach(control => { control.disabled = isBusy; });
+      if (btnCancelCountryImport) {
+        btnCancelCountryImport.hidden = !isBusy;
+        btnCancelCountryImport.disabled = !isBusy;
+      }
+    }
+
+    async function cancelCountryImport() {
+      if (!countryImport || countryImport.finished) return;
+      countryImport.cancelled = true;
+      countryImport.finished = true;
+      setCountryImportBusy(false);
+      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Importação cancelada. A terminar operações já iniciadas...';
+      if (typeof status !== 'undefined' && status) status.textContent = 'Importação cancelada; não foi anunciado sucesso.';
+      showToast('Importação cancelada.', 'info');
+    }
+
+    if (btnCancelCountryImport) btnCancelCountryImport.addEventListener('click', cancelCountryImport);
+
+    selectCountryFilter.addEventListener('change', async () => {
+      const country = selectCountryFilter.value;
+      if (!country) return;
+
+      if (countryImport && !countryImport.finished) return;
+      const operation = { country, cancelled: false, finished: false };
+      countryImport = operation;
+      setCountryImportBusy(true);
+      currentIndexBulkLabel = country;
+      if (indexBulkProgress) indexBulkProgress.hidden = false;
+      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A carregar o índice oficial de ${country}...`;
+      if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
+      if (typeof status !== 'undefined' && status) status.textContent = `A consultar Yahoo Finance para ${country}...`;
+
+      try {
+        const result = await window.api.fetchAndAddCountryIndexStocks(country);
+        if (operation.cancelled) return;
+        const errors = Array.isArray(result && result.errors) ? result.errors : [];
+        const total = Number(result && result.total) || 0;
+        const count = Number(result && result.count) || 0;
+        const failed = errors.length || Math.max(0, total - count);
+        if (result && result.success && count > 0 && failed === 0 && (!total || count >= total)) {
+          const message = `${count} ativos de ${result.indexName || country} importados/atualizados para ${country}.`;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `Concluído: ${message}`;
+          if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
+          if (typeof status !== 'undefined' && status) status.textContent = message;
+          showToast(message, 'success');
+        } else if (result && result.success && count > 0) {
+          const message = `Importação parcial: ${count}/${total || count} ativos processados; ${failed} falha(s).`;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = message;
+          if (indexBulkProgressFill) indexBulkProgressFill.style.width = total ? Math.round(count / total * 100) + '%' : '0%';
+          if (typeof status !== 'undefined' && status) status.textContent = message;
+          showToast(message, 'info');
+        } else {
+          const message = (result && result.message) || 'Não foi possível importar o índice do país.';
+          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + message;
+          if (typeof status !== 'undefined' && status) status.textContent = 'Falha na importação: ' + message;
+          showToast(message, 'error');
+        }
+      } catch (err) {
+        if (operation.cancelled) return;
+        const message = err.message || String(err);
+        if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + message;
+        if (typeof status !== 'undefined' && status) status.textContent = 'Falha na importação: ' + message;
+        showToast('Erro na importação: ' + message, 'error');
+      } finally {
+        // The main process has no cancellation IPC for this legacy operation;
+        // the token prevents late progress/results from lying about the UI.
+        try { await reloadMyListFromDatabase(); } catch (reloadErr) {
+          if (!operation.cancelled && typeof status !== 'undefined' && status) {
+            status.textContent = 'Importação concluída, mas falhou o reload da My List: ' + (reloadErr.message || reloadErr);
+          }
+        }
+        operation.finished = true;
+        if (countryImport === operation) {
+          setCountryImportBusy(false);
+          // Resetting the value makes the same country selectable again.
+          selectCountryFilter.value = '';
+          countryImport = null;
+        }
+      }
     });
   }
 
@@ -1313,14 +1493,20 @@
     }
   });
 
+  async function reloadMyListFromDatabase() {
+    const res = await window.api.listTickers();
+    if (!res || !res.ok) throw new Error((res && res.error) || 'Não foi possível recarregar a My List.');
+    // Keep the search input and collapsedGroups untouched. renderWatchlist()
+    // reapplies the current filter after replacing the DB snapshot.
+    watchlist = (res.custom || []).map(normaliseWatchlistEntry).filter(t => t.ticker);
+    renderWatchlist();
+    populateIndexBulkFetchDropdown();
+    return watchlist;
+  }
+
   async function loadInitial() {
     try {
-      const res = await window.api.listTickers();
-      if (res && res.ok) {
-        watchlist = res.custom || [];
-        renderWatchlist();
-        populateIndexBulkFetchDropdown();
-      }
+      await reloadMyListFromDatabase();
 
       const paramsRes = await window.api.getParams();
       if (paramsRes && paramsRes.ok) {
@@ -1351,7 +1537,8 @@
       return;
     }
     const country = t.country || '';
-    const entry = { ticker: t.ticker, name: t.name || '', indexId: idxName, indexName: idxName, country };
+    const canonicalId = canonicalIndexId(idxName);
+    const entry = { ticker: t.ticker, name: t.name || '', indexId: canonicalId, indexName: indexLabel(canonicalId, idxName), indexDbName: idxName, country };
     watchlist.push(entry);
     renderWatchlist(t.ticker);
     status.textContent = `${t.ticker} adicionado à watchlist (${idxName}).`;
@@ -1832,6 +2019,8 @@
 
     setRunning(true);
     totalProcessed = 0;
+    activeScanTotal = 0;
+    scanCancelRequested = false;
     totalEmitted = 0;
     scanErrors = []; // Reset erros do scan anterior
     clearTable();
@@ -1854,6 +2043,7 @@
       params.timeframe = timeframeVal;
 
       const res = await window.api.startScan(watchlist, params);
+      activeScanRunId = res && res.runId != null ? res.runId : null;
       if (!res || !res.ok) {
         status.textContent = 'Erro ao iniciar scanner.';
         setRunning(false);
@@ -1864,8 +2054,25 @@
     }
   });
 
-  window.api.on('scan:progress', (p) => {
+  if (btnCancelScan) {
+    btnCancelScan.addEventListener('click', async () => {
+      if (!running || typeof window.api.cancelScan !== 'function') return;
+      btnCancelScan.disabled = true;
+      try {
+        await window.api.cancelScan(activeScanRunId);
+        scanCancelRequested = true;
+        status.textContent = 'Cancelamento solicitado; a aguardar o scanner terminar...';
+      } catch (err) {
+        btnCancelScan.disabled = false;
+        status.textContent = 'Erro ao cancelar: ' + (err.message || String(err));
+      }
+    });
+  }
+
+  subscribeApiEvent('on', 'scan:progress', (p) => {
     if (p.total > 0) {
+      activeScanTotal = Number(p.total) || activeScanTotal;
+      totalProcessed = Number(p.processed) || 0;
       const pct = (p.processed / p.total) * 100;
       progressFill.style.width = pct.toFixed(1) + '%';
       progressText.textContent = `${p.processed} / ${p.total}`;
@@ -1873,12 +2080,12 @@
     }
   });
 
-  window.api.on('scan:row', (r) => {
+  subscribeApiEvent('on', 'scan:row', (r) => {
     totalEmitted++;
     appendRow(r);
   });
 
-  window.api.on('scan:error', (e) => {
+  subscribeApiEvent('on', 'scan:error', (e) => {
     // Agregar erro para resumo final
     scanErrors.push(e);
 
@@ -1890,16 +2097,26 @@
     } else {
       console.warn('Scanner error:', e);
     }
+    if (running && e && e.ticker) {
+      status.textContent = `Falha em ${e.ticker}; a análise continua (${totalProcessed}/${e.total || '?'})`;
+    }
   });
 
-  window.api.on('scan:done', (d) => {
+  subscribeApiEvent('on', 'scan:done', (d) => {
     setRunning(false);
-    totalProcessed = d.totalProcessed;
-    progressFill.style.width = '100%';
-    progressText.textContent = `${d.totalProcessed} / ${d.totalProcessed}`;
+    activeScanRunId = null;
+    totalProcessed = Number(d.totalProcessed || d.processed || 0);
+    const total = Number(d.total || activeScanTotal || totalProcessed);
+    progressFill.style.width = total > 0 ? Math.round(totalProcessed / total * 100) + '%' : '100%';
+    progressText.textContent = `${totalProcessed} / ${total}`;
 
     // Construir mensagem de resumo com erros
-    let summaryMsg = `Concluído em ${(d.elapsedMs / 1000).toFixed(1)}s — ${d.totalSignals} sinais.`;
+    const wasCancelled = d.cancelled === true || d.status === 'cancelled' || scanCancelRequested;
+    let summaryMsg = wasCancelled
+      ? `Cancelado: ${totalProcessed}/${total} tickers processados — ${d.totalSignals || 0} sinais.`
+      : scanErrors.length > 0
+        ? `Concluído parcialmente em ${((d.elapsedMs || 0) / 1000).toFixed(1)}s — ${d.totalSignals || 0} sinais.`
+        : `Concluído em ${((d.elapsedMs || 0) / 1000).toFixed(1)}s — ${d.totalSignals || 0} sinais.`;
     if (scanErrors.length > 0) {
       const expectedCount = scanErrors.filter(e => /insuficientes|delisted|No data found/i.test(e.message || '')).length;
       const unexpectedCount = scanErrors.length - expectedCount;
@@ -1913,8 +2130,8 @@
     }
 
     status.textContent = summaryMsg;
-    footerSummary.textContent = `${d.totalSignals} sinais emitidos · ${d.totalProcessed} tickers processados`;
-    if (d.totalSignals === 0) {
+    footerSummary.textContent = `${d.totalSignals || 0} sinais emitidos · ${totalProcessed}/${total} tickers processados`;
+    if (!wasCancelled && (d.totalSignals || 0) === 0) {
       body.innerHTML = '<tr class="empty"><td colspan="12">Nenhum ativo cumpriu os critérios (Edge ≥ 15%, Volume ≥ 1.2× SMA20, direção válida).</td></tr>';
     }
   });
@@ -2881,6 +3098,7 @@
 
   async function syncAssetYahoo() {
     if (!currentAssetTicker || !assetDetailSyncBtn) return;
+    const syncingTicker = currentAssetTicker;
     assetDetailSyncBtn.disabled = true;
     if (assetDetailSyncSpinner) assetDetailSyncSpinner.hidden = false;
     if (assetDetailSyncBtn) {
@@ -2893,7 +3111,8 @@
     }
 
     try {
-      const res = await window.api.syncTickerYahoo(currentAssetTicker);
+      const res = await window.api.syncTickerYahoo(syncingTicker);
+      if (currentAssetTicker !== syncingTicker) return;
       if (!res || !res.ok) {
         if (assetDetailSyncStatus) {
           assetDetailSyncStatus.textContent = res && res.warning
@@ -2917,12 +3136,13 @@
       if (res.summary) updateAssetHistoryUI(res.summary);
       await updateWatchlistBadge(currentAssetTicker, res.summary);
     } catch (err) {
-      if (assetDetailSyncStatus) {
+      if (currentAssetTicker === syncingTicker && assetDetailSyncStatus) {
         assetDetailSyncStatus.textContent = 'Erro: ' + (err.message || String(err));
         assetDetailSyncStatus.className = 'asset-detail-sync-status is-error';
         assetDetailSyncStatus.hidden = false;
       }
     } finally {
+      if (currentAssetTicker !== syncingTicker) return;
       assetDetailSyncBtn.disabled = false;
       if (assetDetailSyncSpinner) assetDetailSyncSpinner.hidden = true;
       if (assetDetailSyncBtn) {
@@ -2955,6 +3175,7 @@
 
       try {
         const result = await window.api.downloadFullYahooHistory(ticker);
+        if (currentAssetTicker !== ticker) return;
         if (result && result.ok) {
           if (fullDownloadStatus) {
             fullDownloadStatus.textContent = `Sucesso: ${result.totalCandles} velas históricas descarregadas e guardadas!`;
@@ -2969,10 +3190,16 @@
             if (totalCandlesEl) totalCandlesEl.textContent = result.summary.totalCandles.toLocaleString('pt-PT');
 
             const historyZone = document.getElementById('history-summary-zone');
-            if (historyZone) historyZone.hidden = false;
+            if (historyZone) {
+              historyZone.hidden = false;
+              historyZone.style.display = 'block';
+            }
 
             const uploadZone = document.getElementById('upload-zone');
-            if (uploadZone) uploadZone.hidden = true;
+            if (uploadZone) {
+              uploadZone.hidden = true;
+              uploadZone.style.display = 'none';
+            }
 
             await updateWatchlistBadge(ticker, result.summary);
             const wlEntry = watchlist.find(w => w.ticker === ticker);
@@ -2991,11 +3218,12 @@
           }
         }
       } catch (err) {
-        if (fullDownloadStatus) {
+        if (currentAssetTicker === ticker && fullDownloadStatus) {
           fullDownloadStatus.textContent = `Erro ao contactar Yahoo Finance: ${err.message || String(err)}`;
           fullDownloadStatus.className = 'asset-detail-full-download-status is-error';
         }
       } finally {
+        if (currentAssetTicker !== ticker) return;
         fullDownloadBtn.disabled = false;
         btnLabel.textContent = originalLabel;
         if (fullDownloadSpinner) fullDownloadSpinner.hidden = true;
@@ -3099,21 +3327,23 @@
         renderModalState(!!(summary && summary.hasData), summary);
       }
 
-      if (assetImportSuccess) {
+       if (assetImportSuccess && currentAssetTicker === activeTicker) {
         assetImportSuccess.innerHTML = `✓ ${res.count} velas importadas para <strong>${escapeHtml(activeTicker)}</strong>`;
         assetImportSuccess.hidden = false;
       }
 
-      assetSelectedFile = null;
-      if (assetFileInput) assetFileInput.value = '';
-      if (assetFilePlaceholder) assetFilePlaceholder.hidden = false;
-      if (assetFileSelected) assetFileSelected.hidden = true;
+       if (currentAssetTicker === activeTicker) {
+         assetSelectedFile = null;
+         if (assetFileInput) assetFileInput.value = '';
+         if (assetFilePlaceholder) assetFilePlaceholder.hidden = false;
+         if (assetFileSelected) assetFileSelected.hidden = true;
+       }
 
       // Update main table (My List) row immediately to show the two date pills
       await updateWatchlistBadge(activeTicker, summary);
     } catch (err) {
-      if (assetImportProgressWrap) assetImportProgressWrap.hidden = true;
-      if (assetImportError) {
+      if (currentAssetTicker === activeTicker && assetImportProgressWrap) assetImportProgressWrap.hidden = true;
+      if (currentAssetTicker === activeTicker && assetImportError) {
         assetImportError.textContent = 'Erro na importação: ' + (err.message || String(err));
         assetImportError.hidden = false;
       }
@@ -3156,7 +3386,7 @@
     });
   }
 
-  window.api.on('ticker:synced', (s) => {
+  subscribeApiEvent('on', 'ticker:synced', (s) => {
     if (s.ticker && s.summary) {
       updateWatchlistBadge(s.ticker, s.summary);
       if (currentAssetTicker && s.ticker === currentAssetTicker) {
@@ -3165,7 +3395,7 @@
     }
   });
 
-  window.api.on('import-success', (s) => {
+  subscribeApiEvent('on', 'import-success', (s) => {
     if (s.ticker && s.summary) {
       updateWatchlistBadge(s.ticker, s.summary);
       if (currentAssetTicker && s.ticker === currentAssetTicker) {
@@ -3174,7 +3404,7 @@
     }
   });
 
-  window.api.on('scanner-sync-status', (s) => {
+  subscribeApiEvent('on', 'scanner-sync-status', (s) => {
     const statusLine = document.getElementById('status-line');
     if (!statusLine) return;
     const labels = {
@@ -3188,7 +3418,7 @@
   });
 
   // Listeners for sync-all progress and done events
-  window.api.on('sync-all-progress', (p) => {
+  subscribeApiEvent('on', 'sync-all-progress', (p) => {
     if (p && btnDownloadAllMylist) {
       const label = btnDownloadAllMylist.querySelector('span');
       if (label && p.current != null && p.total != null) {
@@ -3204,14 +3434,14 @@
     }
   });
 
-  window.api.on('sync-all-done', (p) => {
+  subscribeApiEvent('on', 'sync-all-done', (p) => {
     if (p && p.errorCount > 0 && typeof status !== 'undefined' && status) {
       status.textContent = `Sincronização concluída: ${p.updatedCount} atualizados, ${p.errorCount} erros.`;
     }
   });
 
-  if (window.api.onIndexDownloadProgress) {
-    window.api.onIndexDownloadProgress((p) => {
+  if (typeof window.api.onIndexDownloadProgress === 'function') {
+    subscribeApiEvent('onIndexDownloadProgress', null, (p) => {
       if (!p) return;
       if (p.status === 'done' && !p.ticker) {
         if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
@@ -3237,8 +3467,8 @@
     });
   }
 
-  if (window.api.onFirstDateProgress) {
-    window.api.onFirstDateProgress((p) => {
+  if (typeof window.api.onFirstDateProgress === 'function') {
+    subscribeApiEvent('onFirstDateProgress', null, (p) => {
       if (!p) return;
       if (p.status === 'done' && !p.ticker) {
         if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
@@ -3264,8 +3494,8 @@
     });
   }
 
-  if (window.api.onIndexFirstDateProgress) {
-    window.api.onIndexFirstDateProgress((data) => {
+  if (typeof window.api.onIndexFirstDateProgress === 'function') {
+    subscribeApiEvent('onIndexFirstDateProgress', null, (data) => {
       if (!data || !data.ticker || !data.firstDate) return;
       const { ticker, firstDate, current, total } = data;
       const item = watchlistEl.querySelector(`.watchlist-item[data-ticker="${CSS.escape(ticker)}"]`);
@@ -3285,8 +3515,8 @@
     });
   }
 
-  if (window.api.onIndexDateProgress) {
-    window.api.onIndexDateProgress((data) => {
+  if (typeof window.api.onIndexDateProgress === 'function') {
+    subscribeApiEvent('onIndexDateProgress', null, (data) => {
       if (!data || !data.ticker) return;
       const { ticker, current, total } = data;
       const pct = total > 0 ? Math.round(current / total * 100) : 0;
@@ -3317,6 +3547,38 @@
           if (wlEntry) wlEntry.first_date = data.firstDate;
         }
       }
+      if (data.error) indexDateErrors++;
     });
   }
+
+  if (typeof window.api.onCountryIndexProgress === 'function') {
+    subscribeApiEvent('onCountryIndexProgress', null, (data) => {
+      if (!data || !data.ticker || !countryImport || countryImport.cancelled || countryImport.finished) return;
+      const { current, total, ticker, firstDate, name, error } = data;
+      const pct = total > 0 ? Math.round(current / total * 100) : 0;
+      const dateLabel = firstDate ? fmtShortDate(firstDate) : (error ? 'erro Yahoo' : 'sem data');
+      if (indexBulkProgressLabel) {
+        indexBulkProgressLabel.textContent = error
+          ? `A importar ${data.indexName || ''}: [${current}/${total}] ${ticker} — falha: ${error}`
+          : `A importar ${data.indexName || ''}: [${current}/${total}] ${ticker} — ${name || ticker}: ${dateLabel}`;
+      }
+      if (indexBulkProgressFill) indexBulkProgressFill.style.width = pct + '%';
+      if (typeof status !== 'undefined' && status) {
+        status.textContent = error
+          ? `Falha em ${ticker}; a importação continua (${current}/${total}).`
+          : `A importar ${ticker} (${current}/${total})...`;
+      }
+    });
+  }
+
+  // Unsubscribe on renderer teardown. The preload API returns one cleanup
+  // function per subscription, so a reopened/hot-reloaded window cannot
+  // accumulate callbacks or update detached DOM.
+  window.addEventListener('beforeunload', () => {
+    for (const unsubscribe of apiUnsubscribers.splice(0)) {
+      try { unsubscribe(); } catch (_) { /* window is already closing */ }
+    }
+    countryImport = null;
+    activeScanRunId = null;
+  }, { once: true });
 })();

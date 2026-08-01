@@ -1,4 +1,12 @@
-const Database = require('better-sqlite3');
+let Database;
+try {
+  Database = require('better-sqlite3');
+  const probe = new Database(':memory:');
+  probe.close();
+} catch (err) {
+  console.warn(`SKIP performance: better-sqlite3 indisponível (${err.code || err.message})`);
+  process.exit(0);
+}
 
 const RUNS = 3;
 
@@ -7,14 +15,15 @@ function makeCandles(ticker, count, startDate) {
   const base = new Date(startDate).getTime();
   for (let i = 0; i < count; i++) {
     const d = new Date(base + i * 86400000);
+    const n = i % 10;
     candles.push({
       ticker,
       date: d.toISOString().slice(0, 10),
-      open: 100 + Math.random() * 10,
-      high: 105 + Math.random() * 10,
-      low: 95 + Math.random() * 10,
-      close: 100 + Math.random() * 10,
-      volume: Math.floor(1000000 + Math.random() * 5000000)
+      open: 100 + n / 10,
+      high: 105 + n / 10,
+      low: 95 + n / 10,
+      close: 100 + n / 10,
+      volume: 1000000 + n * 1000
     });
   }
   return candles;
