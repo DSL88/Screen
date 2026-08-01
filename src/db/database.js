@@ -591,12 +591,35 @@ class DB {
   }
 
   getStocksByIndex(indexName = null) {
-    if (indexName) {
-      return this.db.prepare(
-        "SELECT ticker, name, country, index_name, first_date FROM stocks WHERE UPPER(index_name) = UPPER(?) ORDER BY ticker"
-      ).all(indexName);
+    if (!indexName || indexName === 'ALL') {
+      return this.db.prepare(`SELECT * FROM stocks ORDER BY ticker ASC`).all();
     }
-    return this.db.prepare("SELECT ticker, name, country, index_name, first_date FROM stocks ORDER BY ticker").all();
+    return this.db.prepare(`
+      SELECT * FROM stocks
+      WHERE LOWER(TRIM(index_name)) = LOWER(TRIM(?))
+      ORDER BY ticker ASC
+    `).all(indexName);
+  }
+
+  checkIndexDataStatus(indexName) {
+    const stocks = this.getStocksByIndex(indexName);
+    if (!stocks || stocks.length === 0) {
+      return { hasStocks: false, hasPrices: false, totalStocks: 0, stocksWithDataCount: 0, stocks: [] };
+    }
+    const tickers = stocks.map(s => s.ticker);
+    const placeholders = tickers.map(() => '?').join(',');
+    const result = this.db.prepare(`
+      SELECT COUNT(DISTINCT ticker) as stocksWithData
+      FROM historical_prices
+      WHERE ticker IN (${placeholders})
+    `).get(...tickers);
+    return {
+      hasStocks: true,
+      hasPrices: (result ? result.stocksWithData > 0 : false),
+      totalStocks: stocks.length,
+      stocksWithDataCount: (result ? result.stocksWithData : 0),
+      stocks
+    };
   }
 
   upsertStock(stock) {
@@ -617,7 +640,7 @@ class DB {
     this.db.prepare('UPDATE stocks SET full_history_fetched = 1 WHERE ticker = ?').run(ticker);
   }
 
-  setStockFirstDate(ticker, firstDate) {
+  updateStockFirstDate(ticker, firstDate) {
     return this.db.prepare('UPDATE stocks SET first_date = ? WHERE ticker = ?').run(firstDate || null, ticker);
   }
 

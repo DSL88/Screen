@@ -834,6 +834,31 @@
     });
   }
 
+  if (selectIndexBulkFetch) {
+    selectIndexBulkFetch.addEventListener('change', async () => {
+      const idx = selectIndexBulkFetch.value;
+      if (!idx) return;
+      try {
+        const s = await window.api.checkIndexStatus(idx);
+        if (s && s.ok) {
+          if (!s.hasStocks) {
+            if (typeof status !== 'undefined' && status) status.textContent = 'Nenhum ativo associado ao índice.';
+          } else if (s.hasPrices) {
+            if (typeof status !== 'undefined' && status) {
+              status.textContent = `Índice ${idx}: ${s.totalStocks} ativos registados, ${s.stocksWithDataCount} com histórico local.`;
+            }
+          } else {
+            const msg = `Possui ${s.totalStocks} ativos registados, mas sem histórico de velas locais. Clica em 'Mapear 1ª Data' para registar as datas de início.`;
+            if (typeof status !== 'undefined' && status) status.textContent = msg;
+            showToast(msg, 'error');
+          }
+        } else if (s && s.error) {
+          if (typeof status !== 'undefined' && status) status.textContent = 'Erro: ' + s.error;
+        }
+      } catch (_) { /* ignora */ }
+    });
+  }
+
   function openAddModal() {
     if (!modalAdd) return;
     populateIndexDropdown();
