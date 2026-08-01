@@ -156,29 +156,45 @@
       </div>
 
       <div class="tab-content" id="tab-mylist">
-        <header class="topbar mylist-topbar">
-          <div class="topbar-info">
-            <h1>My List</h1>
-            <p>Watchlist pessoal organizada por índices de mercado. Clica num ativo para ver detalhes e sincronizar.</p>
-          </div>
-          <div class="topbar-actions">
-            <div class="mylist-search-wrap">
-              <span class="mylist-search-icon"></span>
-              <input type="text" id="my-list-search" class="mylist-search-input" placeholder="Pesquisar por Ticker ou Nome..." autocomplete="off" spellcheck="false" />
-              <button class="mylist-search-clear" id="my-list-search-clear" type="button" aria-label="Limpar pesquisa" hidden>×</button>
+        <div class="mylist-toolbar">
+          <div class="toolbar-group search-group">
+            <div class="search-input-wrapper">
+              <i class="search-icon">🔍</i>
+              <input type="text" id="mylist-search-input" placeholder="Pesquisar por Ticker ou Nome..." class="toolbar-input" />
             </div>
-            <button class="btn-primary" id="btn-sync-all-stocks" title="Sincronizar todos os ativos da lista com o Yahoo Finance">
-              <span class="btn-label">🔄 Sincronizar / Atualizar Lista</span>
-              <span class="spinner" id="sync-all-spinner" hidden></span>
-            </button>
-            <button class="btn-secondary" id="btn-purge-inactive" title="Remover ativos das listas sem registos de cotação nos últimos 60 dias">
-              <span>Limpar Ativos Inativos / Antigos do Índice</span>
-            </button>
-            <button class="btn-secondary" id="btn-import-csv">
-              <span>Importar CSV</span>
+          </div>
+
+          <div class="toolbar-group index-actions-group">
+            <select id="select-index-bulk-fetch" class="toolbar-select">
+              <option value="" disabled selected>Selecionar Índice...</option>
+            </select>
+            <button id="btn-fetch-index-history" class="btn btn-secondary toolbar-btn" title="Descarregar histórico completo de todos os ativos deste índice">
+              <i class="toolbar-btn-icon">📥</i><span>Histórico do Índice</span>
             </button>
           </div>
-        </header>
+
+          <div class="toolbar-group global-actions-group">
+            <button id="btn-download-all-mylist" class="btn btn-primary toolbar-btn" title="Descarregar histórico de todos os ativos da My List">
+              <i class="toolbar-btn-icon">⬇️</i><span>Baixar Tudo</span>
+            </button>
+            <button id="btn-add-stock-modal" class="btn btn-success toolbar-btn" title="Adicionar novo ativo à My List">
+              <i class="toolbar-btn-icon">➕</i><span>Adicionar Ativo</span>
+            </button>
+            <button id="btn-import-csv" class="btn btn-secondary toolbar-btn" title="Importar histórico de CSV">
+              <i class="toolbar-btn-icon">📄</i><span>Importar CSV</span>
+            </button>
+            <button id="btn-purge-inactive" class="btn btn-secondary toolbar-btn" title="Remover ativos sem registos de cotação nos últimos 60 dias">
+              <i class="toolbar-btn-icon">🧹</i><span>Limpar Inativos</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="index-bulk-progress" id="index-bulk-progress" hidden>
+          <div class="index-bulk-progress-label" id="index-bulk-progress-label"></div>
+          <div class="index-bulk-progress-track">
+            <div class="index-bulk-progress-fill" id="index-bulk-progress-fill"></div>
+          </div>
+        </div>
 
         <section class="mylist-content">
           <div class="mylist-grid">

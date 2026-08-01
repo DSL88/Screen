@@ -3568,10 +3568,10 @@ select.param-input option {
   position: fixed;
   z-index: 9999;
   pointer-events: none;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
+  background: #1e222d;
+  border: 1px solid #363c4e;
   border-radius: 8px;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
   padding: 12px 14px;
   min-width: 200px;
   max-width: 320px;
@@ -3588,11 +3588,13 @@ select.param-input option {
   flex-direction: column;
   gap: 2px;
   margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #363c4e;
 }
 .hover-card-title {
   font-size: 13px;
   font-weight: 700;
-  color: var(--text);
+  color: #ffffff;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3600,7 +3602,7 @@ select.param-input option {
 .hover-card-ticker {
   font-family: var(--mono);
   font-size: 11px;
-  color: var(--accent-hover);
+  color: #2962ff;
 }
 .hover-card-body {
   display: flex;
@@ -3614,9 +3616,194 @@ select.param-input option {
   font-size: 11px;
 }
 .hover-card-label {
-  color: var(--text-mute);
+  color: #787b86;
 }
 .hover-card-value {
   font-family: var(--mono);
+  color: #089981;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   INDEX BULK FETCH
+   ═══════════════════════════════════════════════════════════ */
+.index-bulk-fetch-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.index-bulk-select {
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  height: 38px;
+}
+.index-bulk-progress {
+  width: 100%;
+  margin-top: 8px;
+}
+.index-bulk-progress-label {
+  font-size: 11px;
   color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.index-bulk-progress-track {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.index-bulk-progress-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--bull-soft), var(--bull));
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}
+.index-bulk-fetch-wrap .btn-secondary:disabled {
+  background: var(--surface-2);
+  color: var(--text-mute);
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MY LIST TOOLBAR (TradingView-style)
+   ═══════════════════════════════════════════════════════════ */
+.mylist-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 32px;
+  background: #131722;
+  border-bottom: 1px solid #2a2e39;
+}
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.search-group {
+  flex: 1;
+  min-width: 220px;
+}
+.index-actions-group {
+  flex-wrap: wrap;
+}
+.global-actions-group {
+  flex-wrap: wrap;
+}
+.search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-style: normal;
+  font-size: 14px;
+  opacity: 0.8;
+  pointer-events: none;
+}
+.toolbar-input,
+.toolbar-select {
+  height: 38px;
+  background: #1e222d;
+  color: #d1d4dc;
+  border: 1px solid #2a2e39;
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.toolbar-input {
+  width: 100%;
+  padding: 0 12px 0 32px;
+}
+.toolbar-input::placeholder {
+  color: #787b86;
+}
+.toolbar-input:focus,
+.toolbar-select:focus {
+  border-color: #2962ff;
+  background: #2a2e39;
+}
+.toolbar-select {
+  min-width: 180px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  border-radius: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.toolbar-btn .toolbar-btn-icon {
+  font-style: normal;
+  font-size: 14px;
+  line-height: 1;
+}
+.toolbar-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.mylist-toolbar .btn-secondary {
+  background-color: #2a2e39;
+  color: #d1d4dc;
+  border: 1px solid #363c4e;
+}
+.mylist-toolbar .btn-secondary:hover {
+  background-color: #363c4e;
+  color: #ffffff;
+}
+.mylist-toolbar .btn-primary {
+  background-color: #2962ff;
+  color: #ffffff;
+}
+.mylist-toolbar .btn-primary:hover {
+  background-color: #1e53e5;
+}
+.mylist-toolbar .btn-success {
+  background-color: #089981;
+  color: #ffffff;
+}
+.mylist-toolbar .btn-success:hover {
+  background-color: #067d69;
+}
+.mylist-toolbar .btn-primary,
+.mylist-toolbar .btn-secondary,
+.mylist-toolbar .btn-success {
+  box-shadow: none;
+  transform: none;
+}
+.mylist-toolbar .btn-primary::before {
+  display: none;
+}
+.mylist-toolbar .btn-secondary:disabled,
+.mylist-toolbar .btn-primary:disabled,
+.mylist-toolbar .btn-success:disabled {
+  background-color: #2a2e39;
+  color: #787b86;
+  cursor: not-allowed;
+  opacity: 1;
+  transform: none;
 }
