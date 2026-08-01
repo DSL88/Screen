@@ -1034,6 +1034,25 @@ body {
   border: 1px solid rgba(52, 211, 153, 0.20);
   color: var(--bull);
 }
+.wl-pill-full {
+  border: 1px solid var(--border);
+  font-family: var(--font);
+  letter-spacing: 0;
+}
+.wl-pill-history-full {
+  background: var(--bull-soft);
+  border-color: rgba(52, 211, 153, 0.25);
+  color: var(--bull);
+}
+.wl-pill-history-partial {
+  background: var(--warn-soft);
+  border-color: rgba(251, 191, 36, 0.25);
+  color: var(--warn);
+}
+.wl-pill-history-empty {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-mute);
+}
 .wl-pill-empty {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);
@@ -3667,6 +3686,17 @@ select.param-input option {
   background: linear-gradient(90deg, var(--bull-soft), var(--bull));
   border-radius: 3px;
   transition: width 0.2s ease;
+}
+.import-cancel-btn {
+  color: var(--bear) !important;
+  border-color: rgba(251, 113, 133, 0.35) !important;
+}
+.import-cancel-btn:not([hidden]) {
+  display: inline-flex;
+}
+.btn-cancel-operation {
+  color: var(--bear);
+  border-color: rgba(251, 113, 133, 0.35);
 }
 .index-bulk-fetch-wrap .btn-secondary:disabled {
   background: var(--surface-2);

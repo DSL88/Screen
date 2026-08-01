@@ -1,6 +1,37 @@
 const path = require('path');
 const Database = require('better-sqlite3');
 const { getLastExpectedTradingDay } = require('../utils/dateUtils');
+const { WORLD_INDICES } = require('../data/tickerLists');
+
+function normalizeIndexValue(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+// The database stores the stable id (SP500, DAX40, ...), never the label
+// shown by the UI.  Keeping this conversion here also makes old databases
+// safe to read after the labels in the UI change.
+const INDEX_IDS = new Map();
+for (const index of WORLD_INDICES || []) {
+  const values = [index.id, index.name, ...(index.aliases || [])];
+  for (const value of values) {
+    const normalized = normalizeIndexValue(value);
+    if (normalized) INDEX_IDS.set(normalized, index.id);
+  }
+}
+
+function canonicalIndexId(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  return INDEX_IDS.get(normalizeIndexValue(raw)) || raw;
+}
+
+function canonicalTicker(value) {
+  return String(value || '').trim().toUpperCase();
+}
 
 const DEFAULT_PARAMS = {
   edge_threshold: 0.15,
@@ -13,6 +44,10 @@ class DB {
   constructor(userDataPath) {
     this.db = null;
     this.userDataPath = userDataPath;
+  }
+
+  canonicalIndexId(value) {
+    return canonicalIndexId(value);
   }
 
   init() {
@@ -162,16 +197,27 @@ class DB {
       const customCols = this.db.prepare("PRAGMA table_info(custom_tickers)").all();
       const customColsSet = new Set(customCols.map(c => c.name));
       if (!customColsSet.has('country')) {
-        this.db.exec('ALTER TABLE custom_tickers ADD COLUMN country TEXT');
+        try { this.db.exec('ALTER TABLE custom_tickers ADD COLUMN country TEXT'); } catch (_) { /* already added */ }
       }
       if (!customColsSet.has('index_name')) {
-        this.db.exec('ALTER TABLE custom_tickers ADD COLUMN index_name TEXT');
+        try { this.db.exec('ALTER TABLE custom_tickers ADD COLUMN index_name TEXT'); } catch (_) { /* already added */ }
       }
 
       const stockCols = this.db.prepare("PRAGMA table_info(stocks)").all();
       const stockColsSet = new Set(stockCols.map(c => c.name));
+      // Some very early databases had a minimal stocks table.  Add every
+      // metadata column defensively so the UPSERT below is always valid.
+      if (!stockColsSet.has('name')) {
+        try { this.db.exec("ALTER TABLE stocks ADD COLUMN name TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already added */ }
+      }
+      if (!stockColsSet.has('country')) {
+        try { this.db.exec("ALTER TABLE stocks ADD COLUMN country TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already added */ }
+      }
+      if (!stockColsSet.has('index_name')) {
+        try { this.db.exec("ALTER TABLE stocks ADD COLUMN index_name TEXT NOT NULL DEFAULT ''"); } catch (_) { /* already added */ }
+      }
       if (!stockColsSet.has('full_history_fetched')) {
-        this.db.exec('ALTER TABLE stocks ADD COLUMN full_history_fetched INTEGER DEFAULT 0');
+        try { this.db.exec('ALTER TABLE stocks ADD COLUMN full_history_fetched INTEGER DEFAULT 0'); } catch (_) { /* already added */ }
       }
       if (!stockColsSet.has('first_date')) {
         try {
@@ -180,6 +226,29 @@ class DB {
           // Another process may have added the column between PRAGMA and ALTER.
         }
       }
+
+      // Older releases stored labels such as "EUA — S&P 500" in this
+      // column.  Convert them once, defensively, before any indexed query.
+      const stockRows = this.db.prepare('SELECT ticker, index_name FROM stocks').all();
+      const updateStockIndex = this.db.prepare('UPDATE stocks SET index_name = ? WHERE ticker = ?');
+      for (const row of stockRows) {
+        const id = canonicalIndexId(row.index_name);
+        if (id && id !== row.index_name) updateStockIndex.run(id, row.ticker);
+      }
+      const customRows = this.db.prepare('SELECT ticker, index_name FROM custom_tickers').all();
+      const updateCustomIndex = this.db.prepare('UPDATE custom_tickers SET index_name = ? WHERE ticker = ?');
+      for (const row of customRows) {
+        const id = canonicalIndexId(row.index_name);
+        if (id && id !== row.index_name) updateCustomIndex.run(id, row.ticker);
+      }
+      // custom_tickers did not have index metadata in another old schema;
+      // recover it from stocks when the ticker is shared.
+      this.db.exec(`
+        UPDATE custom_tickers
+        SET index_name = (SELECT s.index_name FROM stocks s WHERE s.ticker = custom_tickers.ticker)
+        WHERE (index_name IS NULL OR TRIM(index_name) = '')
+          AND EXISTS (SELECT 1 FROM stocks s WHERE s.ticker = custom_tickers.ticker AND s.index_name IS NOT NULL)
+      `);
 
       this._migrateRecalculateSLTP();
     });
@@ -308,29 +377,32 @@ class DB {
   }
 
   addCustomTicker(t) {
-    const country = t.country || '';
-    const indexName = t.indexName || t.index_name || t.index || '';
+    const country = String(t.country || '').trim();
+    const indexName = canonicalIndexId(t.indexName || t.index_name || t.index || '');
+    const ticker = canonicalTicker(t.ticker);
     this.db.prepare(`
+      INSERT INTO custom_tickers (ticker, name, exchange, type, country, index_name)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(ticker) DO UPDATE SET
+        name = CASE WHEN NULLIF(excluded.name, '') IS NULL THEN custom_tickers.name ELSE excluded.name END,
+        exchange = CASE WHEN NULLIF(excluded.exchange, '') IS NULL THEN custom_tickers.exchange ELSE excluded.exchange END,
+        type = CASE WHEN NULLIF(excluded.type, '') IS NULL THEN custom_tickers.type ELSE excluded.type END,
+        country = CASE WHEN NULLIF(excluded.country, '') IS NULL THEN custom_tickers.country ELSE excluded.country END,
+        index_name = CASE WHEN NULLIF(excluded.index_name, '') IS NULL THEN custom_tickers.index_name ELSE excluded.index_name END
+    `).run(ticker, t.name || '', t.exchange || '', t.type || '', country, indexName);
+  }
+
+  addCustomTickersBulk(list) {
+    if (!Array.isArray(list) || list.length === 0) return { changes: 0 };
+    const stmt = this.db.prepare(`
       INSERT INTO custom_tickers (ticker, name, exchange, type, country, index_name)
       VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(ticker) DO UPDATE SET
         name = excluded.name,
         exchange = excluded.exchange,
         type = excluded.type,
-        country = excluded.country,
-        index_name = excluded.index_name
-    `).run(t.ticker, t.name || '', t.exchange || '', t.type || '', country, indexName);
-  }
-
-  addCustomTickersBulk(list) {
-    if (!Array.isArray(list) || list.length === 0) return { changes: 0 };
-    const stmt = this.db.prepare(`
-      INSERT INTO custom_tickers (ticker, name, exchange, type)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(ticker) DO UPDATE SET
-        name = excluded.name,
-        exchange = excluded.exchange,
-        type = excluded.type
+        country = CASE WHEN NULLIF(excluded.country, '') IS NULL THEN custom_tickers.country ELSE excluded.country END,
+        index_name = CASE WHEN NULLIF(excluded.index_name, '') IS NULL THEN custom_tickers.index_name ELSE excluded.index_name END
     `);
     const tx = this.db.transaction((items) => {
       let changes = 0;
@@ -341,7 +413,9 @@ class DB {
           tk,
           item.name || item.nome || '',
           item.exchange || item.mercado || '',
-          item.type || item.tipo || ''
+          item.type || item.tipo || '',
+          item.country || '',
+          canonicalIndexId(item.indexName || item.index_name || item.index || '')
         );
         changes += r.changes || 0;
       }
@@ -459,15 +533,23 @@ class DB {
     if (!Array.isArray(candles) || candles.length === 0) return { changes: 0 };
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume)
+      INSERT INTO historical_prices (ticker, date, open, high, low, close, volume)
       VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(ticker, date) DO UPDATE SET
+        open = excluded.open, high = excluded.high, low = excluded.low,
+        close = excluded.close, volume = excluded.volume
+      WHERE historical_prices.open IS NOT excluded.open
+         OR historical_prices.high IS NOT excluded.high
+         OR historical_prices.low IS NOT excluded.low
+         OR historical_prices.close IS NOT excluded.close
+         OR historical_prices.volume IS NOT excluded.volume
     `);
 
     const tx = this.db.transaction((rows) => {
       let changes = 0;
       for (const c of rows) {
         const r = stmt.run(
-          c.ticker,
+          canonicalTicker(c.ticker),
           c.date,
           c.open,
           c.high,
@@ -487,8 +569,16 @@ class DB {
     if (!Array.isArray(entries) || entries.length === 0) return { changes: 0 };
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume)
+      INSERT INTO historical_prices (ticker, date, open, high, low, close, volume)
       VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(ticker, date) DO UPDATE SET
+        open = excluded.open, high = excluded.high, low = excluded.low,
+        close = excluded.close, volume = excluded.volume
+      WHERE historical_prices.open IS NOT excluded.open
+         OR historical_prices.high IS NOT excluded.high
+         OR historical_prices.low IS NOT excluded.low
+         OR historical_prices.close IS NOT excluded.close
+         OR historical_prices.volume IS NOT excluded.volume
     `);
 
     const tx = this.db.transaction((batch) => {
@@ -496,7 +586,7 @@ class DB {
       for (const entry of batch) {
         for (const c of entry.candles) {
           const r = stmt.run(
-            entry.ticker,
+            canonicalTicker(entry.ticker),
             c.date,
             c.open,
             c.high,
@@ -590,19 +680,20 @@ class DB {
 
   getStockByTicker(ticker) {
     return this.db.prepare(
-      'SELECT ticker, name, country, index_name, first_date FROM stocks WHERE ticker = ?'
-    ).get(ticker);
+      'SELECT ticker, name, country, index_name, first_date, full_history_fetched FROM stocks WHERE ticker = ?'
+    ).get(canonicalTicker(ticker));
   }
 
   getStocksByIndex(indexName = null) {
     if (!indexName || indexName === 'ALL') {
       return this.db.prepare(`SELECT * FROM stocks ORDER BY ticker ASC`).all();
     }
+    const indexId = canonicalIndexId(indexName);
     return this.db.prepare(`
       SELECT * FROM stocks
-      WHERE LOWER(TRIM(index_name)) = LOWER(TRIM(?))
+      WHERE index_name = ?
       ORDER BY ticker ASC
-    `).all(indexName);
+    `).all(indexId);
   }
 
   checkIndexDataStatus(indexName) {
@@ -627,17 +718,27 @@ class DB {
   }
 
   upsertStock(stock) {
-    const name = stock.name || stock.ticker || '';
-    const country = stock.country || '';
-    const indexName = stock.indexName || stock.index_name || stock.index || '';
-    this.db.prepare(`
-      INSERT INTO stocks (ticker, name, country, index_name)
-      VALUES (?, ?, ?, ?)
+    const ticker = canonicalTicker(stock.ticker);
+    const name = String(stock.name || '').trim();
+    const country = String(stock.country || '').trim();
+    const indexName = canonicalIndexId(stock.indexName || stock.index_name || stock.index || '');
+    const rawFirstDate = stock.firstDate ?? stock.first_date;
+    const firstDate = rawFirstDate == null || String(rawFirstDate).trim() === '' ? null : String(rawFirstDate).trim();
+    const fullHistoryInput = stock.fullHistoryFetched ?? stock.full_history_fetched;
+    const hasFullHistory = fullHistoryInput != null && String(fullHistoryInput).trim() !== '';
+    const fullHistoryFetched = hasFullHistory
+      ? (Number(fullHistoryInput) ? 1 : 0)
+      : null;
+    return this.db.prepare(`
+      INSERT INTO stocks (ticker, name, country, index_name, first_date, full_history_fetched)
+      VALUES (?, ?, ?, ?, ?, COALESCE(?, 0))
       ON CONFLICT(ticker) DO UPDATE SET
-        name = excluded.name,
-        country = excluded.country,
-        index_name = excluded.index_name
-    `).run(stock.ticker, name, country, indexName);
+        name = CASE WHEN NULLIF(excluded.name, '') IS NULL THEN stocks.name ELSE excluded.name END,
+        country = CASE WHEN NULLIF(excluded.country, '') IS NULL THEN stocks.country ELSE excluded.country END,
+        index_name = CASE WHEN NULLIF(excluded.index_name, '') IS NULL THEN stocks.index_name ELSE excluded.index_name END,
+        first_date = CASE WHEN NULLIF(excluded.first_date, '') IS NULL THEN stocks.first_date ELSE excluded.first_date END,
+        full_history_fetched = COALESCE(?, stocks.full_history_fetched)
+    `).run(ticker, name, country, indexName, firstDate, fullHistoryFetched, fullHistoryFetched);
   }
 
   setFullHistoryFetched(ticker) {
@@ -645,15 +746,16 @@ class DB {
   }
 
   updateStockFirstDate(ticker, firstDate) {
-    const symbol = String(ticker || '').trim();
+    const symbol = canonicalTicker(ticker);
     const baseSymbol = symbol.replace(/\.[A-Z]{1,4}$/i, '');
+    const value = firstDate == null || String(firstDate).trim() === '' ? null : String(firstDate).trim();
     return this.db.prepare(
       'UPDATE stocks SET first_date = ? WHERE LOWER(ticker) = LOWER(?) OR LOWER(ticker) = LOWER(?)'
-    ).run(firstDate || null, symbol, baseSymbol);
+    ).run(value, symbol, baseSymbol);
   }
 
   getFullHistoryFetched(ticker) {
-    const row = this.db.prepare('SELECT full_history_fetched FROM stocks WHERE ticker = ?').get(ticker);
+    const row = this.db.prepare('SELECT full_history_fetched FROM stocks WHERE ticker = ?').get(canonicalTicker(ticker));
     return row ? !!row.full_history_fetched : false;
   }
 
@@ -664,15 +766,23 @@ class DB {
     const sorted = [...candles].sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
 
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume)
+      INSERT INTO historical_prices (ticker, date, open, high, low, close, volume)
       VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(ticker, date) DO UPDATE SET
+        open = excluded.open, high = excluded.high, low = excluded.low,
+        close = excluded.close, volume = excluded.volume
+      WHERE historical_prices.open IS NOT excluded.open
+         OR historical_prices.high IS NOT excluded.high
+         OR historical_prices.low IS NOT excluded.low
+         OR historical_prices.close IS NOT excluded.close
+         OR historical_prices.volume IS NOT excluded.volume
     `);
 
     const tx = this.db.transaction((rows) => {
       let changes = 0;
       for (const c of rows) {
         const r = stmt.run(
-          ticker,
+          canonicalTicker(ticker),
           c.date,
           c.open,
           c.high,
@@ -764,9 +874,16 @@ class DB {
   }
 
   deleteHistoricalPrices(ticker) {
-    const result = this.db.prepare(
-      'DELETE FROM historical_prices WHERE ticker = ?'
-    ).run(ticker);
+    const tx = this.db.transaction(() => {
+      const result = this.db.prepare(
+        'DELETE FROM historical_prices WHERE ticker = ?'
+      ).run(canonicalTicker(ticker));
+      // A deleted history is no longer a successfully fetched full history.
+      this.db.prepare('UPDATE stocks SET full_history_fetched = 0 WHERE ticker = ?')
+        .run(canonicalTicker(ticker));
+      return result;
+    });
+    const result = tx();
     return { changes: result.changes || 0 };
   }
 
@@ -823,6 +940,13 @@ class DB {
       return this.db.prepare('SELECT ticker FROM stocks ORDER BY ticker ASC').all().map(r => r.ticker);
     }
 
+    // Indexes are persisted by canonical id.  Do not fall back to all rows:
+    // a typo or a label from a legacy client must never import another index.
+    const canonicalId = canonicalIndexId(indexName);
+    return this.db.prepare(
+      'SELECT ticker FROM stocks WHERE index_name = ? ORDER BY ticker ASC'
+    ).all(canonicalId).map(r => r.ticker);
+
     const raw = String(indexName).trim();
     // Extrai o nome limpo removendo prefixos de país (ex: "EUA — S&P 500" vira "S&P 500")
     let cleanIndex = raw;
@@ -875,8 +999,8 @@ class DB {
   getCustomTickersByIndex(indexName = null) {
     if (indexName) {
       return this.db.prepare(
-        'SELECT ticker FROM custom_tickers WHERE UPPER(index_name) = UPPER(?) ORDER BY ticker'
-      ).all(indexName).map(r => r.ticker);
+        'SELECT ticker FROM custom_tickers WHERE index_name = ? ORDER BY ticker'
+      ).all(canonicalIndexId(indexName)).map(r => r.ticker);
     }
     return this.db.prepare(
       'SELECT ticker FROM custom_tickers ORDER BY ticker'

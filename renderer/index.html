@@ -100,6 +100,7 @@
               <span class="btn-label">Iniciar Análise Diária</span>
               <span class="spinner" id="spinner" hidden></span>
             </button>
+            <button class="btn-secondary btn-cancel-operation" id="btn-cancel-scan" type="button" hidden>Cancelar</button>
             <select id="mc-filter" class="mc-filter-select">
               <option value="all">Todos os Sinais (MC ≥ 50%)</option>
               <option value="elite">Apenas Elite (MC ≥ 65%)</option>
@@ -162,6 +163,26 @@
               <i class="search-icon">🔍</i>
               <input type="text" id="mylist-search-input" placeholder="Pesquisar por Ticker ou Nome..." class="toolbar-input" />
             </div>
+          </div>
+
+          <div class="toolbar-group country-index-group">
+            <select id="select-country-filter" class="toolbar-select" title="Importar o índice oficial do país">
+              <option value="" selected>Selecionar País...</option>
+              <option value="Portugal">Portugal — PSI</option>
+              <option value="Espanha">Espanha — IBEX 35</option>
+              <option value="Alemanha">Alemanha — DAX 40</option>
+              <option value="EUA">EUA — S&amp;P 500</option>
+              <option value="França">França — CAC 40</option>
+              <option value="Holanda">Holanda — AEX 25</option>
+              <option value="Suíça">Suíça — SMI</option>
+              <option value="Itália">Itália — FTSE MIB</option>
+              <option value="Reino Unido">Reino Unido — FTSE 100</option>
+              <option value="Japão">Japão — Nikkei 225</option>
+              <option value="Hong Kong">Hong Kong — Hang Seng</option>
+            </select>
+            <button id="btn-cancel-country-import" class="btn btn-secondary toolbar-btn import-cancel-btn" type="button" hidden>
+              <span>Cancelar importação</span>
+            </button>
           </div>
 
           <div class="toolbar-group index-actions-group">
