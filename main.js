@@ -1170,6 +1170,113 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('download-full-history-for-index', async (_event, indexName) => {
+      const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
+      if (!index) return { ok: false, error: 'missing-index-name' };
+      if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'window-unavailable' };
+
+      const CHUNK_SIZE = 3;
+      const sleep = ms => new Promise(res => setTimeout(res, ms));
+
+      try {
+        const stocks = db.getStocksByIndex(index);
+        if (!stocks || stocks.length === 0) {
+          return { ok: true, total: 0, updated: 0, errorCount: 0, errors: [], message: 'Nenhum ativo para este índice na SQLite.' };
+        }
+
+        const tickers = stocks.map(s => s.ticker);
+        const total = tickers.length;
+        const errors = [];
+        let updated = 0;
+        let completed = 0;
+
+        for (let i = 0; i < tickers.length; i += CHUNK_SIZE) {
+          const chunk = tickers.slice(i, i + CHUNK_SIZE);
+
+          const results = await Promise.all(chunk.map(async (ticker, chunkIdx) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('index-download-progress', {
+                current: completed + chunkIdx + 1,
+                total,
+                ticker,
+                status: 'syncing'
+              });
+            }
+            try {
+              const candles = await yahooClient.fetchFullYahooHistory(ticker);
+              if (!candles || candles.length === 0) {
+                return { ticker, status: 'noop' };
+              }
+              return { ticker, candles, status: 'updated' };
+            } catch (err) {
+              return { ticker, status: 'error', error: err.message || String(err) };
+            }
+          }));
+
+          const updatedEntries = results.filter(r => r.status === 'updated');
+          if (updatedEntries.length > 0) {
+            try {
+              db.saveHistoricalCandlesBatch(updatedEntries.map(r => ({ ticker: r.ticker, candles: r.candles })));
+              for (const r of updatedEntries) {
+                db.cacheOHLCV(r.ticker, r.candles);
+                try { db.setFullHistoryFetched(r.ticker); } catch (_) {}
+                r.summary = db.getHistoricalSummary(r.ticker);
+              }
+            } catch (err) {
+              const message = err.message || String(err);
+              for (const r of updatedEntries) {
+                r.status = 'error';
+                r.error = message;
+                delete r.candles;
+              }
+            }
+          }
+
+          completed += chunk.length;
+
+          for (const r of results) {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('index-download-progress', {
+                current: completed,
+                total,
+                ticker: r.ticker,
+                status: r.status,
+                summary: r.summary || null,
+                firstDate: (r.summary && r.summary.firstDate) || null,
+                candles: (r.candles && r.candles.length) || 0,
+                error: r.error || null
+              });
+            }
+            if (r.status === 'error') {
+              errors.push({ ticker: r.ticker, error: r.error });
+            } else if (r.status === 'updated') {
+              updated++;
+            }
+          }
+
+          if (i + CHUNK_SIZE < tickers.length) {
+            await sleep(200 + Math.random() * 300);
+          }
+        }
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('index-download-progress', {
+            current: total,
+            total,
+            ticker: '',
+            status: 'done',
+            updated,
+            errorCount: errors.length,
+            firstDate: null
+          });
+        }
+
+        return { ok: true, total, updated, errorCount: errors.length, errors };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     createWindow();
   } catch (err) {
     console.error('Fatal init error:', err);

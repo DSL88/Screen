@@ -587,6 +587,15 @@ class DB {
     ).get(ticker);
   }
 
+  getStocksByIndex(indexName = null) {
+    if (indexName) {
+      return this.db.prepare(
+        "SELECT ticker, name, country, index_name FROM stocks WHERE UPPER(index_name) = UPPER(?) ORDER BY ticker"
+      ).all(indexName);
+    }
+    return this.db.prepare("SELECT ticker, name, country, index_name FROM stocks ORDER BY ticker").all();
+  }
+
   upsertStock(stock) {
     const name = stock.name || stock.ticker || '';
     const country = stock.country || '';
