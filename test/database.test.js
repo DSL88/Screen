@@ -98,3 +98,45 @@ test('bulk custom tickers aceita aliases e é repetível', { skip: !SQLITE_AVAIL
   db.close();
   removeTempDir(dir);
 });
+
+test('deleteIndexAndStocks remove o índice e os seus ativos em cascata, sem tocar em outros índices', { skip: !SQLITE_AVAILABLE }, async () => {
+  const dir = makeTempDir();
+  const db = new DB(dir);
+  await db.init();
+
+  db.upsertStock({ ticker: 'A.LS', name: 'A', country: 'Portugal', indexName: 'PSI' });
+  db.upsertStock({ ticker: 'B.LS', name: 'B', country: 'Portugal', indexName: 'PSI' });
+  db.upsertStock({ ticker: 'C.MC', name: 'C', country: 'Espanha', indexName: 'DAX 40' });
+  db.addCustomTicker({ ticker: 'A.LS', name: 'A', country: 'Portugal', indexName: 'PSI' });
+  db.addCustomTicker({ ticker: 'B.LS', name: 'B', country: 'Portugal', indexName: 'PSI' });
+  db.addCustomTicker({ ticker: 'C.MC', name: 'C', country: 'Espanha', indexName: 'DAX 40' });
+  db.saveHistoricalCandlesFromImport('A.LS', [makeCandle('A.LS', '2024-01-01'), makeCandle('A.LS', '2024-01-02')]);
+  db.saveHistoricalCandlesFromImport('B.LS', [makeCandle('B.LS', '2024-01-01')]);
+  db.saveHistoricalCandlesFromImport('C.MC', [makeCandle('C.MC', '2024-01-01')]);
+
+  const result = db.deleteIndexAndStocks(' psi ');
+  assert.equal(result.success, true);
+  assert.equal(result.indexName, 'psi');
+  assert.equal(result.deletedStocksCount, 2);
+  assert.equal(result.deletedPricesCount, 3);
+  assert.equal(result.deletedCustomCount, 2);
+
+  assert.equal(db.db.prepare("SELECT COUNT(*) AS n FROM stocks WHERE LOWER(TRIM(index_name)) = 'psi'").get().n, 0);
+  assert.equal(db.db.prepare('SELECT COUNT(*) AS n FROM historical_prices WHERE ticker IN (?, ?)').get('A.LS', 'B.LS').n, 0);
+  assert.equal(db.db.prepare("SELECT COUNT(*) AS n FROM custom_tickers WHERE LOWER(TRIM(index_name)) = 'psi'").get().n, 0);
+
+  const sp500 = db.deleteIndexAndStocks('dax40');
+  assert.equal(sp500.success, true);
+  assert.equal(sp500.deletedStocksCount, 1);
+
+  const missing = db.deleteIndexAndStocks('SP500');
+  assert.equal(missing.success, true);
+  assert.equal(missing.deletedStocksCount, 0);
+
+  const noName = db.deleteIndexAndStocks('  ');
+  assert.equal(noName.success, false);
+  assert.equal(noName.error, 'missing-index-name');
+
+  db.close();
+  removeTempDir(dir);
+});

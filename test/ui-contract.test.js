@@ -28,3 +28,11 @@ test('HTML mantém controles necessários para progresso, cancelamento e My List
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
 });
+
+test('eliminação de índice pede confirmação antes de invocar o IPC e recarrega a My List', () => {
+  assert.match(html, /id=["']btn-delete-index["']/);
+  assert.match(renderer, /window\.api\.deleteIndexWithStocks\(indexId\)/);
+  assert.match(renderer, /openConfirmModal\(\{/);
+  assert.match(renderer, /confirmLabel:\s*'Sim, Apagar Tudo'/);
+  assert.match(renderer, /await reloadMyListFromDatabase\(\);/);
+});

@@ -944,6 +944,57 @@ class DB {
     };
   }
 
+  // ═══════════════════════════════════════════════════════════
+  //  DELETE INDEX — Remover um índice e todos os seus ativos
+  // ═══════════════════════════════════════════════════════════
+  deleteIndexAndStocks(indexName) {
+    const name = String(indexName || '').trim();
+    if (!name) {
+      return { success: false, error: 'missing-index-name' };
+    }
+
+    const tx = this.db.transaction((idx) => {
+      // Passo A: tickers pertencentes ao índice (filtro insensível a
+      // maiúsculas/minúsculas e espaços).
+      const matched = this.db.prepare(
+        'SELECT ticker FROM stocks WHERE LOWER(TRIM(index_name)) = LOWER(TRIM(?))'
+      ).all(idx);
+
+      // Passo B: eliminar o histórico de cotações desses tickers.
+      const prices = this.db.prepare(
+        'DELETE FROM historical_prices WHERE ticker IN (' +
+        '  SELECT ticker FROM stocks WHERE LOWER(TRIM(index_name)) = LOWER(TRIM(?))' +
+        ')'
+      ).run(idx);
+
+      // Passo C: eliminar os registos de metadados.
+      const stocks = this.db.prepare(
+        'DELETE FROM stocks WHERE LOWER(TRIM(index_name)) = LOWER(TRIM(?))'
+      ).run(idx);
+
+      // A My List é alimentada pela tabela custom_tickers; remover também os
+      // ativos do índice dessa lista para que a UI reflita a eliminação.
+      const custom = this.db.prepare(
+        'DELETE FROM custom_tickers WHERE LOWER(TRIM(index_name)) = LOWER(TRIM(?))'
+      ).run(idx);
+
+      return {
+        tickers: matched.map(r => r.ticker),
+        deletedStocksCount: stocks.changes || 0,
+        deletedPricesCount: prices.changes || 0,
+        deletedCustomCount: custom.changes || 0
+      };
+    });
+
+    const result = tx(name);
+    return {
+      success: true,
+      indexName: name,
+      deletedStocksCount: result.deletedStocksCount,
+      ...result
+    };
+  }
+
   getTickersForIndex(indexName = null) {
     if (!indexName || indexName === 'ALL') {
       return this.db.prepare('SELECT ticker FROM stocks ORDER BY ticker ASC').all().map(r => r.ticker);

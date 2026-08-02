@@ -19,3 +19,9 @@ test('cancelamento e progresso final fazem parte do contrato IPC', () => {
   assert.match(main, /status: 'done'/);
   assert.match(main, /state: finalStatus/);
 });
+
+test('eliminação de índice expõe um único handler e preload coerente', () => {
+  assert.equal((main.match(/ipcMain\.handle\(['"]delete-index-with-stocks['"]/g) || []).length, 1);
+  assert.match(main, /db\.deleteIndexAndStocks\(indexName\)/);
+  assert.match(preload, /deleteIndexWithStocks:\s*\(indexName\)\s*=>\s*ipcRenderer\.invoke\('delete-index-with-stocks', indexName\)/);
+});
