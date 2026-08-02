@@ -78,6 +78,7 @@
   const selectCountryFilter = document.getElementById('select-country-filter');
   const selectIndexBulkFetch = document.getElementById('select-index-bulk-fetch');
   const btnFetchFirstDate = document.getElementById('btn-update-index-dates');
+  const btnDeleteIndex = document.getElementById('btn-delete-index');
   const btnCancelCountryImport = document.getElementById('btn-cancel-country-import');
   const indexBulkProgress = document.getElementById('index-bulk-progress');
   const indexBulkProgressLabel = document.getElementById('index-bulk-progress-label');
@@ -911,6 +912,57 @@
     });
   }
 
+  if (btnDeleteIndex) {
+    btnDeleteIndex.addEventListener('click', async () => {
+      const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
+      if (!idx) {
+        showToast('Seleciona primeiro um índice para eliminar.', 'error');
+        return;
+      }
+      const selectedOption = selectIndexBulkFetch && selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0];
+      const idxLabel = selectedOption ? selectedOption.textContent : idx;
+      const indexId = idx;
+      const assets = watchlist.filter(w => canonicalIndexId(w.indexId || w.indexName) === indexId);
+      const count = assets.length;
+
+      const ok = await openConfirmModal({
+        title: `Eliminar Índice ${idxLabel}`,
+        message: `Tens a certeza que desejas apagar o Índice <strong>${escapeHtml(idxLabel)}</strong> e todos os <strong>${count}</strong> ${count === 1 ? 'ativo' : 'ativos'} pertencentes a esta lista? Esta ação irá eliminar o histórico e os metadados associados da base de dados.`,
+        confirmLabel: 'Sim, Apagar Tudo',
+        cancelLabel: 'Cancelar',
+        danger: true
+      });
+      if (!ok) return;
+
+      btnDeleteIndex.disabled = true;
+      const span = btnDeleteIndex.querySelector('span');
+      const originalText = span ? span.textContent : btnDeleteIndex.textContent;
+      if (span) span.textContent = 'A eliminar...';
+
+      try {
+        const res = await window.api.deleteIndexWithStocks(indexId);
+        if (!res || !res.ok) {
+          const errMsg = (res && res.error) || 'desconhecido';
+          showToast('Erro ao eliminar índice: ' + errMsg, 'error');
+          if (typeof status !== 'undefined' && status) status.textContent = 'Erro ao eliminar índice: ' + errMsg;
+          return;
+        }
+        const deleted = res.deletedStocksCount || 0;
+        const msg = `Índice ${idxLabel} e ${deleted} ${deleted === 1 ? 'ativo' : 'ativos'} eliminados com sucesso.`;
+        showToast(msg, 'success');
+        if (typeof status !== 'undefined' && status) status.textContent = msg;
+        await reloadMyListFromDatabase();
+        if (selectIndexBulkFetch) selectIndexBulkFetch.value = '';
+      } catch (err) {
+        showToast('Erro ao eliminar índice: ' + (err.message || String(err)), 'error');
+        if (typeof status !== 'undefined' && status) status.textContent = 'Erro: ' + (err.message || String(err));
+      } finally {
+        btnDeleteIndex.disabled = false;
+        if (span) span.textContent = originalText;
+      }
+    });
+  }
+
   if (selectIndexBulkFetch) {
     selectIndexBulkFetch.addEventListener('change', async () => {
       const idx = selectIndexBulkFetch.value;
@@ -943,7 +995,7 @@
       // Country import and index-wide downloads touch the same records. Keep
       // those controls coherent, but do not freeze search, add, purge or the
       // rest of My List.
-      [selectCountryFilter, selectIndexBulkFetch, btnFetchFirstDate]
+      [selectCountryFilter, selectIndexBulkFetch, btnFetchFirstDate, btnDeleteIndex]
         .filter(Boolean).forEach(control => { control.disabled = isBusy; });
       if (btnCancelCountryImport) {
         btnCancelCountryImport.hidden = !isBusy;

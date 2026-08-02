@@ -1472,6 +1472,18 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('delete-index-with-stocks', async (_event, indexName) => {
+      if (!indexName || typeof indexName !== 'string' || !indexName.trim()) {
+        return { ok: false, error: 'missing-index-name' };
+      }
+      try {
+        const result = db.deleteIndexAndStocks(indexName);
+        return { ok: true, ...result };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     ipcMain.handle('UPDATE_INDEX_FIRST_DATES', async (event, input) => {
       const { index, operationId: requestedId } = indexInput(input);
       if (!index) return { ok: false, success: false, status: 'failed', error: 'missing-index-name' };

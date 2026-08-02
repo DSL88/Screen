@@ -30,6 +30,9 @@ test('preload expõe IPC permitido, remove listeners e bloqueia canais arbitrár
     api.startScan([{ ticker: 'AAA' }], { edge_threshold: 0.2 });
     assert.equal(ipcRenderer.invoked[0].channel, 'scan:start');
     assert.deepEqual(ipcRenderer.invoked[0].payload.tickers, [{ ticker: 'AAA' }]);
+    api.deleteIndexWithStocks('PSI');
+    assert.equal(ipcRenderer.invoked[1].channel, 'delete-index-with-stocks');
+    assert.equal(ipcRenderer.invoked[1].payload, 'PSI');
   } finally {
     Module._load = originalLoad;
     delete require.cache[preload];

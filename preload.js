@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('api', {
   purgeInactiveStocks: (daysCutoff = 60) => ipcRenderer.invoke('db:purgeInactive', { daysCutoff }),
   syncAllListStocks: (indexFilter) => ipcRenderer.invoke('sync-all-list-stocks', indexFilter),
   checkListFreshness: (indexFilter) => ipcRenderer.invoke('check-list-freshness', indexFilter),
+  deleteIndexWithStocks: (indexName) => ipcRenderer.invoke('delete-index-with-stocks', indexName),
   downloadIndexFullHistory: (indexId, operationId) => ipcRenderer.invoke('download-full-history-for-index', { indexId, operationId }),
   onIndexDownloadProgress: (callback) => {
     const handler = (_event, data) => callback(data);
