@@ -1762,6 +1762,16 @@ body {
 }
 .footer-meta { color: var(--text-dim); }
 
+/* ── Histórico de Trades: resumo global ── */
+.history-summary {
+  padding: 18px 32px 6px;
+}
+.history-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
 /* ═══════════════════════════════════════════════════════════
    MY LIST TAB
    ═══════════════════════════════════════════════════════════ */

@@ -471,7 +471,7 @@ class Scanner {
         if (hit) {
           const sign = trade.direcao === 'COMPRA' ? 1 : -1;
           const resultado = ((hit.price - trade.preco_entrada) / trade.preco_entrada) * sign;
-          this.db.closeActiveTrade(trade.id, hit.price, resultado);
+          this.db.closeActiveTrade(trade.id, hit.price, resultado, hit.reason);
           closed.push({
             id: trade.id,
             ticker: trade.ticker,
