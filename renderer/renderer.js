@@ -2755,6 +2755,11 @@
   const historyStatus = document.getElementById('history-status');
   const historySummary = document.getElementById('history-summary');
   const btnClearHistory = document.getElementById('btn-clear-history');
+  const historySummaryPanel = document.getElementById('history-summary-panel');
+  const historySummaryTp = document.getElementById('history-summary-tp');
+  const historySummarySl = document.getElementById('history-summary-sl');
+  const historySummaryNet = document.getElementById('history-summary-net');
+  const historySummaryNetCard = document.getElementById('history-summary-net-card');
 
   function renderHistoryRow(trade) {
     const tr = document.createElement('tr');
@@ -2805,12 +2810,68 @@
         if (btnClearHistory) btnClearHistory.disabled = false;
       }
 
+      renderHistorySummary(closed);
+
       historySummary.textContent = `${closed.length} trade${closed.length !== 1 ? 's' : ''} no histórico`;
       historyStatus.textContent = closed.length > 0
         ? `${closed.length} operações fechadas registadas.`
         : 'Registo completo de todas as operações fechadas.';
     } catch (err) {
       historyStatus.textContent = 'Erro: ' + (err.message || String(err));
+    }
+  }
+
+  function renderHistorySummary(closed) {
+    if (!historySummaryPanel) return;
+    if (!Array.isArray(closed) || closed.length === 0) {
+      historySummaryPanel.hidden = true;
+      return;
+    }
+    historySummaryPanel.hidden = false;
+
+    let totalTp = 0;
+    let totalSl = 0;
+    let countTp = 0;
+    let countSl = 0;
+
+    for (const t of closed) {
+      const r = Number(t.resultado_pct) || 0;
+      const motivo = String(t.motivo_fecho || '').toLowerCase();
+      let kind = 'manual';
+      if (motivo === 'take_profit') kind = 'tp';
+      else if (motivo === 'stop_loss') kind = 'sl';
+      else if (motivo === 'auto' || motivo === '') kind = r >= 0 ? 'tp' : 'sl';
+
+      if (kind === 'tp') { totalTp += r; countTp++; }
+      else if (kind === 'sl') { totalSl += r; countSl++; }
+    }
+
+    const net = totalTp + totalSl;
+    const fmt = v => (v * 100).toFixed(2) + '%';
+
+    if (historySummaryTp) {
+      historySummaryTp.textContent = `${fmt(totalTp)}`;
+      historySummaryTp.parentElement.querySelector('.metric-lbl').textContent =
+        `Take Profit · ${countTp} trade${countTp !== 1 ? 's' : ''}`;
+    }
+    if (historySummarySl) {
+      historySummarySl.textContent = `${fmt(totalSl)}`;
+      historySummarySl.parentElement.querySelector('.metric-lbl').textContent =
+        `Stop Loss · ${countSl} trade${countSl !== 1 ? 's' : ''}`;
+    }
+
+    if (historySummaryNet) {
+      const label = net > 0
+        ? `Ganho Global · ${fmt(net)}`
+        : net < 0
+          ? `Perda Global · ${fmt(net)}`
+          : `Neutro · ${fmt(net)}`;
+      historySummaryNet.textContent = `${net > 0 ? '+' : ''}${(net * 100).toFixed(2)}%`;
+      historySummaryNet.parentElement.querySelector('.metric-lbl').textContent = label;
+      if (historySummaryNetCard) {
+        historySummaryNetCard.classList.remove('is-good', 'is-bad', 'is-warn', 'is-neutral');
+        historySummaryNetCard.classList.add(net > 0 ? 'is-good' : net < 0 ? 'is-bad' : 'is-neutral');
+      }
     }
   }
 

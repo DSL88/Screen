@@ -465,13 +465,13 @@ class DB {
     ).all(limit);
   }
 
-  closeActiveTrade(id, precoFecho, resultadoPct) {
+  closeActiveTrade(id, precoFecho, resultadoPct, motivo = 'auto') {
     this.db.prepare(`
       UPDATE active_trades
       SET status = 'fechado', resultado_pct = ?, preco_fecho = ?,
           motivo_fecho = ?, fechado_em = ?
       WHERE id = ?
-    `).run(resultadoPct, precoFecho, 'auto', new Date().toISOString().slice(0, 10), id);
+    `).run(resultadoPct, precoFecho, motivo, new Date().toISOString().slice(0, 10), id);
   }
 
   removeActiveTrade(id) {

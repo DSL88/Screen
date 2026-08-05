@@ -571,7 +571,7 @@ app.whenReady().then(async () => {
             if (msg.payload.closed && msg.payload.closed.length > 0) {
               for (const c of msg.payload.closed) {
                 try {
-                  db.closeActiveTrade(c.id, c.exitPrice, c.resultado);
+                  db.closeActiveTrade(c.id, c.exitPrice, c.resultado, c.motivo_fecho);
                 } catch (err) {
                   console.error('[trade:update] Falha ao fechar trade:', err.message);
                 }
