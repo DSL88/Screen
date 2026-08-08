@@ -70,6 +70,7 @@
   const btnFreshnessGoMylist = document.getElementById('btn-freshness-go-mylist');
   const btnFreshnessContinue = document.getElementById('btn-freshness-continue');
   let freshnessOverride = false;
+  let expectedTradingDay = null;
   const toastContainer = document.getElementById('toast-container');
   const hoverCard = document.getElementById('stock-hover-card');
   const hoverCardName = document.getElementById('hover-card-name');
@@ -363,10 +364,36 @@
   // Track collapsed state per index group
   const collapsedGroups = new Set();
 
+  async function refreshExpectedTradingDay() {
+    try {
+      const freshness = await window.api.checkListFreshness(null);
+      if (freshness && freshness.ok && freshness.expectedDate) {
+        const next = String(freshness.expectedDate);
+        if (next !== expectedTradingDay) {
+          expectedTradingDay = next;
+          renderWatchlist();
+        }
+      }
+    } catch (err) {
+      console.warn('refreshExpectedTradingDay failed:', err);
+    }
+  }
+
   function getCardSyncState(t) {
+    if (t.ultimaData && expectedTradingDay) {
+      if (t.ultimaData >= expectedTradingDay) return 'card-synced';
+      return t.temHistorico ? 'card-outdated' : 'card-pending';
+    }
     if (t.fullHistoryFetched) return 'card-synced';
     if (t.temHistorico) return 'card-outdated';
     return 'card-pending';
+  }
+
+  function applyCardSyncState(item, t) {
+    if (!item) return;
+    item.classList.remove('card-pending', 'card-outdated', 'card-synced');
+    const syncState = getCardSyncState(t);
+    if (syncState) item.classList.add(syncState);
   }
 
   function renderWatchlist(highlightTicker) {
@@ -550,9 +577,7 @@
     const newBadge = temp.firstChild;
     oldPills.replaceWith(newBadge);
 
-    item.classList.remove('card-pending', 'card-outdated', 'card-synced');
-    const syncState = getCardSyncState(updated);
-    if (syncState) item.classList.add(syncState);
+    applyCardSyncState(item, updated);
   }
 
   function guessStockMetadata(ticker, exchange) {
@@ -1516,6 +1541,7 @@
   async function loadInitial() {
     try {
       await reloadMyListFromDatabase();
+      void refreshExpectedTradingDay();
 
       const paramsRes = await window.api.getParams();
       if (paramsRes && paramsRes.ok) {
@@ -2011,8 +2037,9 @@
             ? freshness.maxStoredDate.split('-').reverse().join('-')
             : '—';
           freshnessBannerMessage.innerHTML =
-            `⚠️ A base de dados tem cotações até <strong>${maxDateFormatted}</strong>, mas a última sessão de mercado esperada é <strong>${expectedDateFormatted}</strong>. ` +
-            `Por favor, acede à aba <strong>"My List"</strong> e clica em <strong>"Atualizar"</strong> antes de fazer a análise.`;
+            `⚠️ A sua base de dados local tem cotações pendentes de atualização ` +
+            `(dados até <strong>${maxDateFormatted}</strong>, última sessão de mercado esperada <strong>${expectedDateFormatted}</strong>). ` +
+            `Atualize a <strong>"My List"</strong> para resultados 100% precisos.`;
           freshnessBanner.hidden = false;
           return; // Stop the scan initiation
         }
@@ -3277,8 +3304,7 @@
             if (wlEntry) wlEntry.fullHistoryFetched = true;
             const cardEl = watchlistEl.querySelector('.watchlist-item[data-ticker="' + CSS.escape(ticker) + '"]');
             if (cardEl) {
-              cardEl.classList.remove('card-pending', 'card-outdated', 'card-synced');
-              cardEl.classList.add('card-synced');
+              applyCardSyncState(cardEl, wlEntry || { ticker, temHistorico: true, ultimaData: result.summary.lastDate, fullHistoryFetched: true });
             }
           }
         } else {
@@ -3532,7 +3558,8 @@
         const item = watchlistEl.querySelector(`.watchlist-item[data-ticker="${CSS.escape(p.ticker)}"]`);
         if (item) {
           item.dataset.firstDate = p.firstDate ? fmtShortDate(p.firstDate) : 'Sem Registos';
-          item.classList.add('card-synced');
+          const wlEntry = watchlist.find(w => w.ticker === p.ticker);
+          applyCardSyncState(item, wlEntry || { ticker: p.ticker, temHistorico: true, ultimaData: p.lastDate });
         }
       }
     });

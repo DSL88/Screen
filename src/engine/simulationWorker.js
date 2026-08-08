@@ -78,8 +78,28 @@ async function handleStart({ runId, universe, params }) {
   }
 
   const built = [];
-  for (const u of list) {
+  let lastLoadAt = 0;
+  let lastTicker = null;
+  for (let i = 0; i < list.length; i++) {
+    const u = list[i];
     if (cancelRequested.has(runId)) break;
+
+    lastTicker = u.ticker;
+    const now = Date.now();
+    if (now - lastLoadAt >= PROGRESS_THROTTLE_MS) {
+      lastLoadAt = now;
+      const current = i + 1;
+      send({
+        type: 'simProgress',
+        payload: {
+          runId,
+          current,
+          total: list.length,
+          ticker: u.ticker,
+          percent: Math.round((current / list.length) * 100)
+        }
+      });
+    }
 
     let candles = null;
     try {
@@ -116,13 +136,13 @@ async function handleStart({ runId, universe, params }) {
         const now = Date.now();
         if (percent < 100 && now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
         lastProgressAt = now;
-        send({ type: 'simProgress', payload: { runId, percent } });
+        send({ type: 'simProgress', payload: { runId, percent, ticker: lastTicker } });
       },
       onStatus(message) {
         const now = Date.now();
         if (now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
         lastProgressAt = now;
-        send({ type: 'simProgress', payload: { runId, percent: lastPercent, message } });
+        send({ type: 'simProgress', payload: { runId, percent: lastPercent, message, ticker: lastTicker } });
       },
       cancelled: () => cancelRequested.has(runId)
     }
