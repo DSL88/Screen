@@ -31,6 +31,8 @@ for (const idx of tickerLists.WORLD_INDICES || []) {
 let mainWindow = null;
 let db = null;
 let scannerWorker = null;
+let simulationWorker = null;
+let activeSimulationRunId = null;
 let activePipelineOperation = null;
 
 function operationId(prefix) {
@@ -287,6 +289,74 @@ function getScannerWorker() {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Worker Thread — gestão da simulação fora do Main Process
+// ═══════════════════════════════════════════════════════════
+function getSimulationWorker() {
+  if (simulationWorker && !simulationWorker.isTerminated) return simulationWorker;
+
+  simulationWorker = new Worker(path.join(__dirname, 'src/engine/simulationWorker.js'));
+
+  simulationWorker.on('message', (msg) => {
+    switch (msg.type) {
+      case 'simProgress':
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('simulation:progress', msg.payload);
+        }
+        break;
+
+      case 'simResult':
+        if (activeSimulationRunId === msg.payload.runId) activeSimulationRunId = null;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('simulation:result', msg.payload);
+        }
+        break;
+
+      case 'simError':
+        if (activeSimulationRunId === msg.payload.runId) activeSimulationRunId = null;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('simulation:error', msg.payload);
+        }
+        break;
+
+      case 'getAllHistoricalPrices': {
+        const requestId = msg.requestId;
+        try {
+          const prices = db.getAllHistoricalPrices(msg.payload.ticker);
+          simulationWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: true,
+            data: prices
+          });
+        } catch (err) {
+          simulationWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: false,
+            error: err.message
+          });
+        }
+        break;
+      }
+    }
+  });
+
+  simulationWorker.on('error', (err) => {
+    console.error('[SimWorker] Erro fatal:', err);
+    activeSimulationRunId = null;
+    simulationWorker = null;
+  });
+
+  simulationWorker.on('exit', (code) => {
+    if (code !== 0) console.error('[SimWorker] Terminou com código', code);
+    activeSimulationRunId = null;
+    simulationWorker = null;
+  });
+
+  return simulationWorker;
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Auto-tuning adaptativo (replicado do Scanner, mas no main)
 // ═══════════════════════════════════════════════════════════
 function _tuneAdaptiveParams() {
@@ -491,6 +561,96 @@ app.whenReady().then(async () => {
     // ═══════════════════════════════════════════════════════
     ipcMain.handle('scan:cancel', async (_event, payload) => {
       const worker = getScannerWorker();
+      worker.postMessage({ action: 'cancel', runId: payload?.runId });
+      return { ok: true };
+    });
+
+    // ═══════════════════════════════════════════════════════
+    //  SIMULATION — Execução via Worker Thread
+    // ═══════════════════════════════════════════════════════
+    ipcMain.handle('simulation:options', async () => {
+      try {
+        const stocks = db.getStocksByIndex('ALL');
+        const seen = new Set();
+        const indices = [];
+        for (const s of stocks) {
+          const id = s.index_name || '';
+          if (id && !seen.has(id)) {
+            seen.add(id);
+            indices.push({ id, name: indexNames[id] || id });
+          }
+        }
+        const custom = db.getCustomTickers();
+        const assets = (Array.isArray(custom) ? custom : []).map(t => {
+          const stock = db.getStockByTicker(t.ticker);
+          return {
+            ticker: t.ticker,
+            name: t.name || t.ticker,
+            indexName: (stock && stock.index_name) || t.index_name || ''
+          };
+        });
+        return { ok: true, indices, assets };
+      } catch (err) {
+        console.error('[simulation:options] Error:', err.message);
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('simulation:start', async (_event, payload) => {
+      if (!mainWindow) return { ok: false, error: 'window-unavailable' };
+      if (activeSimulationRunId) return { ok: false, error: 'simulation-in-progress' };
+      const universeInput = payload?.universe || {};
+      const mode = universeInput.mode || 'all';
+      let universe = [];
+
+      if (mode === 'index') {
+        // Consistente com o modo "all" (My List): o universo por índice
+        // são os ativos de custom_tickers desse índice. Fallback para a
+        // tabela stocks se a My List não tiver ativos desse índice.
+        const indexName = String(universeInput.index || '').trim();
+        let rows = [];
+        try {
+          rows = db.db.prepare(
+            'SELECT ticker, name FROM custom_tickers WHERE LOWER(TRIM(index_name)) = LOWER(TRIM(?)) ORDER BY ticker'
+          ).all(indexName);
+        } catch (_) { /* fallback abaixo */ }
+        if (rows.length === 0) {
+          const stocks = db.getStocksByIndex(indexName);
+          rows = (Array.isArray(stocks) ? stocks : []).map(s => ({ ticker: s.ticker, name: s.name }));
+        }
+        universe = rows.map(r => ({ ticker: r.ticker, name: r.name || r.ticker }));
+      } else if (mode === 'single') {
+        const ticker = String(universeInput.ticker || '').toUpperCase().trim();
+        if (ticker) universe = [{ ticker, name: ticker }];
+      } else {
+        const custom = db.getCustomTickers();
+        universe = (Array.isArray(custom) ? custom : []).map(t => ({ ticker: t.ticker, name: t.name || t.ticker }));
+      }
+
+      if (universe.length === 0) {
+        return { ok: false, error: 'empty-universe' };
+      }
+
+      const runId = 'sim_' + Date.now();
+      activeSimulationRunId = runId;
+      try {
+        getSimulationWorker().postMessage({
+          action: 'start',
+          runId,
+          universe,
+          params: payload?.params
+        });
+      } catch (err) {
+        activeSimulationRunId = null;
+        console.error('[simulation:start] Falha ao iniciar:', err.message || err);
+        return { ok: false, error: err.message || String(err) };
+      }
+
+      return { ok: true, runId, count: universe.length };
+    });
+
+    ipcMain.handle('simulation:cancel', async (_event, payload) => {
+      const worker = getSimulationWorker();
       worker.postMessage({ action: 'cancel', runId: payload?.runId });
       return { ok: true };
     });
@@ -1785,6 +1945,9 @@ app.on('activate', () => {
 app.on('before-quit', () => {
   if (scannerWorker && !scannerWorker.isTerminated) {
     scannerWorker.terminate();
+  }
+  if (simulationWorker && !simulationWorker.isTerminated) {
+    simulationWorker.terminate();
   }
   if (db) db.close();
 });

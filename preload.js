@@ -15,7 +15,10 @@ const ALLOWED_EVENTS = new Set([
   'index-first-date-progress',
   'index-date-progress',
   'UPDATE_INDEX_DATE_PROGRESS',
-  'country-index-progress'
+  'country-index-progress',
+  'simulation:progress',
+  'simulation:result',
+  'simulation:error'
 ]);
 
 contextBridge.exposeInMainWorld('api', {
@@ -97,6 +100,24 @@ contextBridge.exposeInMainWorld('api', {
   },
   importHistoricalCsv: () => ipcRenderer.invoke('import-historical-csv'),
   importHistoricalData: (data) => ipcRenderer.invoke('import-historical-data', data),
+  simulationStart: (payload) => ipcRenderer.invoke('simulation:start', payload),
+  simulationCancel: (runId) => ipcRenderer.invoke('simulation:cancel', { runId }),
+  simulationOptions: () => ipcRenderer.invoke('simulation:options'),
+  onSimulationProgress: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('simulation:progress', handler);
+    return () => ipcRenderer.removeListener('simulation:progress', handler);
+  },
+  onSimulationResult: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('simulation:result', handler);
+    return () => ipcRenderer.removeListener('simulation:result', handler);
+  },
+  onSimulationError: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('simulation:error', handler);
+    return () => ipcRenderer.removeListener('simulation:error', handler);
+  },
   on: (channel, callback) => {
     if (!ALLOWED_EVENTS.has(channel)) {
       throw new Error(`Channel "${channel}" is not allowed`);
