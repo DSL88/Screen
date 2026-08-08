@@ -4,19 +4,60 @@ const readline = require('readline');
 
 const REQUIRED_COLUMNS = ['date', 'open', 'high', 'low', 'close', 'volume'];
 
+// Aliases normalizados (minúsculas, sem acentos) por coluna canónica.
+// Aceita cabeçalhos em Português e Inglês.
+const COLUMN_ALIASES = {
+  date: ['date', 'data'],
+  open: ['open', 'abertura'],
+  high: ['high', 'maxima'],
+  low: ['low', 'minima'],
+  close: ['close', 'fechamento'],
+  volume: ['volume'],
+  ticker: ['ticker', 'ativo', 'simbolo', 'symbol']
+};
+
+function normalizeHeader(header) {
+  return header.trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function columnAliases(canonical) {
+  return COLUMN_ALIASES[canonical] || [canonical];
+}
+
+function findColumnIndex(headers, target) {
+  const aliases = columnAliases(target);
+  return headers.findIndex(h => aliases.includes(normalizeHeader(h)));
+}
+
+// Converte números aceitando vírgula decimal (formato europeu) e
+// separadores de milhar (1.234,56 ou 1,234.56).
+function toNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : NaN;
+  if (typeof value !== 'string') return NaN;
+  let s = value.trim().replace(/\s/g, '');
+  if (!s) return NaN;
+  const hasDot = s.indexOf('.') !== -1;
+  const hasComma = s.indexOf(',') !== -1;
+  if (hasComma && hasDot) {
+    // 1.234,56 → pontos de milhar + vírgula decimal
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
+    // 1,234.56 → vírgulas de milhar + ponto decimal
+    else s = s.replace(/,/g, '');
+  } else if (hasComma) {
+    s = s.replace(',', '.');
+  }
+  return parseFloat(s);
+}
+
 function excelDateToJSDate(serial) {
   const utc_days = Math.floor(serial - 25569);
   const utc_value = utc_days * 86400;
   const date_info = new Date(utc_value * 1000);
   return date_info.toISOString().slice(0, 10);
-}
-
-function normalizeHeader(header) {
-  return header.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function findColumnIndex(headers, target) {
-  return headers.findIndex(h => normalizeHeader(h) === target);
 }
 
 function padDate(y, m, d) {
@@ -65,6 +106,17 @@ function normalizeDate(dateStr) {
   return padDate(y, m, d);
 }
 
+// Detecta o delimitador de colunas (preferindo o mais frequente no cabeçalho).
+// Isto permite ficheiros com vírgula decimal ("1,5") quando o separador é ";".
+function detectDelimiter(headerLine) {
+  const candidates = [
+    [';', (headerLine.match(/;/g) || []).length],
+    [',', (headerLine.match(/,/g) || []).length],
+    ['\t', (headerLine.match(/\t/g) || []).length]
+  ].sort((a, b) => b[1] - a[1]);
+  return candidates[0][1] > 0 ? candidates[0][0] : ',';
+}
+
 function parseCSV(filePath) {
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
@@ -72,7 +124,11 @@ function parseCSV(filePath) {
     return { ok: false, error: 'CSV file must have a header and at least one data row' };
   }
 
-  const headers = lines[0].split(/[;,\t]/).map(h => h.trim());
+  const delimiter = detectDelimiter(lines[0]);
+  const splitLine = line => line.split(delimiter).map(v => v.trim());
+
+  const headers = splitLine(lines[0]);
+  const colCount = headers.length;
   const colMap = {};
   for (const required of REQUIRED_COLUMNS) {
     const idx = findColumnIndex(headers, required);
@@ -84,7 +140,23 @@ function parseCSV(filePath) {
 
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(/[;,\t]/).map(v => v.trim());
+    const values = splitLine(lines[i]);
+    // Guarda anti-corrupção: se uma linha tem mais campos do que o cabeçalho,
+    // provavelmente o separador de colunas colide com a vírgula decimal (ex:
+    // ficheiro com vírgula a separar colunas e também decimais). Falha com
+    // mensagem clara em vez de persistir dados desalinhados. Tolera apenas um
+    // separador terminal em vírgula (linha acaba em ",").
+    if (values.length > colCount) {
+      const trailingEmpty = values.length === colCount + 1 && values[colCount] === '';
+      if (!trailingEmpty) {
+        return {
+          ok: false,
+          error: `Inconsistência de colunas na linha ${i + 1}: ${values.length} campos vs ${colCount} no cabeçalho. ` +
+            'Verifica o separador do ficheiro (a vírgula é o separador e também o separador decimal?).'
+        };
+      }
+      values.length = colCount;
+    }
     const row = {};
     for (const col of REQUIRED_COLUMNS) {
       row[col] = values[colMap[col]] || '';
@@ -108,7 +180,7 @@ function parseXLSX(filePath) {
 
   const headers = Object.keys(data[0]);
   for (const required of REQUIRED_COLUMNS) {
-    const found = headers.some(h => normalizeHeader(h) === required);
+    const found = headers.some(h => columnAliases(required).includes(normalizeHeader(h)));
     if (!found) {
       return { ok: false, error: `Missing required column: ${required}` };
     }
@@ -117,7 +189,7 @@ function parseXLSX(filePath) {
   const normalizedData = data.map(row => {
     const normalized = {};
     for (const required of REQUIRED_COLUMNS) {
-      const key = headers.find(h => normalizeHeader(h) === required);
+      const key = headers.find(h => columnAliases(required).includes(normalizeHeader(h)));
       normalized[required] = row[key];
     }
     return normalized;
@@ -132,17 +204,16 @@ function cleanRow(row) {
     return null;
   }
 
-  const open = parseFloat(row.open);
-  const high = parseFloat(row.high);
-  const low = parseFloat(row.low);
-  const close = parseFloat(row.close);
+  const open = toNumber(row.open);
+  const high = toNumber(row.high);
+  const low = toNumber(row.low);
+  const close = toNumber(row.close);
 
   if ([open, high, low, close].some(v => isNaN(v))) {
     return null;
   }
 
-  const volumeStr = String(row.volume).replace(/,/g, '');
-  const volume = parseInt(volumeStr, 10);
+  const volume = parseInt(String(row.volume).replace(/[.,]/g, ''), 10);
   if (isNaN(volume)) {
     return null;
   }
@@ -212,6 +283,8 @@ async function importFromCsvFile(filePath, db) {
   let firstDate = null;
   let lastDate = null;
   let stmt;
+  let delimiter = ',';
+  let colCount = 0;
 
   const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -226,11 +299,15 @@ async function importFromCsvFile(filePath, db) {
     for await (const line of rl) {
       if (!line.trim()) continue;
 
-      const values = line.split(/[;,\t]/).map(v => v.trim());
+      if (!headerParsed) {
+        delimiter = detectDelimiter(line);
+        colCount = line.split(delimiter).length;
+      }
+      const values = line.split(delimiter).map(v => v.trim());
 
       if (!headerParsed) {
         for (const col of REQUIRED_IMPORT_COLUMNS) {
-          const idx = values.findIndex(v => normalizeHeader(v) === col);
+          const idx = values.findIndex(v => columnAliases(col).includes(normalizeHeader(v)));
           if (idx === -1) {
             db.db.exec('ROLLBACK');
             return { ok: false, error: `Missing required column: ${col}` };
@@ -241,27 +318,37 @@ async function importFromCsvFile(filePath, db) {
         continue;
       }
 
+      if (values.length > colCount) {
+        const trailingEmpty = values.length === colCount + 1 && values[colCount] === '';
+        if (!trailingEmpty) {
+          throw new Error(
+            `Inconsistência de colunas: ${values.length} campos vs ${colCount} no cabeçalho. ` +
+            'Verifica o separador do ficheiro (a vírgula é o separador e também o separador decimal?).'
+          );
+        }
+        values.length = colCount;
+      }
+
       const ticker = (values[colMap.ticker] || '').trim().toUpperCase();
       const date = normalizeDate(values[colMap.date]);
-      const closeStr = (values[colMap.close] || '').trim();
+      const closeNum = toNumber(values[colMap.close]);
 
-      if (!ticker || !date || !closeStr || isNaN(parseFloat(closeStr))) {
+      if (!ticker || !date || isNaN(closeNum)) {
         skipped++;
         continue;
       }
 
-      const open = parseFloat((values[colMap.open] || '').trim());
-      const high = parseFloat((values[colMap.high] || '').trim());
-      const low = parseFloat((values[colMap.low] || '').trim());
-      const close = parseFloat(closeStr);
-      const volume = parseInt((values[colMap.volume] || '').replace(/,/g, ''), 10);
+      const open = toNumber(values[colMap.open]);
+      const high = toNumber(values[colMap.high]);
+      const low = toNumber(values[colMap.low]);
+      const volume = parseInt(String(values[colMap.volume] || '').replace(/[.,]/g, ''), 10);
 
       if ([open, high, low, volume].some(v => isNaN(v))) {
         skipped++;
         continue;
       }
 
-      stmt.run(ticker, date, open, high, low, close, volume);
+      stmt.run(ticker, date, open, high, low, closeNum, volume);
       inserted++;
 
       if (!firstDate || date < firstDate) firstDate = date;

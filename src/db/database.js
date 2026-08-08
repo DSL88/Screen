@@ -118,6 +118,7 @@ class DB {
         );
         CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date);
         CREATE INDEX IF NOT EXISTS idx_historical_prices_ticker_date_asc ON historical_prices (ticker, date ASC);
+        CREATE INDEX IF NOT EXISTS idx_hist_ticker_date_desc ON historical_prices (ticker, date DESC);
 
         CREATE TABLE IF NOT EXISTS stocks (
           ticker      TEXT PRIMARY KEY,

@@ -32,6 +32,75 @@ test('parser CSV normaliza headers/datas, ordena e descarta linhas inválidas', 
   removeTempDir(dir);
 });
 
+test('parser CSV aceita cabeçalhos em Português e números com vírgula decimal', () => {
+  const dir = makeTempDir();
+  const file = path.join(dir, 'pt.csv');
+  fs.writeFileSync(file, [
+    'Data;Abertura;Máxima;Mínima;Fechamento;Volume',
+    '2024-02-01;10,5;11,2;9,8;10,75;1.000',
+    '2024-02-02;10,8;12,0;10,5;11,90;2000',
+    'invalid;10;11;9;10;100'
+  ].join('\n'));
+  const result = parseFile(file);
+  assert.equal(result.ok, true);
+  assert.equal(result.candles.length, 2);
+  assert.deepEqual(result.candles[0], {
+    date: '2024-02-01',
+    open: 10.5,
+    high: 11.2,
+    low: 9.8,
+    close: 10.75,
+    volume: 1000
+  });
+  assert.equal(result.candles[1].close, 11.9);
+  removeTempDir(dir);
+});
+
+test('parser CSV suporta cabeçalho misto EN/PT e formato europeu 1.234,56', () => {
+  const dir = makeTempDir();
+  const file = path.join(dir, 'mixed.csv');
+  fs.writeFileSync(file, [
+    'Date;Open;High;Low;Fechamento;Volume',
+    '2024-01-05;1.234,56;1.300,00;1.200,00;1.250,00;5.000'
+  ].join('\n'));
+  const result = parseFile(file);
+  assert.equal(result.ok, true);
+  assert.equal(result.candles.length, 1);
+  assert.equal(result.candles[0].open, 1234.56);
+  assert.equal(result.candles[0].high, 1300);
+  assert.equal(result.candles[0].close, 1250);
+  assert.equal(result.candles[0].volume, 5000);
+  removeTempDir(dir);
+});
+
+test('toNumber aceita formato inglês com vírgulas de milhar 1,234.56', () => {
+  const dir = makeTempDir();
+  const file = path.join(dir, 'en.csv');
+  fs.writeFileSync(file, [
+    'Date;Open;High;Low;Close;Volume',
+    '2024-01-06;1,234.56;1,300.00;1,200.00;1,250.00;5,000'
+  ].join('\n'));
+  const result = parseFile(file);
+  assert.equal(result.ok, true);
+  assert.equal(result.candles[0].open, 1234.56);
+  assert.equal(result.candles[0].high, 1300);
+  assert.equal(result.candles[0].volume, 5000);
+  removeTempDir(dir);
+});
+
+test('parser CSV rejeita ficheiro com delimitador vírgula e vírgula decimal (evita corrupção)', () => {
+  const dir = makeTempDir();
+  const file = path.join(dir, 'conflict.csv');
+  fs.writeFileSync(file, [
+    'Date,Open,High,Low,Close,Volume',
+    '2024-01-07,10,5,11,2,9,8,10,75,1.000'
+  ].join('\n'));
+  const result = parseFile(file);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Inconsistência de colunas/i);
+  removeTempDir(dir);
+});
+
 test('importação CSV transacional persiste tickers em maiúsculas e é UPSERT', { skip: !SQLITE_AVAILABLE }, async () => {
   const dir = makeTempDir();
   const file = path.join(dir, 'bulk.csv');

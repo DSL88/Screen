@@ -1669,9 +1669,9 @@ body {
   border: 1px solid rgba(251, 191, 36, 0.25);
 }
 .badge-mc-rejected {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-mute);
-  border: 1px solid var(--border);
+  background: var(--bear-soft);
+  color: var(--bear);
+  border: 1px solid rgba(251, 113, 133, 0.30);
 }
 .mc-tooltip {
   position: absolute;

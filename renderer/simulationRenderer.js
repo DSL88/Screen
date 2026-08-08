@@ -199,7 +199,10 @@
     const pct = Math.min(100, Math.max(0, Number(data.percent) || 0));
     if (els.progressFill) els.progressFill.style.width = pct + '%';
     if (els.progressText) {
-      els.progressText.textContent = Math.round(pct) + '%' + (data.message ? ' · ' + data.message : '');
+      const parts = [];
+      if (data.ticker) parts.push(data.ticker);
+      if (data.message) parts.push(data.message);
+      els.progressText.textContent = Math.round(pct) + '%' + (parts.length ? ' · ' + parts.join(' · ') : '');
     }
   }
 
