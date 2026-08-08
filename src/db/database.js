@@ -649,6 +649,24 @@ class DB {
     }));
   }
 
+  getAllHistoricalPrices(ticker) {
+    const rows = this.db.prepare(`
+      SELECT date, open, high, low, close, volume
+      FROM historical_prices
+      WHERE ticker = ?
+      ORDER BY date ASC
+    `).all(canonicalTicker(ticker));
+
+    return rows.map(row => ({
+      date: row.date,
+      open: Number(row.open),
+      high: Number(row.high),
+      low: Number(row.low),
+      close: Number(row.close),
+      volume: Number(row.volume)
+    }));
+  }
+
   getTickerDataRange(ticker) {
     const row = this.db.prepare(`
       SELECT 

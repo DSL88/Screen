@@ -18,8 +18,8 @@ const ADX_PERIOD = 14;
 const BB_PERIOD = 30;
 const BB_MULT = 2.0;
 
-function sampleState(probabilities) {
-  const r = Math.random();
+function sampleState(probabilities, rng = Math.random) {
+  const r = rng();
   let cumulative = 0;
   for (let i = 0; i < probabilities.length; i++) {
     cumulative += probabilities[i];
@@ -77,6 +77,8 @@ function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, 
   const daysAhead = opts.daysAhead || MC_DAYS_AHEAD;
   const slPct = opts.slPct != null ? opts.slPct : SL_PCT;
   const tpPct = opts.tpPct != null ? opts.tpPct : TP_PCT;
+  const rng = typeof opts.random === 'function' ? opts.random : Math.random;
+  const isShort = String(opts.side || 'LONG').toUpperCase() === 'SHORT';
 
   if (!transitionMatrix || currentState < 0 || !candles || candles.length < 60 || !currentPrice || currentPrice <= 0) {
     return { winRate: 0, tpHits: 0, slHits: 0, expired: iterations, isApproved: false, mcTier: 'REJECTED', mcLabel: 'Rejeitado' };
@@ -84,8 +86,10 @@ function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, 
 
   const returnsByState = buildStateReturnsMap(candles);
 
-  const tpPrice = currentPrice * (1 + tpPct);
-  const slPrice = currentPrice * (1 - slPct);
+  // LONG:  TP acima (1+tpPct) / SL abaixo (1-slPct)
+  // SHORT: TP abaixo (1-tpPct) / SL acima (1+slPct)
+  const tpPrice = currentPrice * (1 + (isShort ? -tpPct : tpPct));
+  const slPrice = currentPrice * (1 + (isShort ? slPct : -slPct));
 
   let tpHits = 0;
   let slHits = 0;
@@ -97,23 +101,36 @@ function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, 
     let exited = false;
 
     for (let d = 0; d < daysAhead; d++) {
-      state = sampleState(transitionMatrix[state]);
+      state = sampleState(transitionMatrix[state], rng);
 
       const returns = returnsByState[state];
       if (returns.length === 0) continue;
 
-      const retIdx = Math.floor(Math.random() * returns.length);
+      const retIdx = Math.floor(rng() * returns.length);
       price = price * (1 + returns[retIdx]);
 
-      if (price >= tpPrice) {
-        tpHits++;
-        exited = true;
-        break;
-      }
-      if (price <= slPrice) {
-        slHits++;
-        exited = true;
-        break;
+      if (isShort) {
+        if (price <= tpPrice) {
+          tpHits++;
+          exited = true;
+          break;
+        }
+        if (price >= slPrice) {
+          slHits++;
+          exited = true;
+          break;
+        }
+      } else {
+        if (price >= tpPrice) {
+          tpHits++;
+          exited = true;
+          break;
+        }
+        if (price <= slPrice) {
+          slHits++;
+          exited = true;
+          break;
+        }
       }
     }
 
