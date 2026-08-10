@@ -220,13 +220,13 @@ test('Filtro de direção long não gera SHORTs', { concurrency: false }, async 
 test('Warm-up insuficiente ignora o ativo com mensagem', { concurrency: false }, async () => {
   const { runSimulation } = loadEngine({ directionAt: () => 'COMPRA' });
   const shortSeries = buildSeries([
-    { date: '2020-01-25', open: 100, high: 101, low: 99, close: 100 },
-    { date: '2020-01-26', open: 100, high: 101, low: 99, close: 100 },
-    { date: '2020-01-27', open: 100, high: 101, low: 99, close: 100 },
-    { date: '2020-01-28', open: 100, high: 101, low: 99, close: 100 },
-    { date: '2020-01-29', open: 100, high: 101, low: 99, close: 100 },
     { date: '2020-01-30', open: 100, high: 101, low: 99, close: 100 },
-    { date: '2020-01-31', open: 100, high: 101, low: 99, close: 100 }
+    { date: '2020-01-31', open: 100, high: 101, low: 99, close: 100 },
+    { date: '2020-02-01', open: 100, high: 101, low: 99, close: 100 },
+    { date: '2020-02-02', open: 100, high: 101, low: 99, close: 100 },
+    { date: '2020-02-03', open: 100, high: 101, low: 99, close: 100 },
+    { date: '2020-02-04', open: 100, high: 101, low: 99, close: 100 },
+    { date: '2020-02-05', open: 100, high: 101, low: 99, close: 100 }
   ]);
   const result = await runSimulation({
     universe: [{ ticker: 'SHORT', name: 'Curto', candles: shortSeries }],
@@ -234,7 +234,85 @@ test('Warm-up insuficiente ignora o ativo com mensagem', { concurrency: false },
     hooks: {}
   });
   assert.equal(result.trades.length, 0);
-  assert.equal(result.messages.some(m => m.includes('warm-up insuficiente')), true);
+  assert.equal(result.messages.some(m => m.includes('sem registos suficientes')), true);
+});
+
+test('Ativo com menos de 20 velas gera mensagem de registos insuficientes', { concurrency: false }, async () => {
+  const { runSimulation } = loadEngine({ directionAt: () => 'COMPRA' });
+  const tinySeries = buildSeries(Array.from({ length: 15 }, (_, i) => ({
+    date: dateAt('2020-01-30', i),
+    open: 100, high: 101, low: 99, close: 100
+  })));
+  const result = await runSimulation({
+    universe: [{ ticker: 'TINY', name: 'Pequeno', candles: tinySeries }],
+    params: baseParams(),
+    hooks: {}
+  });
+  assert.equal(result.trades.length, 0);
+  assert.equal(result.messages.some(m => m.includes('sem registos suficientes')), true);
+});
+
+test('Warm-up dinâmico ajusta o início e não ignora o ativo', { concurrency: false }, async () => {
+  const { runSimulation } = loadEngine({ directionAt: () => 'COMPRA' });
+  const series = buildSeries(Array.from({ length: 250 }, (_, i) => ({
+    date: dateAt('2020-01-01', i),
+    open: 100, high: 101, low: 99, close: 100
+  })));
+  const result = await runSimulation({
+    universe: [{ ticker: 'LONG', name: 'Longo', candles: series }],
+    params: baseParams({ startDate: '2020-01-01', endDate: dateAt('2020-01-01', 249) }),
+    hooks: {}
+  });
+  assert.ok(result.trades.length > 0, 'série longa com warm-up dinâmico deve produzir trades');
+  assert.equal(result.messages.some(m => m.includes('início ajustado')), true);
+  assert.equal(result.messages.some(m => m.includes('sem registos suficientes')), false);
+});
+
+test('Preços em String são coerzidos para números com o mesmo resultado', { concurrency: false }, async () => {
+  const { runSimulation } = loadEngine({ directionAt: date => (date === '2020-02-08' ? 'COMPRA' : 'NEUTRO') });
+  const numeric = longTpSeries();
+  const stringy = numeric.map(c => ({
+    date: c.date,
+    open: String(c.open),
+    high: String(c.high),
+    low: String(c.low),
+    close: String(c.close),
+    volume: String(c.volume)
+  }));
+  const numResult = await runSimulation({
+    universe: [{ ticker: 'TEST', name: 'Teste', candles: numeric }],
+    params: baseParams(),
+    hooks: {}
+  });
+  const strResult = await runSimulation({
+    universe: [{ ticker: 'TEST', name: 'Teste', candles: stringy }],
+    params: baseParams(),
+    hooks: {}
+  });
+  assert.equal(strResult.trades.length, numResult.trades.length);
+  assert.equal(strResult.kpis.totalTrades, numResult.kpis.totalTrades);
+  assert.equal(strResult.kpis.netProfit, numResult.kpis.netProfit);
+  assert.deepEqual(strResult.trades, numResult.trades);
+});
+
+test('Velas fora de ordem cronológica são ordenadas ASC com o mesmo resultado', { concurrency: false }, async () => {
+  const { runSimulation } = loadEngine({ directionAt: date => (date === '2020-02-08' ? 'COMPRA' : 'NEUTRO') });
+  const sorted = longTpSeries();
+  const shuffled = sorted.slice().reverse();
+  const sortedResult = await runSimulation({
+    universe: [{ ticker: 'TEST', name: 'Teste', candles: sorted }],
+    params: baseParams(),
+    hooks: {}
+  });
+  const shuffledResult = await runSimulation({
+    universe: [{ ticker: 'TEST', name: 'Teste', candles: shuffled }],
+    params: baseParams(),
+    hooks: {}
+  });
+  assert.equal(shuffledResult.trades.length, 1);
+  assert.equal(shuffledResult.kpis.totalTrades, sortedResult.kpis.totalTrades);
+  assert.equal(shuffledResult.kpis.netProfit, sortedResult.kpis.netProfit);
+  assert.deepEqual(shuffledResult.trades, sortedResult.trades);
 });
 
 test('KPIs calculados corretamente num caso com 1 win e 1 loss', { concurrency: false }, async () => {

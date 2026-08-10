@@ -5,8 +5,13 @@ const { runSimulation } = require('./backtesterEngine');
 
 const DB_TIMEOUT_MS = 60000;
 const PROGRESS_THROTTLE_MS = 100;
+const MIN_CANDLES = 20;
 
 const cancelRequested = new Set();
+
+function toISODate(v) {
+  return String(v || '').slice(0, 10);
+}
 
 // ═══════════════════════════════════════════════════════════
 //  DB Request-Response — Comunicação com Main Process
@@ -67,9 +72,39 @@ parentPort.on('message', async (msg) => {
 //  SIMULAÇÃO
 // ═══════════════════════════════════════════════════════════
 
-async function handleStart({ runId, universe, params }) {
+function loadLocalCandles(dbPath, ticker, endDate) {
+  const Database = require('better-sqlite3');
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  try {
+    const rows = db.prepare(`
+      SELECT date, open, high, low, close, volume
+      FROM historical_prices
+      WHERE ticker = ? AND date <= ?
+      ORDER BY date ASC
+    `).all(ticker, endDate);
+    return rows.map(row => ({
+      date: row.date,
+      open: Number(row.open),
+      high: Number(row.high),
+      low: Number(row.low),
+      close: Number(row.close),
+      volume: Number(row.volume)
+    }));
+  } finally {
+    db.close();
+  }
+}
+
+async function handleStart({ runId, universe, params, dbPath, startDate, endDate }) {
   const messages = [];
   const list = Array.isArray(universe) ? universe : [];
+  const start = toISODate(startDate);
+  const end = toISODate(endDate);
+  const simParams = {
+    ...(params || {}),
+    startDate: start,
+    endDate: end
+  };
 
   if (cancelRequested.has(runId)) {
     cancelRequested.delete(runId);
@@ -84,7 +119,9 @@ async function handleStart({ runId, universe, params }) {
     const u = list[i];
     if (cancelRequested.has(runId)) break;
 
-    lastTicker = u.ticker;
+    const ticker = String(u.ticker || '').trim().toUpperCase();
+    if (!ticker) continue;
+    lastTicker = ticker;
     const now = Date.now();
     if (now - lastLoadAt >= PROGRESS_THROTTLE_MS) {
       lastLoadAt = now;
@@ -95,27 +132,41 @@ async function handleStart({ runId, universe, params }) {
           runId,
           current,
           total: list.length,
-          ticker: u.ticker,
+          ticker,
           percent: Math.round((current / list.length) * 100)
         }
       });
     }
 
     let candles = null;
+    let candlesError = null;
     try {
-      candles = await requestDB('getAllHistoricalPrices', { ticker: u.ticker });
+      candles = await requestDB('getAllHistoricalPrices', { ticker });
     } catch (err) {
-      const ticker = u && u.ticker ? u.ticker : '?';
-      messages.push(`${ticker}: falha ao carregar candles — ${err.message || String(err)}`);
-      continue;
+      candlesError = err;
     }
 
     if (!candles || candles.length === 0) {
-      messages.push(`${u.ticker}: sem candles disponíveis`);
+      if (dbPath) {
+        try {
+          candles = loadLocalCandles(dbPath, ticker, end);
+        } catch (_) {
+          candlesError = candlesError || new Error('falha ao carregar dados locais');
+        }
+      }
+    }
+
+    if (!candles || candles.length < MIN_CANDLES) {
+      if (candlesError) {
+        messages.push(`${ticker}: ${candlesError.message || String(candlesError)}`);
+      }
+      const message = 'Ativo sem registos suficientes na base de dados SQLite.';
+      send({ type: 'simError', payload: { runId, ticker, message } });
+      messages.push(message);
       continue;
     }
 
-    built.push({ ticker: u.ticker, name: u.name || u.ticker, candles });
+    built.push({ ticker, name: u.name || ticker, candles });
   }
 
   if (cancelRequested.has(runId)) {
@@ -129,7 +180,7 @@ async function handleStart({ runId, universe, params }) {
 
   const result = await runSimulation({
     universe: built,
-    params,
+    params: simParams,
     hooks: {
       onProgress(percent) {
         lastPercent = percent;

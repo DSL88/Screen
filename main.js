@@ -633,12 +633,22 @@ app.whenReady().then(async () => {
 
       const runId = 'sim_' + Date.now();
       activeSimulationRunId = runId;
+      const dbPath = path.join(app.getPath('userData'), 'trades.db');
+      const startDate = String(payload?.params?.startDate || '').slice(0, 10);
+      const endDate = String(payload?.params?.endDate || '').slice(0, 10);
+      const normalizedUniverse = (Array.isArray(universe) ? universe : []).map(t => ({
+        ticker: String(t.ticker || '').trim().toUpperCase(),
+        name: t.name || t.ticker
+      }));
       try {
         getSimulationWorker().postMessage({
           action: 'start',
           runId,
-          universe,
-          params: payload?.params
+          universe: normalizedUniverse,
+          params: payload?.params,
+          dbPath,
+          startDate,
+          endDate
         });
       } catch (err) {
         activeSimulationRunId = null;
