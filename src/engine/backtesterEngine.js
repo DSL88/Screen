@@ -120,22 +120,43 @@ async function runSimulation(options) {
   const assets = [];
   for (const u of universe) {
     if (!u || !Array.isArray(u.candles) || u.candles.length === 0) continue;
-    const candles = u.candles.filter(c => c && c.close != null && Number.isFinite(Number(c.close)));
+    const candles = u.candles
+      .filter(c => c && c.close != null && String(c.close).trim() !== '' && Number.isFinite(Number(c.close)))
+      .map(c => ({
+        date: c.date,
+        open: Number(c.open),
+        high: Number(c.high),
+        low: Number(c.low),
+        close: Number(c.close),
+        volume: Number(c.volume)
+      }))
+      .sort((a, b) => (String(a.date) < String(b.date) ? -1 : String(a.date) > String(b.date) ? 1 : 0));
     if (candles.length === 0) continue;
 
-    let startIdx = 0;
-    while (startIdx < candles.length && String(candles[startIdx].date) < cfg.startDate) startIdx++;
+    let requestedStartIdx = 0;
+    while (requestedStartIdx < candles.length && String(candles[requestedStartIdx].date) < cfg.startDate) requestedStartIdx++;
 
-    if (startIdx < cfg.warmup) {
-      messages.push(`IGNORADO ${u.ticker || '?'}: warm-up insuficiente (${startIdx} velas prévias, mínimo ${cfg.warmup})`);
+    if (candles.length <= cfg.warmup) {
+      messages.push(`${u.ticker || '?'}: Ativo sem registos suficientes na base de dados SQLite.`);
       continue;
+    }
+
+    if (requestedStartIdx >= candles.length) {
+      messages.push(`IGNORADO ${u.ticker || '?'}: startDate fora do histórico disponível`);
+      continue;
+    }
+
+    const effectiveStartIdx = Math.max(requestedStartIdx, cfg.warmup);
+
+    if (effectiveStartIdx > requestedStartIdx) {
+      messages.push(`${u.ticker || '?'}: warm-up insuficiente até ${cfg.startDate}; início ajustado para ${candles[effectiveStartIdx].date}`);
     }
 
     let endIdx = candles.length - 1;
     while (endIdx >= 0 && String(candles[endIdx].date) > cfg.endDate) endIdx--;
-    if (endIdx < startIdx) continue;
+    if (endIdx < effectiveStartIdx) continue;
 
-    assets.push({ ticker: u.ticker, name: u.name || u.ticker, candles, startIdx, endIdx, ptr: startIdx });
+    assets.push({ ticker: u.ticker, name: u.name || u.ticker, candles, startIdx: effectiveStartIdx, endIdx, ptr: effectiveStartIdx });
   }
 
   // Datas únicas ordenadas (eixo da curva de capital)
@@ -169,7 +190,7 @@ async function runSimulation(options) {
   const positions = new Map();
   const pending = new Map();
   const lastClose = new Map();
-  const equityCurve = [{ date: cfg.startDate, value: initialCapital }];
+  const equityCurve = [];
 
   const slip = cfg.slippagePct / 100;
   const commission = cfg.commissionPct / 100;

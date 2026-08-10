@@ -74,10 +74,13 @@
     pageSize: 50,
     searchQuery: '',
     running: false,
+    dataToastShown: false,
     unsubscribers: []
   };
 
   const REASON_LABELS = { TP: 'Take Profit', SL: 'Stop Loss', Trailing: 'Trailing', Sinal: 'Sinal' };
+
+  const INSUFFICIENT_DATA_RE = /não foram encontrados dados|sem registos suficientes|sem candles disponíveis|dados insuficientes/i;
 
   function init() {
     if (!els.universe) return;
@@ -223,13 +226,28 @@
     state.sortDir = 'desc';
     state.searchQuery = els.tradesSearch ? String(els.tradesSearch.value || '').trim().toLowerCase() : '';
     renderResult(result);
+
+    const trades = result.trades || [];
+    if (trades.length === 0) {
+      const bad = (result.messages || []).filter(Boolean).find((m) => INSUFFICIENT_DATA_RE.test(String(m)));
+      if (bad) {
+        const ticker = String(bad).split(':')[0].trim() || '';
+        showDataToast(ticker);
+      }
+    }
   }
 
   function onError(data) {
     if (!data || !isCurrentRun(data)) return;
-    state.currentRunId = null;
-    resetControls();
-    setStatus('Erro na simulação: ' + ((data && data.message) || 'erro desconhecido.'));
+    const msg = ((data && data.message) || 'erro desconhecido.');
+    if (!(data && data.ticker)) {
+      state.currentRunId = null;
+      resetControls();
+    }
+    if (INSUFFICIENT_DATA_RE.test(msg)) {
+      showDataToast(data.ticker || '');
+    }
+    setStatus('Erro na simulação: ' + msg);
   }
 
   // ── Controlo de estado "a correr" ──
@@ -263,6 +281,25 @@
     els.status.hidden = !msg;
   }
 
+  function showToast(message, type) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast toast-' + (type || 'error');
+    toast.innerHTML = '<span class="toast-icon">' + (type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ') + '</span><span class="toast-text">' + escapeHtml(message) + '</span>';
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.classList.add('toast-fadeout');
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
+  }
+
+  function showDataToast(ticker) {
+    if (state.dataToastShown) return;
+    state.dataToastShown = true;
+    showToast('⚠️ Não foram encontrados dados suficientes na SQLite para ' + (ticker || 'o ativo selecionado') + '. Por favor, atualiza o histórico na aba My List.');
+  }
+
   // ── Iniciar / cancelar ──
   function toNum(input, fallback) {
     if (!input) return fallback;
@@ -274,7 +311,7 @@
     const universeMode = els.universe ? els.universe.value : 'all';
     const universe = { mode: universeMode };
     if (universeMode === 'index') universe.index = els.index ? els.index.value : '';
-    if (universeMode === 'single') universe.ticker = els.asset ? els.asset.value : '';
+    if (universeMode === 'single') universe.ticker = String(els.asset ? els.asset.value : '').trim().toUpperCase();
     if (universeMode !== 'all' && !universe.index && !universe.ticker) {
       setStatus('Seleciona um índice ou ativo antes de iniciar a simulação.');
       return null;
@@ -291,8 +328,8 @@
       vwapGate: !!(els.vwapGate && els.vwapGate.checked),
       mcMin: toNum(els.mcMin, 50),
       markovMin: toNum(els.markovMin, 55),
-      startDate: els.startDate ? els.startDate.value : '',
-      endDate: els.endDate ? els.endDate.value : '',
+      startDate: String(els.startDate ? els.startDate.value : '').slice(0, 10),
+      endDate: String(els.endDate ? els.endDate.value : '').slice(0, 10),
       capital: toNum(els.capital, 10000),
       risk: toNum(els.risk, 2),
       commission: toNum(els.commission, 0.05),
@@ -310,6 +347,7 @@
     const payload = buildPayload();
     if (!payload) return;
 
+    state.dataToastShown = false;
     setRunningUi();
     setStatus('');
     if (els.results) els.results.hidden = true;
