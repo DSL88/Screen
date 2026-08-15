@@ -16,6 +16,7 @@ const ALLOWED_EVENTS = new Set([
   'index-date-progress',
   'UPDATE_INDEX_DATE_PROGRESS',
   'country-index-progress',
+  'first-registo-progress',
   'simulation:progress',
   'simulation:result',
   'simulation:error'
@@ -93,6 +94,12 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('UPDATE_INDEX_DATE_PROGRESS', handler);
   },
   checkIndexStatus: (indexName) => ipcRenderer.invoke('check-index-status', indexName),
+  firstRegisto: (index, operationId) => ipcRenderer.invoke('first-registo-index', { index, operationId }),
+  onFirstRegistoProgress: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('first-registo-progress', handler);
+    return () => ipcRenderer.removeListener('first-registo-progress', handler);
+  },
   onFirstDateProgress: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('UPDATE_INDEX_DATE_PROGRESS', handler);

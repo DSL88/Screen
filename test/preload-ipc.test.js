@@ -33,6 +33,17 @@ test('preload expõe IPC permitido, remove listeners e bloqueia canais arbitrár
     api.deleteIndexWithStocks('PSI');
     assert.equal(ipcRenderer.invoked[1].channel, 'delete-index-with-stocks');
     assert.equal(ipcRenderer.invoked[1].payload, 'PSI');
+    api.firstRegisto('PSI', 'op-1');
+    assert.equal(ipcRenderer.invoked[2].channel, 'first-registo-index');
+    assert.equal(ipcRenderer.invoked[2].payload.index, 'PSI');
+    assert.equal(ipcRenderer.invoked[2].payload.operationId, 'op-1');
+    api.checkIndexStatus('PSI');
+    assert.equal(ipcRenderer.invoked[3].channel, 'check-index-status');
+    assert.equal(ipcRenderer.invoked[3].payload, 'PSI');
+    const firstRegistoUnsub = api.onFirstRegistoProgress(callback);
+    assert.equal(listeners.size, 1);
+    firstRegistoUnsub();
+    assert.equal(listeners.size, 0);
   } finally {
     Module._load = originalLoad;
     delete require.cache[preload];

@@ -1452,6 +1452,7 @@ app.whenReady().then(async () => {
               mainWindow.webContents.send('sync-all-progress', {
                 current: completed,
                 total: tickers.length,
+                percent: tickers.length > 0 ? Math.round(completed / tickers.length * 100) : 0,
                 status: 'batch',
                 updated: updatedSummaries.splice(0)
               });
@@ -1635,10 +1636,158 @@ app.whenReady().then(async () => {
       const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
       if (!index) return { ok: false, error: 'missing-index-name' };
       try {
-        const status = db.checkIndexDataStatus(index);
+        const status = db.checkIndexStatus(index);
         return { ok: true, ...status };
       } catch (err) {
         return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('first-registo-index', async (event, input) => {
+      const { index, operationId: requestedId } = indexInput(input);
+      if (!index) return { ok: false, success: false, status: 'failed', error: 'missing-index-name' };
+      if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, success: false, status: 'failed', error: 'window-unavailable' };
+      const lock = beginPipelineOperation('first-registo', requestedId);
+      if (lock.busy) return lock.result;
+      const operation = lock.operation;
+
+      const CHUNK_SIZE = 3;
+      const sleep = ms => new Promise(res => setTimeout(res, ms));
+      const errors = [];
+      let completed = 0;
+      let total = 0;
+      let updated = 0;
+
+      try {
+        const stocks = db.getStocksByIndex(index);
+        if (!stocks || stocks.length === 0) {
+          sendPipelineProgress(event, 'first-registo-progress', {
+            operationId: operation.operationId, index, current: 0, total: 0,
+            ticker: '', status: 'done', state: 'failed', errorCount: 0
+          });
+          return { ok: false, success: false, status: 'failed', operationId: operation.operationId,
+            total: 0, updated: 0, errorCount: 0, errors: [], error: 'no-stocks' };
+        }
+
+        const tickers = stocks.map(s => s.ticker);
+        total = tickers.length;
+
+        for (let i = 0; i < tickers.length; i += CHUNK_SIZE) {
+          if (isPipelineCancelled(operation)) break;
+          const chunk = tickers.slice(i, i + CHUNK_SIZE);
+
+          const results = await Promise.all(chunk.map(async (ticker, chunkIdx) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('first-registo-progress', {
+                operationId: operation.operationId, index,
+                current: completed + chunkIdx + 1,
+                total,
+                ticker,
+                status: 'syncing'
+              });
+            }
+            try {
+              const stock = stocks.find(s => s.ticker === ticker);
+              let firstDate = (stock && stock.first_date) || null;
+              if (!firstDate) {
+                firstDate = await yahooClient.fetchFirstTradeDate(ticker);
+              }
+              if (isPipelineCancelled(operation)) return { ticker, status: 'cancelled' };
+              if (firstDate) {
+                db.updateStockFirstDate(ticker, firstDate);
+              }
+
+              const candles = await yahooClient.fetchHistorySince(ticker, firstDate);
+              if (isPipelineCancelled(operation)) return { ticker, status: 'cancelled' };
+              if (!candles || candles.length === 0) {
+                return { ticker, status: 'noop', firstDate };
+              }
+              return { ticker, candles, firstDate, status: 'updated' };
+            } catch (err) {
+              return { ticker, status: 'error', error: err.message || String(err) };
+            }
+          }));
+
+          const updatedEntries = results.filter(r => r.status === 'updated');
+          for (const r of updatedEntries) {
+            try {
+              if (isPipelineCancelled(operation)) {
+                r.status = 'cancelled';
+                delete r.candles;
+                continue;
+              }
+              db.saveHistoricalCandlesFromImport(r.ticker, r.candles);
+              db.cacheOHLCV(r.ticker, r.candles);
+              db.setFullHistoryFetched(r.ticker);
+              r.summary = db.getHistoricalSummary(r.ticker);
+            } catch (err) {
+              r.status = 'error';
+              r.error = err.message || String(err);
+              delete r.candles;
+            }
+          }
+
+          completed += chunk.length;
+
+          for (const r of results) {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('first-registo-progress', {
+                operationId: operation.operationId,
+                index,
+                current: completed,
+                total,
+                ticker: r.ticker,
+                percent: total > 0 ? Math.round(completed / total * 100) : 0,
+                firstDate: r.firstDate || null,
+                status: r.status,
+                state: r.status === 'updated' ? 'success' : (r.status === 'error' ? 'failed' : r.status),
+                summary: r.summary || null,
+                error: r.error || null
+              });
+            }
+            if (r.status === 'error' || r.status === 'noop') {
+              if (r.status === 'noop') r.error = 'empty-history';
+              errors.push({ ticker: r.ticker, error: r.error });
+            } else if (r.status === 'updated') {
+              updated++;
+            }
+          }
+
+          if (i + CHUNK_SIZE < tickers.length && !isPipelineCancelled(operation)) {
+            await sleep(200 + Math.random() * 200);
+          }
+        }
+
+        const status = operationStatus(total, errors, operation.cancelled, completed, updated);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('first-registo-progress', {
+            operationId: operation.operationId,
+            index,
+            current: completed,
+            total,
+            ticker: '',
+            percent: total > 0 ? Math.round(completed / total * 100) : 0,
+            status: 'done',
+            state: status,
+            updated,
+            errorCount: errors.length,
+            firstDate: null
+          });
+        }
+
+        return { ok: status !== 'failed', success: status !== 'failed', status,
+          operationId: operation.operationId, total, updated, errorCount: errors.length,
+          errors, cancelled: operation.cancelled };
+      } catch (err) {
+        const error = err.message || String(err);
+        errors.push({ ticker: null, error });
+        sendPipelineProgress(event, 'first-registo-progress', {
+          operationId: operation.operationId, index, current: 0, total: 0,
+          ticker: '', status: 'done', state: 'failed', error, errorCount: errors.length
+        });
+        return { ok: false, success: false, status: 'failed', operationId: operation.operationId, errors, error };
+      } finally {
+        finishPipelineOperation(operation);
       }
     });
 

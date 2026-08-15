@@ -405,6 +405,14 @@ class DB {
         country = CASE WHEN NULLIF(excluded.country, '') IS NULL THEN custom_tickers.country ELSE excluded.country END,
         index_name = CASE WHEN NULLIF(excluded.index_name, '') IS NULL THEN custom_tickers.index_name ELSE excluded.index_name END
     `);
+    const stockStmt = this.db.prepare(`
+      INSERT INTO stocks (ticker, name, country, index_name, first_date, full_history_fetched)
+      VALUES (?, ?, ?, ?, NULL, COALESCE(?, 0))
+      ON CONFLICT(ticker) DO UPDATE SET
+        name = CASE WHEN NULLIF(excluded.name, '') IS NULL THEN stocks.name ELSE excluded.name END,
+        country = CASE WHEN NULLIF(excluded.country, '') IS NULL THEN stocks.country ELSE excluded.country END,
+        index_name = CASE WHEN NULLIF(excluded.index_name, '') IS NULL THEN stocks.index_name ELSE excluded.index_name END
+    `);
     const tx = this.db.transaction((items) => {
       let changes = 0;
       for (const item of items) {
@@ -419,6 +427,17 @@ class DB {
           canonicalIndexId(item.indexName || item.index_name || item.index || '')
         );
         changes += r.changes || 0;
+        // Manter a tabela `stocks` em sincronia para que o "1º Registo" e o
+        // validador de estado do índice cubram os ativos adicionados em bloco
+        // (mesmo comportamento do addCustomTicker + upsertStock no add individual).
+        const fullHistory = item.fullHistoryFetched ?? item.full_history_fetched;
+        stockStmt.run(
+          tk,
+          item.name || item.nome || '',
+          item.country || '',
+          canonicalIndexId(item.indexName || item.index_name || item.index || ''),
+          fullHistory == null || String(fullHistory).trim() === '' ? null : (Number(fullHistory) ? 1 : 0)
+        );
       }
       return changes;
     });
@@ -733,6 +752,114 @@ class DB {
       totalStocks: stocks.length,
       stocksWithDataCount: (result ? result.stocksWithData : 0),
       stocks
+    };
+  }
+
+  checkIndexStatus(indexName) {
+    const stocks = this.getStocksByIndex(indexName);
+    if (!stocks || stocks.length === 0) {
+      return {
+        status: 'pendente-primeiro-registo',
+        label: 'Pendente: 1º Registo',
+        complete: false,
+        totalStocks: 0,
+        stocksCompleteCount: 0,
+        expectedDate: this.getLastExpectedTradingDay(),
+        stocks: [],
+        missing: ['first-date']
+      };
+    }
+
+    const tickers = stocks.map(s => s.ticker);
+    const placeholders = tickers.map(() => '?').join(',');
+    const prices = this.db.prepare(`
+      SELECT ticker,
+             MIN(date) as min_date,
+             MAX(date) as max_date,
+             COUNT(*) as total_candles
+      FROM historical_prices
+      WHERE ticker IN (${placeholders})
+      GROUP BY ticker
+    `).all(...tickers);
+
+    const priceMap = {};
+    for (const row of prices) priceMap[row.ticker] = row;
+
+    const expectedDate = this.getLastExpectedTradingDay();
+
+    const details = stocks.map((s) => {
+      const p = priceMap[s.ticker] || null;
+      const hasData = !!p && p.total_candles > 0;
+      const firstDate = s.first_date || null;
+      const minDate = p ? p.min_date : null;
+      const maxDate = p ? p.max_date : null;
+      const fullHistoryFetched = !!s.full_history_fetched;
+
+      let cardState;
+      if (!hasData) cardState = 'card-pending';
+      else if (maxDate && expectedDate && maxDate >= expectedDate) cardState = 'card-synced';
+      else cardState = 'card-outdated';
+
+      const historyFromOrigin = hasData && !!firstDate && (
+        fullHistoryFetched ||
+        (minDate && minDate <= firstDate)
+      );
+
+      const missing = [];
+      if (!firstDate) missing.push('first-date');
+      if (!hasData) missing.push('history');
+      else if (!historyFromOrigin) missing.push('first-registo');
+      if (cardState === 'card-outdated') missing.push('recent');
+
+      return {
+        ticker: s.ticker,
+        name: s.name,
+        indexName: s.index_name,
+        firstDate,
+        minDate,
+        maxDate,
+        fullHistoryFetched,
+        hasData,
+        cardState,
+        historyFromOrigin: !!historyFromOrigin,
+        missing
+      };
+    });
+
+    const stocksCompleteCount = details.filter(d =>
+      d.hasData && d.historyFromOrigin && d.cardState === 'card-synced'
+    ).length;
+
+    let status;
+    const hasAnyFirstRegistoMissing = details.some(d => !d.historyFromOrigin || !d.firstDate || !d.hasData);
+    const hasAnyOutdated = details.some(d => d.cardState === 'card-outdated');
+
+    if (details.length > 0 && stocksCompleteCount === details.length) {
+      status = 'COMPLETO';
+    } else if (hasAnyFirstRegistoMissing) {
+      status = 'pendente-primeiro-registo';
+    } else if (hasAnyOutdated) {
+      status = 'pendente-recente';
+    } else {
+      status = 'pendente-primeiro-registo';
+    }
+
+    const labels = {
+      'COMPLETO': 'COMPLETO',
+      'pendente-primeiro-registo': 'Pendente: 1º Registo',
+      'pendente-recente': 'Pendente: Recente'
+    };
+
+    return {
+      status,
+      label: labels[status] || status,
+      complete: status === 'COMPLETO',
+      hasStocks: details.length > 0,
+      totalStocks: details.length,
+      stocksCompleteCount,
+      expectedDate,
+      missing: details.reduce((acc, d) => acc.concat(d.missing), []),
+      stocks: details
     };
   }
 

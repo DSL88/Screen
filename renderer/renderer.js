@@ -80,6 +80,11 @@
   const selectIndexBulkFetch = document.getElementById('select-index-bulk-fetch');
   const btnFetchFirstDate = document.getElementById('btn-update-index-dates');
   const btnDeleteIndex = document.getElementById('btn-delete-index');
+  const btnFirstRegisto = document.getElementById('btn-first-registo');
+  const btnMostRecent = document.getElementById('btn-most-recent');
+  const btnIndexActions = document.getElementById('btn-index-actions');
+  const indexActionsDropdown = document.getElementById('index-actions-dropdown');
+  const indexStatusBadge = document.getElementById('index-status-badge');
   const btnCancelCountryImport = document.getElementById('btn-cancel-country-import');
   const indexBulkProgress = document.getElementById('index-bulk-progress');
   const indexBulkProgressLabel = document.getElementById('index-bulk-progress-label');
@@ -139,6 +144,8 @@
 
   let countryImport = null;
   const apiUnsubscribers = [];
+  let mostRecentActive = false;
+  const indexStatusCache = new Map();
 
   function subscribeApiEvent(method, channel, callback) {
     try {
@@ -443,8 +450,15 @@
       header.innerHTML = `
         <span class="wl-group-chevron">▾</span>
         <span class="wl-group-title">${escapeHtml(g.name)}</span>
+        ${key !== 'CUSTOM' ? `<span class="wl-group-status index-status-badge" data-group-status="${escapeHtml(key)}" hidden></span>` : ''}
         <span class="wl-group-count">${g.items.length}</span>
       `;
+      if (key !== 'CUSTOM') {
+        const dbName = g.items[0] && (g.items[0].indexDbName || g.items[0].indexName);
+        if (dbName) {
+          void refreshGroupStatusBadge(key, dbName);
+        }
+      }
       header.addEventListener('click', () => {
         if (collapsedGroups.has(key)) {
           collapsedGroups.delete(key);
@@ -862,12 +876,11 @@
     }
     const previous = selectIndexBulkFetch.value;
     selectIndexBulkFetch.innerHTML = '';
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.disabled = true;
-    placeholder.selected = true;
-    placeholder.textContent = '-- Seleciona o Índice --';
-    selectIndexBulkFetch.appendChild(placeholder);
+    const all = document.createElement('option');
+    all.value = 'ALL';
+    all.textContent = 'Todos os Índices';
+    all.selected = true;
+    selectIndexBulkFetch.appendChild(all);
     for (const [idxId, idxInfo] of currentIndexes) {
       const opt = document.createElement('option');
       opt.value = idxId;
@@ -875,9 +888,71 @@
       opt.dataset.dbName = idxInfo.dbName || idxId;
       selectIndexBulkFetch.appendChild(opt);
     }
-    if (previous && currentIndexes.has(previous)) {
+    if (previous && previous !== 'ALL' && currentIndexes.has(previous)) {
       selectIndexBulkFetch.value = previous;
     }
+  }
+
+  async function refreshIndexStatusBadge() {
+    if (!indexStatusBadge || !selectIndexBulkFetch) return;
+    const idx = selectIndexBulkFetch.value;
+    if (!idx || idx === 'ALL') {
+      indexStatusBadge.hidden = true;
+      return;
+    }
+    const selectedOption = selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0];
+    const requestIndex = (selectedOption && selectedOption.dataset.dbName) || idx;
+    try {
+      const s = await window.api.checkIndexStatus(requestIndex);
+      if (s && s.ok && s.status) {
+        indexStatusBadge.hidden = false;
+        indexStatusBadge.textContent = s.label || s.status;
+        indexStatusBadge.className = 'index-status-badge' + (s.status === 'COMPLETO'
+          ? ' is-complete'
+          : s.status === 'pendente-recente'
+            ? ' is-pending-recent'
+            : ' is-pending-first');
+      } else {
+        indexStatusBadge.hidden = true;
+      }
+    } catch (_) {
+      indexStatusBadge.hidden = true;
+    }
+  }
+
+  async function refreshGroupStatusBadge(groupId, dbName) {
+    const el = document.querySelector(`.watchlist-group-header[data-group-id="${CSS.escape(groupId)}"] .wl-group-status`);
+    if (!el || !dbName) return;
+    const cached = indexStatusCache.get(dbName);
+    if (cached) {
+      applyIndexStatusBadge(el, cached);
+      return;
+    }
+    try {
+      const s = await window.api.checkIndexStatus(dbName);
+      if (s && s.ok && s.status) {
+        indexStatusCache.set(dbName, s);
+        applyIndexStatusBadge(el, s);
+      } else {
+        el.hidden = true;
+      }
+    } catch (_) {
+      el.hidden = true;
+    }
+  }
+
+  function applyIndexStatusBadge(el, s) {
+    if (!el || !s || !s.status) {
+      if (el) el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    el.textContent = s.label || s.status;
+    el.className = 'wl-group-status index-status-badge' + (s.status === 'COMPLETO'
+      ? ' is-complete'
+      : s.status === 'pendente-recente'
+        ? ' is-pending-recent'
+        : ' is-pending-first');
   }
 
   if (btnFetchFirstDate) {
@@ -940,8 +1015,8 @@
   if (btnDeleteIndex) {
     btnDeleteIndex.addEventListener('click', async () => {
       const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
-      if (!idx) {
-        showToast('Seleciona primeiro um índice para eliminar.', 'error');
+      if (!idx || idx === 'ALL') {
+        showToast('Seleciona primeiro um índice específico para eliminar.', 'error');
         return;
       }
       const selectedOption = selectIndexBulkFetch && selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0];
@@ -977,7 +1052,7 @@
         showToast(msg, 'success');
         if (typeof status !== 'undefined' && status) status.textContent = msg;
         await reloadMyListFromDatabase();
-        if (selectIndexBulkFetch) selectIndexBulkFetch.value = '';
+        if (selectIndexBulkFetch) selectIndexBulkFetch.value = 'ALL';
       } catch (err) {
         showToast('Erro ao eliminar índice: ' + (err.message || String(err)), 'error');
         if (typeof status !== 'undefined' && status) status.textContent = 'Erro: ' + (err.message || String(err));
@@ -997,21 +1072,20 @@
       try {
         const s = await window.api.checkIndexStatus(requestIndex);
         if (s && s.ok) {
-          if (!s.hasStocks) {
+          if (s.totalStocks === 0) {
             if (typeof status !== 'undefined' && status) status.textContent = 'Nenhum ativo associado ao índice.';
-          } else if (s.hasPrices) {
-            if (typeof status !== 'undefined' && status) {
-              status.textContent = `Índice ${idx}: ${s.totalStocks} ativos registados, ${s.stocksWithDataCount} com histórico local.`;
-            }
           } else {
-            const msg = `Possui ${s.totalStocks} ativos registados, mas sem histórico de velas locais. Clica em 'Atualizar Data' para registar as datas de início.`;
-            if (typeof status !== 'undefined' && status) status.textContent = msg;
-            showToast(msg, 'error');
+            if (typeof status !== 'undefined' && status) {
+              status.textContent = s.complete
+                ? `Índice ${idx}: ${s.totalStocks}/${s.totalStocks} ativos COMPLETOS.`
+                : `Índice ${idx}: ${s.stocksCompleteCount}/${s.totalStocks} ativos completos (${s.label}).`;
+            }
           }
         } else if (s && s.error) {
           if (typeof status !== 'undefined' && status) status.textContent = 'Erro: ' + s.error;
         }
       } catch (_) { /* ignora */ }
+      await refreshIndexStatusBadge();
     });
   }
 
@@ -1533,8 +1607,10 @@
     // Keep the search input and collapsedGroups untouched. renderWatchlist()
     // reapplies the current filter after replacing the DB snapshot.
     watchlist = (res.custom || []).map(normaliseWatchlistEntry).filter(t => t.ticker);
+    indexStatusCache.clear();
     renderWatchlist();
     populateIndexBulkFetchDropdown();
+    await refreshIndexStatusBadge();
     return watchlist;
   }
 
@@ -1989,6 +2065,119 @@
   const btnAddStockModal = document.getElementById('btn-add-stock-modal');
   if (btnAddStockModal) {
     btnAddStockModal.addEventListener('click', () => openAddModal());
+  }
+
+  // --- Index actions dropdown toggle ---
+  if (btnIndexActions && indexActionsDropdown) {
+    btnIndexActions.addEventListener('click', (e) => {
+      e.stopPropagation();
+      indexActionsDropdown.hidden = !indexActionsDropdown.hidden;
+    });
+    document.addEventListener('click', (e) => {
+      const menu = document.getElementById('index-actions-menu');
+      if (indexActionsDropdown && !indexActionsDropdown.hidden && menu && !menu.contains(e.target)) {
+        indexActionsDropdown.hidden = true;
+      }
+    });
+  }
+
+  function getSelectedIndexDbName() {
+    if (!selectIndexBulkFetch) return null;
+    const idx = selectIndexBulkFetch.value;
+    if (!idx || idx === 'ALL') return null;
+    const selectedOption = selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0];
+    return (selectedOption && selectedOption.dataset.dbName) || idx;
+  }
+
+  // --- 1º Registo (baixar histórico desde o IPO/Origem) ---
+  if (btnFirstRegisto) {
+    btnFirstRegisto.addEventListener('click', async () => {
+      const requestIndex = getSelectedIndexDbName();
+      const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
+      const idxLabel = idx === 'ALL' ? 'Todos os Índices'
+        : (selectIndexBulkFetch && selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0]
+          ? selectIndexBulkFetch.selectedOptions[0].textContent : idx);
+      const requestName = requestIndex || idx || 'ALL';
+
+      btnFirstRegisto.disabled = true;
+      const label = btnFirstRegisto.querySelector('span');
+      const originalLabel = label.textContent;
+      label.textContent = 'A obter 1º registo...';
+      if (indexBulkProgress) indexBulkProgress.hidden = false;
+      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `1º Registo de ${idxLabel}: a iniciar...`;
+      if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
+
+      try {
+        const res = await window.api.firstRegisto(requestName);
+        if (res && res.ok) {
+          const msg = res.updated > 0
+            ? `1º Registo concluído: ${res.updated} ativos com histórico desde a origem (${idxLabel}).`
+            : 'Nenhum ativo precisou de novo histórico desde a origem.';
+          showToast(msg, 'success');
+          if (typeof status !== 'undefined' && status) status.textContent = msg;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `✅ ${msg}`;
+          if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
+        } else {
+          const errMsg = res && res.error ? res.error : 'Erro desconhecido';
+          showToast('Erro no 1º Registo: ' + errMsg, 'error');
+          if (typeof status !== 'undefined' && status) status.textContent = 'Erro no 1º Registo: ' + errMsg;
+        }
+      } catch (err) {
+        showToast('Erro no 1º Registo: ' + (err.message || String(err)), 'error');
+        if (typeof status !== 'undefined' && status) status.textContent = 'Erro no 1º Registo: ' + (err.message || String(err));
+      } finally {
+        btnFirstRegisto.disabled = false;
+        label.textContent = originalLabel;
+        await reloadMyListFromDatabase();
+        await refreshIndexStatusBadge();
+      }
+    });
+  }
+
+  // --- Mais Recente (sincronizar até à última sessão de mercado) ---
+  if (btnMostRecent) {
+    btnMostRecent.addEventListener('click', async () => {
+      const requestIndex = getSelectedIndexDbName();
+      const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
+      const idxLabel = idx === 'ALL' ? 'Todos os Índices'
+        : (selectIndexBulkFetch && selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0]
+          ? selectIndexBulkFetch.selectedOptions[0].textContent : idx);
+
+      btnMostRecent.disabled = true;
+      mostRecentActive = true;
+      const label = btnMostRecent.querySelector('span');
+      const originalLabel = label.textContent;
+      label.textContent = 'A sincronizar...';
+      if (indexBulkProgress) indexBulkProgress.hidden = false;
+      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `Mais Recente de ${idxLabel}: a iniciar...`;
+      if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
+
+      try {
+        const res = await window.api.syncAllListStocks(requestIndex);
+        if (res && res.ok) {
+          const msg = res.totalNewCandles > 0
+            ? `Lista atualizada! ${res.totalNewCandles} novas velas gravadas (${idxLabel}).`
+            : (res.message || 'Lista já estava atualizada até ao último dia de mercado.');
+          showToast(msg, 'success');
+          if (typeof status !== 'undefined' && status) status.textContent = msg;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `✅ ${msg}`;
+          if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
+        } else {
+          const errMsg = res && res.error ? res.error : 'Erro desconhecido';
+          showToast('Erro na sincronização: ' + errMsg, 'error');
+          if (typeof status !== 'undefined' && status) status.textContent = 'Erro na sincronização: ' + errMsg;
+        }
+      } catch (err) {
+        showToast('Erro na sincronização: ' + (err.message || String(err)), 'error');
+        if (typeof status !== 'undefined' && status) status.textContent = 'Erro na sincronização: ' + (err.message || String(err));
+      } finally {
+        btnMostRecent.disabled = false;
+        mostRecentActive = false;
+        label.textContent = originalLabel;
+        await reloadMyListFromDatabase();
+        await refreshIndexStatusBadge();
+      }
+    });
   }
 
   // Freshness banner "Go to My List" button
@@ -3516,16 +3705,20 @@
 
   // Listeners for sync-all progress and done events
   subscribeApiEvent('on', 'sync-all-progress', (p) => {
-    if (p && btnDownloadAllMylist) {
-      const label = btnDownloadAllMylist.querySelector('span');
-      if (label && p.current != null && p.total != null) {
-        label.textContent = `A sincronizar ${p.current}/${p.total}...`;
-      }
-      if (Array.isArray(p.updated)) {
-        for (const u of p.updated) {
-          if (u && u.ticker && u.summary) {
-            void updateWatchlistBadge(u.ticker, u.summary);
-          }
+    if (!p) return;
+    const label = btnMostRecent && btnMostRecent.querySelector('span');
+    if (mostRecentActive && label && p.current != null && p.total != null) {
+      label.textContent = `A sincronizar ${p.current}/${p.total}...`;
+    }
+    if (p.current != null && p.total != null && p.total > 0) {
+      const pct = Math.round(p.current / p.total * 100);
+      if (indexBulkProgressFill) indexBulkProgressFill.style.width = pct + '%';
+      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `${mostRecentActive ? 'Mais Recente' : 'Baixar Tudo'}: ${p.current}/${p.total} ativos (${pct}%)...`;
+    }
+    if (Array.isArray(p.updated)) {
+      for (const u of p.updated) {
+        if (u && u.ticker && u.summary) {
+          void updateWatchlistBadge(u.ticker, u.summary);
         }
       }
     }
@@ -3536,6 +3729,33 @@
       status.textContent = `Sincronização concluída: ${p.updatedCount} atualizados, ${p.errorCount} erros.`;
     }
   });
+
+  if (typeof window.api.onFirstRegistoProgress === 'function') {
+    subscribeApiEvent('onFirstRegistoProgress', null, (p) => {
+      if (!p) return;
+      if (p.status === 'done' && !p.ticker) {
+        if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
+        return;
+      }
+      if (!p.ticker) return;
+      const pct = typeof p.percent === 'number' ? p.percent : (p.total > 0 ? Math.round(p.current / p.total * 100) : 0);
+      if (indexBulkProgressLabel) {
+        indexBulkProgressLabel.textContent =
+          `1º Registo: Processando ${p.current}/${p.total} (${p.ticker}) - ${pct}%...`;
+      }
+      if (indexBulkProgressFill) indexBulkProgressFill.style.width = pct + '%';
+      if (p.status === 'updated' && p.summary) {
+        void updateWatchlistBadge(p.ticker, p.summary);
+      } else if (p.status === 'updated' && p.firstDate) {
+        const item = watchlistEl.querySelector(`.watchlist-item[data-ticker="${CSS.escape(p.ticker)}"]`);
+        if (item) {
+          item.dataset.firstDate = p.firstDate ? fmtShortDate(p.firstDate) : 'Sem Registos';
+          const wlEntry = watchlist.find(w => w.ticker === p.ticker);
+          applyCardSyncState(item, wlEntry || { ticker: p.ticker, temHistorico: true, ultimaData: p.lastDate });
+        }
+      }
+    });
+  }
 
   if (typeof window.api.onIndexDownloadProgress === 'function') {
     subscribeApiEvent('onIndexDownloadProgress', null, (p) => {

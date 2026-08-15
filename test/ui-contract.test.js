@@ -29,6 +29,20 @@ test('HTML mantém controles necessários para progresso, cancelamento e My List
   }
 });
 
+test('toolbar My List reestruturada expõe os 6 controlos e o badge de estado', () => {
+  for (const id of ['select-index-bulk-fetch', 'mylist-search-input', 'btn-first-registo', 'btn-most-recent', 'btn-add-stock-modal', 'btn-index-actions', 'index-status-badge']) {
+    assert.match(html, new RegExp(`id=["']${id}["']`));
+  }
+  assert.match(html, /Todos os Índices/);
+  assert.match(html, /value="ALL"/);
+  assert.match(html, /1º Registo \(Baixar histórico desde o IPO\/Origem\)/);
+  assert.match(html, /Mais Recente \(Sincronizar até à última sessão de mercado\)/);
+  assert.match(renderer, /refreshIndexStatusBadge\(\)/);
+  assert.match(renderer, /window\.api\.firstRegisto\(/);
+  assert.match(renderer, /window\.api\.syncAllListStocks\(/);
+  assert.match(renderer, /onFirstRegistoProgress/);
+});
+
 test('eliminação de índice pede confirmação antes de invocar o IPC e recarrega a My List', () => {
   assert.match(html, /id=["']btn-delete-index["']/);
   assert.match(renderer, /window\.api\.deleteIndexWithStocks\(indexId\)/);

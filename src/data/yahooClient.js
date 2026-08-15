@@ -550,6 +550,13 @@ function buildIncrementalPeriod1(lastStoredDate) {
   return date;
 }
 
+function buildPeriod1FromDate(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const date = new Date(dateStr + 'T00:00:00Z');
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
 async function fetchIncrementalYahooHistory(ticker, lastStoredDate) {
   const period1 = buildIncrementalPeriod1(lastStoredDate);
   if (!period1) {
@@ -591,6 +598,33 @@ async function fetchIncrementalYahooHistory(ticker, lastStoredDate) {
   }
 }
 
+async function fetchHistorySince(ticker, sinceDate) {
+  const period1 = buildPeriod1FromDate(sinceDate);
+  if (!period1) return fetchFullYahooHistory(ticker);
+  const period2 = new Date();
+  if (period1.getTime() >= period2.getTime()) return [];
+
+  const normalizedTicker = normalizeTicker(ticker);
+  try {
+    await sleep(1200 + Math.random() * 800);
+    const result = await yahooFinance.chart(
+      normalizedTicker,
+      { period1, period2, interval: '1d' },
+      {
+        fetchOptions: {
+          headers: { 'User-Agent': USER_AGENT }
+        }
+      }
+    );
+    const quotes = result && result.quotes;
+    if (!Array.isArray(quotes) || quotes.length === 0) return [];
+    return processQuotes(quotes, ticker);
+  } catch (err) {
+    console.warn(`[yahooClient] fetchHistorySince(${ticker}, ${sinceDate}): ${err && err.message ? err.message : err}`);
+    return [];
+  }
+}
+
 async function fetchFirstTradeDate(ticker) {
   try {
     await sleep(1200 + Math.random() * 800);
@@ -613,4 +647,4 @@ async function fetchFirstTradeDate(ticker) {
   }
 }
 
-module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory, buildIncrementalPeriod1, fetchFirstTradeDate };
+module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory, buildIncrementalPeriod1, fetchFirstTradeDate, fetchHistorySince };

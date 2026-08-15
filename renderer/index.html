@@ -159,6 +159,13 @@
 
       <div class="tab-content" id="tab-mylist">
         <div class="mylist-toolbar">
+          <div class="toolbar-group index-select-group">
+            <select id="select-index-bulk-fetch" class="toolbar-select" title="Filtrar a My List por índice (ou ver todos)">
+              <option value="ALL" selected>Todos os Índices</option>
+            </select>
+            <span class="index-status-badge" id="index-status-badge" hidden></span>
+          </div>
+
           <div class="toolbar-group search-group">
             <div class="search-input-wrapper">
               <i class="search-icon">🔍</i>
@@ -166,51 +173,63 @@
             </div>
           </div>
 
-          <div class="toolbar-group country-index-group">
-            <select id="select-country-filter" class="toolbar-select" title="Importar o índice oficial do país">
-              <option value="" selected>Selecionar País...</option>
-              <option value="Portugal">Portugal — PSI</option>
-              <option value="Espanha">Espanha — IBEX 35</option>
-              <option value="Alemanha">Alemanha — DAX 40</option>
-              <option value="EUA">EUA — S&amp;P 500</option>
-              <option value="França">França — CAC 40</option>
-              <option value="Holanda">Holanda — AEX 25</option>
-              <option value="Suíça">Suíça — SMI</option>
-              <option value="Itália">Itália — FTSE MIB</option>
-              <option value="Reino Unido">Reino Unido — FTSE 100</option>
-              <option value="Japão">Japão — Nikkei 225</option>
-              <option value="Hong Kong">Hong Kong — Hang Seng</option>
-            </select>
-            <button id="btn-cancel-country-import" class="btn btn-secondary toolbar-btn import-cancel-btn" type="button" hidden>
-              <span>Cancelar importação</span>
+          <div class="toolbar-group data-actions-group">
+            <button id="btn-first-registo" class="btn btn-secondary toolbar-btn" title="1º Registo (Baixar histórico desde o IPO/Origem)">
+              <i class="toolbar-btn-icon">🌅</i><span>1º Registo</span>
+            </button>
+            <button id="btn-most-recent" class="btn btn-primary toolbar-btn" title="Mais Recente (Sincronizar até à última sessão de mercado)">
+              <i class="toolbar-btn-icon">⬇️</i><span>Mais Recente</span>
+            </button>
+          </div>
+
+          <div class="toolbar-group add-action-group">
+            <button id="btn-add-stock-modal" class="btn btn-success toolbar-btn" title="Adicionar novo ativo à My List">
+              <i class="toolbar-btn-icon">➕</i><span>Adicionar Ativo</span>
             </button>
           </div>
 
           <div class="toolbar-group index-actions-group">
-            <select id="select-index-bulk-fetch" class="toolbar-select">
-              <option value="" disabled selected>Selecionar Índice...</option>
-            </select>
-            <button id="btn-update-index-dates" class="btn btn-secondary toolbar-btn" title="Obter no Yahoo Finance a 1ª data registada (IPO) de TODOS os ativos deste índice e gravar na SQLite">
-              <i class="toolbar-btn-icon">🔄</i><span>Atualizar Data</span>
-            </button>
-            <button id="btn-delete-index" class="btn btn-secondary toolbar-btn btn-danger-ghost" title="Eliminar o índice selecionado e todos os seus ativos da base de dados">
-              <i class="toolbar-btn-icon">🗑️</i><span>Eliminar Índice</span>
-            </button>
-          </div>
-
-          <div class="toolbar-group global-actions-group">
-            <button id="btn-download-all-mylist" class="btn btn-primary toolbar-btn" title="Descarregar histórico de todos os ativos da My List">
-              <i class="toolbar-btn-icon">⬇️</i><span>Baixar Tudo</span>
-            </button>
-            <button id="btn-add-stock-modal" class="btn btn-success toolbar-btn" title="Adicionar novo ativo à My List">
-              <i class="toolbar-btn-icon">➕</i><span>Adicionar Ativo</span>
-            </button>
-            <button id="btn-import-csv" class="btn btn-secondary toolbar-btn" title="Importar histórico de CSV">
-              <i class="toolbar-btn-icon">📄</i><span>Importar CSV</span>
-            </button>
-            <button id="btn-purge-inactive" class="btn btn-secondary toolbar-btn" title="Remover ativos sem registos de cotação nos últimos 60 dias">
-              <i class="toolbar-btn-icon">🧹</i><span>Limpar Inativos</span>
-            </button>
+            <div class="index-actions-menu" id="index-actions-menu">
+              <button id="btn-index-actions" class="btn btn-secondary toolbar-btn" title="Opções / Ações do Índice">
+                <i class="toolbar-btn-icon">⚙️</i><span>Ações do Índice</span>
+              </button>
+              <div class="index-actions-dropdown" id="index-actions-dropdown" hidden>
+                <div class="index-actions-dropdown-label">Importar índice do país</div>
+                <select id="select-country-filter" class="toolbar-select" title="Importar o índice oficial do país">
+                  <option value="" selected>Selecionar País...</option>
+                  <option value="Portugal">Portugal — PSI</option>
+                  <option value="Espanha">Espanha — IBEX 35</option>
+                  <option value="Alemanha">Alemanha — DAX 40</option>
+                  <option value="EUA">EUA — S&amp;P 500</option>
+                  <option value="França">França — CAC 40</option>
+                  <option value="Holanda">Holanda — AEX 25</option>
+                  <option value="Suíça">Suíça — SMI</option>
+                  <option value="Itália">Itália — FTSE MIB</option>
+                  <option value="Reino Unido">Reino Unido — FTSE 100</option>
+                  <option value="Japão">Japão — Nikkei 225</option>
+                  <option value="Hong Kong">Hong Kong — Hang Seng</option>
+                </select>
+                <button id="btn-cancel-country-import" class="btn btn-secondary toolbar-btn import-cancel-btn" type="button" hidden>
+                  <span>Cancelar importação</span>
+                </button>
+                <div class="index-actions-divider"></div>
+                <button id="btn-update-index-dates" class="index-action-item" title="Obter no Yahoo Finance a 1ª data registada (IPO) de TODOS os ativos deste índice e gravar na SQLite">
+                  <i class="toolbar-btn-icon">🔄</i><span>Atualizar 1ª Data</span>
+                </button>
+                <button id="btn-delete-index" class="index-action-item index-action-danger" title="Eliminar o índice selecionado e todos os seus ativos da base de dados">
+                  <i class="toolbar-btn-icon">🗑️</i><span>Eliminar Índice</span>
+                </button>
+                <button id="btn-download-all-mylist" class="index-action-item" title="Descarregar histórico de todos os ativos da My List">
+                  <i class="toolbar-btn-icon">⬇️</i><span>Baixar Tudo</span>
+                </button>
+                <button id="btn-import-csv" class="index-action-item" title="Importar histórico de CSV">
+                  <i class="toolbar-btn-icon">📄</i><span>Importar CSV</span>
+                </button>
+                <button id="btn-purge-inactive" class="index-action-item" title="Remover ativos sem registos de cotação nos últimos 60 dias">
+                  <i class="toolbar-btn-icon">🧹</i><span>Limpar Inativos</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
