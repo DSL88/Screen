@@ -8,10 +8,12 @@ Axios/Yahoo e o relógio de backoff são substituídos por mocks locais.
 | SQLite | migração de schema legado, colunas, metadata, UPSERT, idempotência, bulk e pipeline | `database.test.js`, `pipeline.sqlite.test.js` |
 | Importação | CSV, headers, datas, linhas inválidas, transação e deduplicação | `importer.test.js` |
 | Wikipedia | tabelas, notas, símbolos, sufixos, deduplicação e fallback | `wikipedia.test.js` |
-| Yahoo/Stooq | sucesso, vazio, 404, 429, timeout, datas inválidas e fallback | `market-data.test.js`, `yahoo-client.test.js` |
+| Yahoo/Stooq | sucesso, vazio, 404, 429, timeout, datas inválidas, fallback e `fetchHistorySince` (bloco desde a data inicial) | `market-data.test.js`, `yahoo-client.test.js` |
 | Scanner | persistência mista, falha parcial, limite de concorrência e cancelamento | `scanner.test.js` |
 | IPC/worker | progresso, done, cancelamento, estados finais do contrato e unsubscribe do preload | `ipc-worker.test.js`, `pipeline.ipc.test.js`, `preload-ipc.test.js` |
 | UI | re-render da My List, país repetido, proteção de reentrada e listeners | `ui-contract.test.js` |
+| Estado do índice | `checkIndexStatus`: COMPLETO, pendente-1º-registo, pendente-recente, ALL e mistos | `index-status.test.js` |
+| Sync My List | `getLastStoredDate`, incremental up-to-date, batch UPSERT e fluxo 1º Registo idempotente | `most-recent.test.js` |
 
 ## Lacunas conhecidas
 

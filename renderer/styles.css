@@ -3856,6 +3856,117 @@ select.param-input option {
   transform: none;
 }
 
+/* Índice: seletor com badge de estado COMPLETO */
+.index-select-group {
+  align-items: center;
+}
+.index-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+.index-status-badge[hidden] {
+  display: none;
+}
+.index-status-badge.is-complete {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+.index-status-badge.is-pending-recent {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+.index-status-badge.is-pending-first {
+  background-color: rgba(107, 114, 128, 0.15);
+  color: #9ca3af;
+  border: 1px solid rgba(107, 114, 128, 0.4);
+}
+.wl-group-status.index-status-badge {
+  margin: 0 8px;
+  padding: 2px 8px;
+}
+
+/* Dropdown de ações do índice */
+.index-actions-menu {
+  position: relative;
+}
+.index-actions-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 120;
+  min-width: 260px;
+  background: #1e222d;
+  border: 1px solid #2a2e39;
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.index-actions-dropdown[hidden] {
+  display: none;
+}
+.index-actions-dropdown-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #787b86;
+  padding: 2px 8px;
+}
+.index-actions-dropdown .toolbar-select {
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+.index-actions-dropdown .toolbar-btn {
+  width: 100%;
+  justify-content: center;
+  margin-top: 4px;
+}
+.index-actions-divider {
+  height: 1px;
+  background: #2a2e39;
+  margin: 4px 0;
+}
+.index-action-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  color: #d1d4dc;
+  border: none;
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s ease;
+}
+.index-action-item:hover {
+  background-color: #2a2e39;
+  color: #ffffff;
+}
+.index-action-item.index-action-danger {
+  color: #f87171;
+}
+.index-action-item.index-action-danger:hover {
+  background-color: rgba(248, 113, 113, 0.1);
+}
+
 /* ═══════════════════════════════════════════════════════════
    SIMULAÇÃO DE ESTRATÉGIAS TAB
    ═══════════════════════════════════════════════════════════ */

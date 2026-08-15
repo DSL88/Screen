@@ -25,3 +25,22 @@ test('eliminação de índice expõe um único handler e preload coerente', () =
   assert.match(main, /db\.deleteIndexAndStocks\(indexName\)/);
   assert.match(preload, /deleteIndexWithStocks:\s*\(indexName\)\s*=>\s*ipcRenderer\.invoke\('delete-index-with-stocks', indexName\)/);
 });
+
+test('1º Registo expõe um único handler, progresso por ticker e preload coerente', () => {
+  assert.equal((main.match(/ipcMain\.handle\(['"]first-registo-index['"]/g) || []).length, 1);
+  assert.match(main, /beginPipelineOperation\('first-registo'/);
+  assert.match(main, /send\('first-registo-progress'/);
+  assert.match(main, /db\.updateStockFirstDate\(/);
+  assert.match(main, /db\.saveHistoricalCandlesFromImport\(/);
+  assert.match(main, /db\.setFullHistoryFetched\(/);
+  assert.match(main, /CHUNK_SIZE\s*=\s*3/);
+  assert.match(preload, /firstRegisto:\s*\(index,\s*operationId\)\s*=>\s*ipcRenderer\.invoke\('first-registo-index'/);
+  assert.match(preload, /onFirstRegistoProgress/);
+  assert.match(preload, /'first-registo-progress'/);
+});
+
+test('check-index-status usa o validador completo checkIndexStatus', () => {
+  assert.equal((main.match(/ipcMain\.handle\(['"]check-index-status['"]/g) || []).length, 1);
+  assert.match(main, /db\.checkIndexStatus\(index\)/);
+  assert.match(preload, /checkIndexStatus:\s*\(indexName\)\s*=>\s*ipcRenderer\.invoke\('check-index-status', indexName\)/);
+});
