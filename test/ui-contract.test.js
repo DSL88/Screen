@@ -50,3 +50,50 @@ test('eliminação de índice pede confirmação antes de invocar o IPC e recarr
   assert.match(renderer, /confirmLabel:\s*'Sim, Apagar Tudo'/);
   assert.match(renderer, /await reloadMyListFromDatabase\(\);/);
 });
+
+test('toolbar de Auditoria 1º Registo liga o botão ao sync e o badge à auditoria', () => {
+  assert.match(renderer, /btnFirstRegisto\.addEventListener\('click'/);
+  assert.match(renderer, /window\.api\.syncIndexFirstRecords\(requestName\)/);
+  assert.match(renderer, /setFirstRegistoBusy\(/);
+  assert.match(renderer, /function setFirstRegistoBusy/);
+  assert.match(renderer, /A auditar e descarregar 1º registo de/);
+  assert.match(renderer, /A auditar e descarregar \$\{p\.ticker\}/);
+
+  // O badge de estado do índice é alimentado pela auditoria (X/Y ativos completos).
+  assert.match(renderer, /refreshIndexStatusBadge\(\)/);
+  assert.match(renderer, /window\.api\.auditIndex\(requestIndex\)/);
+  assert.match(renderer, /\$\{audit\.completeCount\}\/\$\{audit\.totalStocks\} ativos completos/);
+  assert.match(renderer, /audit\.pendingCount === 0/);
+
+  // Progresso subscrito exatamente uma vez via subscribeApiEvent (sem duplicados).
+  assert.equal((renderer.match(/subscribeApiEvent\('onIndexSyncProgress'/g) || []).length, 1);
+  assert.equal((renderer.match(/btnFirstRegisto\.addEventListener\('click'/g) || []).length, 1);
+  assert.equal((renderer.match(/setFirstRegistoBusy\(true\)/g) || []).length, 1);
+});
+
+test('modal de edição de metadados expõe os 4 controlos e o botão de gravação', () => {
+  for (const id of ['modal-stock-name', 'modal-stock-country', 'modal-stock-index', 'modal-stock-index-custom', 'btn-save-stock-metadata']) {
+    assert.match(html, new RegExp(`id=["']${id}["']`));
+  }
+  assert.match(html, /CUSTOM_NEW/);
+});
+
+test('saveStockMetadata grava via IPC, notifica sucesso e repopula a UI sem duplicar listeners', () => {
+  // A função existe e é a única registada no botão.
+  assert.match(renderer, /async function saveStockMetadata\(\)/);
+  assert.equal((renderer.match(/btnSaveStockMetadata\.addEventListener\('click', saveStockMetadata\)/g) || []).length, 1);
+
+  // Chama o canal via preload com (ticker, data) e lê o contrato { ok }.
+  assert.match(renderer, /window\.api\.updateStockMetadata\(ticker, data\)/);
+  assert.match(renderer, /if \(!res \|\| !res\.ok\)/);
+
+  // Sucesso: toast, fecho do modal e repovoamento da My List/dropdown/badge.
+  assert.match(renderer, /showToast\('Metadados atualizados com sucesso', 'success'\)/);
+  assert.match(renderer, /closeAssetDetailModal\(\)/);
+  assert.match(renderer, /await reloadMyListFromDatabase\(\);/);
+  assert.match(renderer, /populateIndexBulkFetchDropdown\(\);/);
+  assert.match(renderer, /await refreshIndexStatusBadge\(\);/);
+
+  // Erro de negócio (res.ok false) mostra toast de erro sem sucesso falso.
+  assert.match(renderer, /showToast\('Erro: ' \+ \(\(res && res\.error\) \|\| 'desconhecido'\), 'error'\)/);
+});

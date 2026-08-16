@@ -647,4 +647,55 @@ async function fetchFirstTradeDate(ticker) {
   }
 }
 
-module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory, buildIncrementalPeriod1, fetchFirstTradeDate, fetchHistorySince };
+async function fetchFirstAvailableDate(ticker) {
+  // Primeira data de negociação disponível (IPO) em ISO 'YYYY-MM-DD'.
+  // Wrapper fino: tenta o chart range=max (1mo) e, em último recurso,
+  // deriva a data da primeira vela do histórico diário completo.
+  const firstDate = await fetchFirstTradeDate(ticker);
+  if (firstDate) return firstDate;
+  try {
+    const candles = await fetchFullYahooHistory(ticker);
+    if (Array.isArray(candles) && candles.length > 0) return candles[0].date || null;
+  } catch (err) {
+    console.warn(`[yahooClient] fetchFirstAvailableDate(${ticker}): ${err && err.message ? err.message : err}`);
+  }
+  return null;
+}
+
+async function fetchFullHistoryFromIPO(ticker) {
+  // Histórico diário total desde a origem (period1=0 até agora).
+  // Reforça o contrato: velas sanitizadas (tipos numéricos, sem nulos),
+  // deduplicadas por data e ordenadas ASC.
+  const candles = await fetchFullYahooHistory(ticker);
+  if (!Array.isArray(candles) || candles.length === 0) return [];
+
+  const sanitized = [];
+  const seen = new Set();
+  for (const c of candles) {
+    if (!c || !c.date) continue;
+    const date = String(c.date).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || seen.has(date)) continue;
+    const close = Number(c.close);
+    if (!Number.isFinite(close)) continue;
+    const open = Number.isFinite(Number(c.open)) ? Number(c.open) : close;
+    const high = Number.isFinite(Number(c.high))
+      ? Math.max(Number(c.high), open, close)
+      : Math.max(open, close);
+    const low = Number.isFinite(Number(c.low))
+      ? Math.min(Number(c.low), open, close)
+      : Math.min(open, close);
+    seen.add(date);
+    sanitized.push({
+      date,
+      open,
+      high,
+      low,
+      close,
+      volume: Number.isFinite(Number(c.volume)) ? Number(c.volume) : 0
+    });
+  }
+  sanitized.sort((a, b) => a.date.localeCompare(b.date));
+  return sanitized;
+}
+
+module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory, buildIncrementalPeriod1, fetchFirstTradeDate, fetchHistorySince, fetchFirstAvailableDate, fetchFullHistoryFromIPO };

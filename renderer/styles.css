@@ -3131,6 +3131,59 @@ select.param-input option {
   color: var(--text);
 }
 
+/* ── Edição de Metadados do Ativo (Nome / País / Índice) ── */
+.asset-detail-metadata-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.asset-detail-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.asset-detail-meta-row-full {
+  grid-column: 1 / -1;
+}
+
+.asset-detail-meta-input {
+  margin-top: 2px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.asset-detail-meta-input-custom {
+  margin-top: 8px;
+}
+
+.asset-detail-meta-input[hidden] {
+  display: none;
+}
+
+.asset-detail-metadata-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.asset-detail-metadata-actions .form-error {
+  flex: 1;
+  min-width: 180px;
+}
+
+.asset-detail-save-metadata-btn {
+  justify-content: center;
+  min-width: 180px;
+}
+
+.asset-detail-save-metadata-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .asset-detail-section-title {
   font-size: 10px;
   font-weight: 700;
@@ -3889,6 +3942,12 @@ select.param-input option {
   background-color: rgba(107, 114, 128, 0.15);
   color: #9ca3af;
   border: 1px solid rgba(107, 114, 128, 0.4);
+}
+/* Resumo de auditoria "X/Y ativos completos" (1º registo por índice) */
+.index-status-badge.is-audit-summary {
+  background-color: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
 }
 .wl-group-status.index-status-badge {
   margin: 0 8px;

@@ -145,6 +145,7 @@
   let countryImport = null;
   const apiUnsubscribers = [];
   let mostRecentActive = false;
+  let firstRegistoActive = false;
   const indexStatusCache = new Map();
 
   function subscribeApiEvent(method, channel, callback) {
@@ -903,7 +904,45 @@
     const selectedOption = selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0];
     const requestIndex = (selectedOption && selectedOption.dataset.dbName) || idx;
     try {
-      const s = await window.api.checkIndexStatus(requestIndex);
+      const auditPromise = typeof window.api.auditIndex === 'function'
+        ? window.api.auditIndex(requestIndex)
+        : Promise.resolve(null);
+      const statusPromise = typeof window.api.checkIndexStatus === 'function'
+        ? window.api.checkIndexStatus(requestIndex)
+        : Promise.resolve(null);
+      const [audit, s] = await Promise.all([auditPromise, statusPromise]);
+      const auditOk = !!audit && audit.ok !== false && typeof audit.totalStocks === 'number';
+      // Auditoria "1º Registo por Índice": badge verde COMPLETO ou resumo X/Y.
+      if (auditOk) {
+        if (audit.totalStocks === 0) {
+          indexStatusBadge.hidden = true;
+          return;
+        }
+        const fullStatus = (s && s.ok && s.status) || null;
+        // COMPLETO exige também a dimensão "recente": todos os ativos com
+        // histórico desde a origem E última data >= dia esperado (checkIndexStatus).
+        if (audit.pendingCount === 0 && fullStatus === 'COMPLETO') {
+          indexStatusBadge.hidden = false;
+          indexStatusBadge.textContent = 'COMPLETO';
+          indexStatusBadge.className = 'index-status-badge is-complete';
+          indexStatusBadge.title = `${audit.completeCount}/${audit.totalStocks} ativos completos`;
+          return;
+        }
+        // Histórico desde a origem OK mas última data desatualizada.
+        if (audit.pendingCount === 0 && fullStatus === 'pendente-recente') {
+          indexStatusBadge.hidden = false;
+          indexStatusBadge.textContent = 'Pendente: Recente';
+          indexStatusBadge.className = 'index-status-badge is-pending-recent';
+          indexStatusBadge.title = `${audit.completeCount}/${audit.totalStocks} ativos completos desde a origem`;
+          return;
+        }
+        indexStatusBadge.hidden = false;
+        indexStatusBadge.textContent = `${audit.completeCount}/${audit.totalStocks} ativos completos`;
+        indexStatusBadge.className = 'index-status-badge is-audit-summary';
+        indexStatusBadge.title = `${audit.pendingCount} pendente(s) de 1º registo`;
+        return;
+      }
+      // Fallback: estado qualitativo do índice (checkIndexStatus).
       if (s && s.ok && s.status) {
         indexStatusBadge.hidden = false;
         indexStatusBadge.textContent = s.label || s.status;
@@ -912,9 +951,9 @@
           : s.status === 'pendente-recente'
             ? ' is-pending-recent'
             : ' is-pending-first');
-      } else {
-        indexStatusBadge.hidden = true;
+        return;
       }
+      indexStatusBadge.hidden = true;
     } catch (_) {
       indexStatusBadge.hidden = true;
     }
@@ -1070,8 +1109,28 @@
       const selectedOption = selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0];
       const requestIndex = (selectedOption && selectedOption.dataset.dbName) || idx;
       try {
-        const s = await window.api.checkIndexStatus(requestIndex);
-        if (s && s.ok) {
+        // Auditoria automática do 1º Registo por índice selecionado.
+        const [audit, s] = await Promise.all([
+          typeof window.api.auditIndex === 'function'
+            ? window.api.auditIndex(requestIndex)
+            : Promise.resolve(null),
+          typeof window.api.checkIndexStatus === 'function'
+            ? window.api.checkIndexStatus(requestIndex)
+            : Promise.resolve(null)
+        ]);
+        if (audit && audit.ok !== false && typeof audit.totalStocks === 'number') {
+          if (audit.totalStocks === 0) {
+            if (typeof status !== 'undefined' && status) status.textContent = 'Nenhum ativo associado ao índice.';
+          } else if (audit.pendingCount === 0) {
+            if (typeof status !== 'undefined' && status) {
+              status.textContent = `Índice ${idx}: ${audit.totalStocks}/${audit.totalStocks} ativos COMPLETOS.`;
+            }
+          } else {
+            if (typeof status !== 'undefined' && status) {
+              status.textContent = `Índice ${idx}: ${audit.completeCount}/${audit.totalStocks} ativos completos (${audit.pendingCount} pendentes de 1º registo).`;
+            }
+          }
+        } else if (s && s.ok) {
           if (s.totalStocks === 0) {
             if (typeof status !== 'undefined' && status) status.textContent = 'Nenhum ativo associado ao índice.';
           } else {
@@ -2089,7 +2148,14 @@
     return (selectedOption && selectedOption.dataset.dbName) || idx;
   }
 
-  // --- 1º Registo (baixar histórico desde o IPO/Origem) ---
+  // --- 1º Registo (Auditoria + download do histórico desde o IPO/Origem) ---
+  function setFirstRegistoBusy(busy) {
+    // A operação serializa no main process; congelar as ações da toolbar para
+    // evitar cliques múltiplos sem bloquear a pesquisa nem os cards.
+    [btnFirstRegisto, btnMostRecent, btnAddStockModal, btnIndexActions]
+      .filter(Boolean).forEach((btn) => { if (btn) btn.disabled = busy; });
+  }
+
   if (btnFirstRegisto) {
     btnFirstRegisto.addEventListener('click', async () => {
       const requestIndex = getSelectedIndexDbName();
@@ -2099,34 +2165,63 @@
           ? selectIndexBulkFetch.selectedOptions[0].textContent : idx);
       const requestName = requestIndex || idx || 'ALL';
 
-      btnFirstRegisto.disabled = true;
+      if (!requestIndex && (!idx || idx === 'ALL')) {
+        showToast('Seleciona um índice específico para a auditoria do 1º Registo.', 'error');
+        return;
+      }
+
+      firstRegistoActive = true;
+      setFirstRegistoBusy(true);
       const label = btnFirstRegisto.querySelector('span');
       const originalLabel = label.textContent;
-      label.textContent = 'A obter 1º registo...';
+      label.textContent = 'A auditar 1º registo...';
       if (indexBulkProgress) indexBulkProgress.hidden = false;
-      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `1º Registo de ${idxLabel}: a iniciar...`;
+      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A auditar e descarregar 1º registo de ${idxLabel}: a iniciar...`;
       if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
 
       try {
-        const res = await window.api.firstRegisto(requestName);
-        if (res && res.ok) {
-          const msg = res.updated > 0
-            ? `1º Registo concluído: ${res.updated} ativos com histórico desde a origem (${idxLabel}).`
-            : 'Nenhum ativo precisou de novo histórico desde a origem.';
+        let res;
+        if (typeof window.api.syncIndexFirstRecords === 'function') {
+          res = await window.api.syncIndexFirstRecords(requestName);
+        } else {
+          // Fallback legado mantido para contratos antigos do preload.
+          res = await window.api.firstRegisto(requestName);
+        }
+        const errors = Array.isArray(res && res.errors) ? res.errors : [];
+        const errorCount = Number(res && res.errorCount) || errors.length || 0;
+
+        if (res && res.ok && errorCount === 0) {
+          const msg = res.status === 'complete'
+            ? `1º Registo: ${idxLabel} já está completo (${res.total} ativos com histórico desde a origem).`
+            : `1º Registo concluído: ${res.updated} ativos com histórico desde a origem (${idxLabel}).`;
           showToast(msg, 'success');
           if (typeof status !== 'undefined' && status) status.textContent = msg;
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `✅ ${msg}`;
           if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
+        } else if (res && (res.cancelled || (res.ok && errorCount > 0))) {
+          const msg = res.cancelled
+            ? `1º Registo cancelado (${res.updated || 0} ativos atualizados, ${errorCount} falha(s)).`
+            : `1º Registo parcial: ${res.updated}/${res.total} ativos atualizados (${idxLabel}); ${errorCount} falha(s).`;
+          showToast(msg, 'info');
+          if (typeof status !== 'undefined' && status) status.textContent = msg;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `⚠️ ${msg}`;
+          const firstErr = errors[0];
+          if (firstErr && typeof status !== 'undefined' && status) {
+            status.textContent += ` Ex.: ${firstErr.ticker || '?'}: ${firstErr.error || firstErr}`;
+          }
         } else {
-          const errMsg = res && res.error ? res.error : 'Erro desconhecido';
+          const errMsg = (res && (res.error || res.message)) || 'Erro desconhecido';
           showToast('Erro no 1º Registo: ' + errMsg, 'error');
           if (typeof status !== 'undefined' && status) status.textContent = 'Erro no 1º Registo: ' + errMsg;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = '❌ ' + errMsg;
         }
       } catch (err) {
         showToast('Erro no 1º Registo: ' + (err.message || String(err)), 'error');
         if (typeof status !== 'undefined' && status) status.textContent = 'Erro no 1º Registo: ' + (err.message || String(err));
+        if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = '❌ ' + (err.message || String(err));
       } finally {
-        btnFirstRegisto.disabled = false;
+        firstRegistoActive = false;
+        setFirstRegistoBusy(false);
         label.textContent = originalLabel;
         await reloadMyListFromDatabase();
         await refreshIndexStatusBadge();
@@ -3205,8 +3300,12 @@
   const assetDetailClose = document.getElementById('asset-detail-close');
   const assetDetailTickerEl = document.getElementById('asset-detail-ticker');
   const assetDetailNameEl = document.getElementById('asset-detail-name');
-  const assetDetailCountryEl = document.getElementById('asset-detail-country');
-  const assetDetailIndexEl = document.getElementById('asset-detail-index');
+  const modalStockName = document.getElementById('modal-stock-name');
+  const modalStockCountry = document.getElementById('modal-stock-country');
+  const modalStockIndex = document.getElementById('modal-stock-index');
+  const modalStockIndexCustom = document.getElementById('modal-stock-index-custom');
+  const btnSaveStockMetadata = document.getElementById('btn-save-stock-metadata');
+  const assetMetadataError = document.getElementById('asset-metadata-error');
   const assetDetailFirstDate = document.getElementById('asset-detail-first-date');
   const assetDetailLastDate = document.getElementById('asset-detail-last-date');
   const assetDetailTotalCandles = document.getElementById('asset-detail-total-candles');
@@ -3283,8 +3382,17 @@
     // 2. Full clean reset of all modal DOM elements & inputs
     if (assetDetailTickerEl) assetDetailTickerEl.textContent = cleanTicker;
     if (assetDetailNameEl) assetDetailNameEl.textContent = '';
-    if (assetDetailCountryEl) assetDetailCountryEl.textContent = '—';
-    if (assetDetailIndexEl) assetDetailIndexEl.textContent = '—';
+    if (modalStockName) modalStockName.value = '';
+    if (modalStockCountry) modalStockCountry.value = '';
+    if (modalStockIndex) {
+      modalStockIndex.innerHTML = '<option value="" disabled selected>-- Seleciona o Índice --</option>';
+    }
+    if (modalStockIndexCustom) {
+      modalStockIndexCustom.value = '';
+      modalStockIndexCustom.hidden = true;
+    }
+    if (btnSaveStockMetadata) btnSaveStockMetadata.disabled = false;
+    if (assetMetadataError) { assetMetadataError.textContent = ''; assetMetadataError.hidden = true; }
 
     const firstEl = document.getElementById('asset-detail-first-date');
     const lastEl = document.getElementById('asset-detail-last-date');
@@ -3343,13 +3451,15 @@
 
       if (res && res.ok) {
         if (res.stock) {
-          assetDetailNameEl.textContent = res.stock.name || '';
-          assetDetailCountryEl.textContent = res.stock.country || '—';
-          assetDetailIndexEl.textContent = res.stock.index_name || '—';
+          if (assetDetailNameEl) assetDetailNameEl.textContent = res.stock.name || '';
+          if (modalStockName) modalStockName.value = res.stock.name || '';
+          if (modalStockCountry) modalStockCountry.value = res.stock.country || '';
+          populateModalStockIndexDropdown(res.stock.index_name);
         } else if (res.custom) {
-          assetDetailNameEl.textContent = res.custom.name || '';
-          assetDetailCountryEl.textContent = '—';
-          assetDetailIndexEl.textContent = '—';
+          if (assetDetailNameEl) assetDetailNameEl.textContent = res.custom.name || '';
+          if (modalStockName) modalStockName.value = res.custom.name || '';
+          if (modalStockCountry) modalStockCountry.value = '';
+          populateModalStockIndexDropdown('');
         }
         const summary = res.summary || {};
         renderModalState(!!summary.hasData, summary);
@@ -3370,6 +3480,171 @@
     currentAssetTicker = null;
     assetSelectedFile = null;
   }
+
+  // ── Edição de Metadados do Ativo (Nome / País / Índice) ──
+  function getModalStockNameValue() {
+    return modalStockName ? modalStockName.value.trim() : '';
+  }
+
+  function getModalStockCountryValue() {
+    return modalStockCountry ? modalStockCountry.value.trim() : '';
+  }
+
+  function getModalStockIndexValue() {
+    if (!modalStockIndex) return '';
+    if (modalStockIndex.value === 'CUSTOM_NEW') {
+      return modalStockIndexCustom ? modalStockIndexCustom.value.trim() : '';
+    }
+    return modalStockIndex.value.trim();
+  }
+
+  function setModalStockIndexCustomVisible(visible) {
+    if (modalStockIndexCustom) modalStockIndexCustom.hidden = !visible;
+  }
+
+  // Seleciona o índice atual do ativo por defeito. O valor vindo da BD é o ID
+  // canónico (ex.: 'PSI', 'IBEX35') ou o nome de um índice personalizado; os
+  // nomes amigáveis são apenas apresentação. Se não houver opção equivalente,
+  // ativa o modo "+ Digitar Novo Índice / Personalizado..." com o valor preenchido.
+  function setModalStockIndexValue(raw) {
+    if (!modalStockIndex) return;
+    const clean = String(raw || '').trim();
+    if (!clean) {
+      modalStockIndex.value = '';
+      setModalStockIndexCustomVisible(false);
+      return;
+    }
+    const canonical = canonicalIndexId(clean);
+    const options = Array.from(modalStockIndex.options);
+    const matchedOpt = options.find((opt) => {
+      if (!opt.value || opt.value === 'CUSTOM_NEW') return false;
+      return opt.value.toUpperCase() === clean.toUpperCase()
+        || canonicalIndexId(opt.value) === canonical;
+    });
+    if (matchedOpt) {
+      modalStockIndex.value = matchedOpt.value;
+      setModalStockIndexCustomVisible(false);
+    } else {
+      modalStockIndex.value = 'CUSTOM_NEW';
+      if (modalStockIndexCustom) modalStockIndexCustom.value = clean;
+      setModalStockIndexCustomVisible(true);
+    }
+  }
+
+  // Preenche o dropdown de índice do modal com os índices da BD (watchlist +
+  // PREDEFINED_INDEXES), seguindo o padrão de populateIndexDropdown().
+  function populateModalStockIndexDropdown(selectedRaw) {
+    if (!modalStockIndex) return;
+    const currentIndexes = new Map();
+    for (const t of watchlist) {
+      const idxId = canonicalIndexId(t.indexId || t.indexName);
+      if (idxId && !currentIndexes.has(idxId)) {
+        currentIndexes.set(idxId, t.indexName || idxId);
+      }
+    }
+    modalStockIndex.innerHTML = '';
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = '';
+    defaultOpt.disabled = true;
+    defaultOpt.selected = true;
+    defaultOpt.textContent = '-- Seleciona o Índice --';
+    modalStockIndex.appendChild(defaultOpt);
+    if (currentIndexes.size > 0) {
+      const groupCurrent = document.createElement('optgroup');
+      groupCurrent.label = '⭐ Índices Atuais na My List';
+      for (const [idxId, idxName] of currentIndexes) {
+        const opt = document.createElement('option');
+        opt.value = idxId;
+        opt.textContent = idxName || idxId;
+        groupCurrent.appendChild(opt);
+      }
+      modalStockIndex.appendChild(groupCurrent);
+    }
+    const groupOther = document.createElement('optgroup');
+    groupOther.label = '🌐 Outros Índices de Mercado';
+    let hasOther = false;
+    for (const idx of PREDEFINED_INDEXES) {
+      if (!currentIndexes.has(idx.id.toUpperCase())) {
+        const opt = document.createElement('option');
+        opt.value = idx.id;
+        opt.textContent = idx.label;
+        groupOther.appendChild(opt);
+        hasOther = true;
+      }
+    }
+    if (hasOther) modalStockIndex.appendChild(groupOther);
+    const groupCustom = document.createElement('optgroup');
+    groupCustom.label = '➕ Personalizado';
+    const customOpt = document.createElement('option');
+    customOpt.value = 'CUSTOM_NEW';
+    customOpt.textContent = '+ Digitar Novo Índice / Personalizado...';
+    groupCustom.appendChild(customOpt);
+    modalStockIndex.appendChild(groupCustom);
+    setModalStockIndexValue(selectedRaw);
+  }
+
+  if (modalStockIndex) {
+    modalStockIndex.addEventListener('change', () => {
+      if (modalStockIndex.value === 'CUSTOM_NEW') {
+        setModalStockIndexCustomVisible(true);
+        if (modalStockIndexCustom) modalStockIndexCustom.focus();
+      } else {
+        setModalStockIndexCustomVisible(false);
+      }
+    });
+  }
+
+  async function saveStockMetadata() {
+    if (!currentAssetTicker) return;
+    const ticker = currentAssetTicker;
+    if (btnSaveStockMetadata) btnSaveStockMetadata.disabled = true;
+    if (assetMetadataError) { assetMetadataError.textContent = ''; assetMetadataError.hidden = true; }
+    try {
+      const name = getModalStockNameValue();
+      const country = getModalStockCountryValue();
+      const indexName = getModalStockIndexValue();
+      if (!name && !country && !indexName) {
+        showToast('Erro: preenche pelo menos um campo (Nome, País ou Índice)', 'error');
+        return;
+      }
+      const data = {};
+      if (name) data.name = name;
+      if (country) data.country = country;
+      if (indexName) data.index_name = indexName;
+
+      const res = await window.api.updateStockMetadata(ticker, data);
+      // O utilizador mudou de ativo enquanto a gravação decorria: aborta a
+      // atualização da UI (a BD já foi atualizada, o próximo open reflete-a).
+      if (currentAssetTicker !== ticker) return;
+
+      if (!res || !res.ok) {
+        showToast('Erro: ' + ((res && res.error) || 'desconhecido'), 'error');
+        return;
+      }
+
+      showToast('Metadados atualizados com sucesso', 'success');
+      if (name && assetDetailNameEl) assetDetailNameEl.textContent = name;
+
+      // Recarregar a My List a partir da BD (preserva busca/grupos) e fechar
+      // o modal para refletir as mudanças. reloadMyListFromDatabase() já
+      // repovoa o dropdown de bulk-fetch e o badge de estado do índice; as
+      // chamadas explícitas seguintes são idempotentes e cobrem falhas parciais.
+      closeAssetDetailModal();
+      try {
+        await reloadMyListFromDatabase();
+      } catch (err) {
+        console.warn('saveStockMetadata: reloadMyListFromDatabase failed:', err);
+      }
+      populateIndexBulkFetchDropdown();
+      await refreshIndexStatusBadge();
+    } catch (err) {
+      showToast('Erro: ' + (err.message || String(err)), 'error');
+    } finally {
+      if (btnSaveStockMetadata) btnSaveStockMetadata.disabled = false;
+    }
+  }
+
+  if (btnSaveStockMetadata) btnSaveStockMetadata.addEventListener('click', saveStockMetadata);
 
   if (assetDetailClose) assetDetailClose.addEventListener('click', closeAssetDetailModal);
   if (modalAssetDetail) {
@@ -3589,9 +3864,9 @@
 
       const res = await window.api.importBulk({
         ticker: activeTicker,
-        name: assetDetailNameEl.textContent || activeTicker,
-        country: assetDetailCountryEl.textContent === '—' ? '' : assetDetailCountryEl.textContent,
-        indexName: assetDetailIndexEl.textContent === '—' ? '' : assetDetailIndexEl.textContent,
+        name: getModalStockNameValue() || (assetDetailNameEl && assetDetailNameEl.textContent) || activeTicker,
+        country: getModalStockCountryValue(),
+        indexName: getModalStockIndexValue(),
         fileData: Array.from(uint8Array),
         fileName: assetSelectedFile.name
       });
@@ -3753,6 +4028,38 @@
           const wlEntry = watchlist.find(w => w.ticker === p.ticker);
           applyCardSyncState(item, wlEntry || { ticker: p.ticker, temHistorico: true, ultimaData: p.lastDate });
         }
+      }
+    });
+  }
+
+  // Auditoria + download do 1º registo por índice (nova pipeline
+  // sync-index-first-records). Atualiza a barra e os cards reativamente.
+  if (typeof window.api.onIndexSyncProgress === 'function') {
+    subscribeApiEvent('onIndexSyncProgress', null, (p) => {
+      if (!p || !firstRegistoActive) return;
+      if (p.status === 'done') {
+        if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
+        return;
+      }
+      if (!p.ticker) return;
+      const pct = typeof p.percent === 'number' ? p.percent
+        : (p.total > 0 ? Math.round(p.current / p.total * 100) : 0);
+      if (indexBulkProgressLabel) {
+        indexBulkProgressLabel.textContent = p.status === 'syncing'
+          ? `A auditar e descarregar ${p.ticker} (${p.current} de ${p.total})...`
+          : `1º Registo: ${p.ticker} (${p.current} de ${p.total}) - ${pct}%...`;
+      }
+      if (indexBulkProgressFill) indexBulkProgressFill.style.width = pct + '%';
+      if (typeof status !== 'undefined' && status) {
+        status.textContent = p.status === 'error'
+          ? `Falha em ${p.ticker}: ${p.error || 'erro'} (a operação continua).`
+          : `1º Registo: ${p.current}/${p.total} (${p.ticker})...`;
+      }
+      if (p.status === 'updated' && p.ticker) {
+        // Atualização seletiva do card do ticker processado (sem reload global).
+        const wlEntry = watchlist.find(w => w.ticker === String(p.ticker).toUpperCase());
+        if (wlEntry && p.firstDate) wlEntry.first_date = p.firstDate;
+        void updateWatchlistBadge(p.ticker, null);
       }
     });
   }

@@ -78,7 +78,10 @@ test('índice sem first_date → pendente-primeiro-registo', { skip: !SQLITE_AVA
   await withExpectedDay(EXPECTED, () => {
     const { db, dir } = makeDb();
     db.upsertStock({ ticker: 'A.LS', name: 'A', country: 'Portugal', indexName: 'PSI' });
+    // saveHistoricalCandlesFromImport auto-preenche first_date quando NULL;
+    // limpar depois reconstitui o cenário "sem first_date" para o validador.
     db.saveHistoricalCandlesFromImport('A.LS', [makeCandle('A.LS', EXPECTED, 20)]);
+    db.updateStockFirstDate('A.LS', null);
 
     const s = db.checkIndexStatus('PSI');
     assert.equal(s.status, 'pendente-primeiro-registo');
@@ -98,6 +101,7 @@ test('índice com full_history_fetched mas SEM first_date → pendente-primeiro-
       makeCandle('A.LS', '2010-01-01', 10),
       makeCandle('A.LS', EXPECTED, 20)
     ]);
+    db.updateStockFirstDate('A.LS', null);
 
     const s = db.checkIndexStatus('PSI');
     assert.equal(s.status, 'pendente-primeiro-registo');

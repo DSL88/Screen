@@ -868,14 +868,32 @@
         <button class="modal-close" id="asset-detail-close" aria-label="Fechar">×</button>
       </div>
       <div class="modal-body">
-        <div class="asset-detail-meta">
-          <div class="asset-detail-meta-row">
-            <span class="asset-detail-meta-label">País</span>
-            <span class="asset-detail-meta-value" id="asset-detail-country">—</span>
+        <div class="asset-detail-metadata-section">
+          <div class="asset-detail-section-title-row">
+            <div class="asset-detail-section-title">Metadados do Ativo</div>
           </div>
-          <div class="asset-detail-meta-row">
-            <span class="asset-detail-meta-label">Índice</span>
-            <span class="asset-detail-meta-value" id="asset-detail-index">—</span>
+          <div class="asset-detail-meta-grid">
+            <div class="asset-detail-meta-row asset-detail-meta-row-full">
+              <span class="asset-detail-meta-label">Nome</span>
+              <input type="text" id="modal-stock-name" class="form-input asset-detail-meta-input" placeholder="Nome do ativo" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="asset-detail-meta-row">
+              <span class="asset-detail-meta-label">País</span>
+              <input type="text" id="modal-stock-country" class="form-input asset-detail-meta-input" placeholder="ex: Portugal, Espanha, EUA..." autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="asset-detail-meta-row">
+              <span class="asset-detail-meta-label">Índice</span>
+              <select id="modal-stock-index" class="form-input asset-detail-meta-input">
+                <option value="" disabled selected>-- Seleciona o Índice --</option>
+              </select>
+              <input type="text" id="modal-stock-index-custom" class="form-input asset-detail-meta-input asset-detail-meta-input-custom" placeholder="Nome do novo índice..." autocomplete="off" spellcheck="false" hidden />
+            </div>
+          </div>
+          <div class="asset-detail-metadata-actions">
+            <button type="button" class="btn-primary asset-detail-save-metadata-btn" id="btn-save-stock-metadata">
+              <span class="btn-label">Guardar Alterações</span>
+            </button>
+            <div class="form-error" id="asset-metadata-error" hidden></div>
           </div>
         </div>
 

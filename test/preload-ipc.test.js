@@ -49,3 +49,86 @@ test('preload expõe IPC permitido, remove listeners e bloqueia canais arbitrár
     delete require.cache[preload];
   }
 });
+
+test('preload expõe auditIndex, syncIndexFirstRecords e onIndexSyncProgress', () => {
+  const preload = require.resolve('../preload');
+  delete require.cache[preload];
+  let api;
+  const listeners = new Map();
+  const ipcRenderer = {
+    invoked: [],
+    invoke(channel, payload) { this.invoked.push({ channel, payload }); return Promise.resolve({ ok: true }); },
+    on(channel, handler) { listeners.set(channel, handler); },
+    removeListener(channel, handler) { if (listeners.get(channel) === handler) listeners.delete(channel); }
+  };
+  const originalLoad = Module._load;
+  Module._load = function (request, parent, isMain) {
+    if (request === 'electron') return { contextBridge: { exposeInMainWorld(_name, value) { api = value; } }, ipcRenderer };
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  try {
+    originalLoad(preload, module, false);
+    assert.ok(api);
+
+    // auditIndex → handler 'audit-index'
+    api.auditIndex('PSI');
+    assert.equal(ipcRenderer.invoked[0].channel, 'audit-index');
+    assert.equal(ipcRenderer.invoked[0].payload, 'PSI');
+
+    // syncIndexFirstRecords → handler 'sync-index-first-records' com { index, operationId }
+    api.syncIndexFirstRecords('PSI', 'op-sync-1');
+    assert.equal(ipcRenderer.invoked[1].channel, 'sync-index-first-records');
+    assert.deepEqual(ipcRenderer.invoked[1].payload, { index: 'PSI', operationId: 'op-sync-1' });
+
+    // onIndexSyncProgress subscreve/remove o canal 'index-sync-progress'
+    const callback = () => {};
+    const unsub = api.onIndexSyncProgress(callback);
+    assert.equal(listeners.has('index-sync-progress'), true);
+    unsub();
+    assert.equal(listeners.has('index-sync-progress'), false);
+
+    // O canal também é aceite pelo gate genérico on() (está em ALLOWED_EVENTS)
+    const unsubOn = api.on('index-sync-progress', callback);
+    assert.equal(listeners.has('index-sync-progress'), true);
+    unsubOn();
+    assert.equal(listeners.has('index-sync-progress'), false);
+  } finally {
+    Module._load = originalLoad;
+    delete require.cache[preload];
+  }
+});
+
+test('preload expõe updateStockMetadata que invoca o canal com { ticker, data }', () => {
+  const preload = require.resolve('../preload');
+  delete require.cache[preload];
+  let api;
+  const ipcRenderer = {
+    invoked: [],
+    invoke(channel, payload) { this.invoked.push({ channel, payload }); return Promise.resolve({ ok: true }); },
+    on() {},
+    removeListener() {}
+  };
+  const originalLoad = Module._load;
+  Module._load = function (request, parent, isMain) {
+    if (request === 'electron') return { contextBridge: { exposeInMainWorld(_name, value) { api = value; } }, ipcRenderer };
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  try {
+    originalLoad(preload, module, false);
+    assert.ok(api);
+    assert.equal(typeof api.updateStockMetadata, 'function');
+
+    api.updateStockMetadata('aaa.ls', { name: 'Nome novo', country: 'Portugal' });
+    assert.equal(ipcRenderer.invoked[0].channel, 'update-stock-metadata');
+    assert.deepEqual(ipcRenderer.invoked[0].payload, { ticker: 'aaa.ls', data: { name: 'Nome novo', country: 'Portugal' } });
+
+    // Campos omitidos não são forçados: o payload transporta apenas o que o
+    // chamador passou (o main faz a normalização/validação).
+    api.updateStockMetadata('BBB', {});
+    assert.deepEqual(ipcRenderer.invoked[1].payload, { ticker: 'BBB', data: {} });
+  } finally {
+    Module._load = originalLoad;
+    delete require.cache[preload];
+  }
+});
+
