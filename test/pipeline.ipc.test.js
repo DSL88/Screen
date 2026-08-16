@@ -70,6 +70,15 @@ test('sync-index-first-records expõe um único handler com progresso e contrato
   assert.match(preload, /'index-sync-progress'/);
 });
 
+test('get-distinct-indices expõe um único handler que devolve { ok: true, indices }', () => {
+  assert.equal((main.match(/ipcMain\.handle\(['"]get-distinct-indices['"]/g) || []).length, 1);
+  assert.match(main, /db\.getAllDistinctIndices\(\)/);
+  assert.match(main, /return \{ ok: true, indices \};/);
+  // Sem payload; contrato de retorno: sucesso espalha o array, erro normaliza.
+  assert.match(main, /return \{ ok: false, error: err\.message \|\| String\(err\) \};/);
+  assert.match(preload, /getDistinctIndices:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('get-distinct-indices'\)/);
+});
+
 test('update-stock-metadata expõe um único handler que delega em db.updateStockMetadata', () => {
   assert.equal((main.match(/ipcMain\.handle\(['"]update-stock-metadata['"]/g) || []).length, 1);
   assert.match(main, /db\.updateStockMetadata\(ticker, payload && payload\.data\)/);

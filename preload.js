@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('api', {
   checkHistory: (ticker) => ipcRenderer.invoke('history:check', { ticker }),
   getTickerDetail: (ticker) => ipcRenderer.invoke('ticker:getDetail', { ticker }),
   updateStockMetadata: (ticker, data) => ipcRenderer.invoke('update-stock-metadata', { ticker, data }),
+  getDistinctIndices: () => ipcRenderer.invoke('get-distinct-indices'),
   syncTickerYahoo: (ticker) => ipcRenderer.invoke('ticker:syncYahoo', { ticker }),
   downloadFullYahooHistory: (ticker) => ipcRenderer.invoke('download-full-yahoo-history', { ticker }),
   deleteTickerHistory: (ticker) => ipcRenderer.invoke('ticker:deleteHistory', { ticker }),
