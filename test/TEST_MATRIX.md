@@ -14,6 +14,7 @@ Axios/Yahoo e o relógio de backoff são substituídos por mocks locais.
 | UI | re-render da My List, país repetido, proteção de reentrada e listeners | `ui-contract.test.js` |
 | Estado do índice | `checkIndexStatus`: COMPLETO, pendente-1º-registo, pendente-recente, ALL e mistos | `index-status.test.js` |
 | Sync My List | `getLastStoredDate`, incremental up-to-date, batch UPSERT e fluxo 1º Registo idempotente | `most-recent.test.js` |
+| Metadados do ativo | `updateStockMetadata`: parcial/total, COALESCE, normalização do índice, ticker exato, inválidos e IPC/preload/UI | `stock-metadata.test.js`, `pipeline.ipc.test.js`, `preload-ipc.test.js`, `ui-contract.test.js` |
 
 ## Lacunas conhecidas
 

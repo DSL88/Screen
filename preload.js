@@ -17,6 +17,7 @@ const ALLOWED_EVENTS = new Set([
   'UPDATE_INDEX_DATE_PROGRESS',
   'country-index-progress',
   'first-registo-progress',
+  'index-sync-progress',
   'simulation:progress',
   'simulation:result',
   'simulation:error'
@@ -47,6 +48,7 @@ contextBridge.exposeInMainWorld('api', {
   importBulk: (data) => ipcRenderer.invoke('import:bulk', data),
   checkHistory: (ticker) => ipcRenderer.invoke('history:check', { ticker }),
   getTickerDetail: (ticker) => ipcRenderer.invoke('ticker:getDetail', { ticker }),
+  updateStockMetadata: (ticker, data) => ipcRenderer.invoke('update-stock-metadata', { ticker, data }),
   syncTickerYahoo: (ticker) => ipcRenderer.invoke('ticker:syncYahoo', { ticker }),
   downloadFullYahooHistory: (ticker) => ipcRenderer.invoke('download-full-yahoo-history', { ticker }),
   deleteTickerHistory: (ticker) => ipcRenderer.invoke('ticker:deleteHistory', { ticker }),
@@ -94,6 +96,13 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('UPDATE_INDEX_DATE_PROGRESS', handler);
   },
   checkIndexStatus: (indexName) => ipcRenderer.invoke('check-index-status', indexName),
+  auditIndex: (indexName) => ipcRenderer.invoke('audit-index', indexName),
+  syncIndexFirstRecords: (index, operationId) => ipcRenderer.invoke('sync-index-first-records', { index, operationId }),
+  onIndexSyncProgress: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('index-sync-progress', handler);
+    return () => ipcRenderer.removeListener('index-sync-progress', handler);
+  },
   firstRegisto: (index, operationId) => ipcRenderer.invoke('first-registo-index', { index, operationId }),
   onFirstRegistoProgress: (callback) => {
     const handler = (_event, data) => callback(data);

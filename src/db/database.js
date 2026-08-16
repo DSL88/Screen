@@ -579,6 +579,24 @@ class DB {
         );
         changes += r.changes || 0;
       }
+      // Preencher first_date automaticamente quando ainda não existe:
+      // usa a data mais antiga deste lote como referência da origem.
+      const tickerSet = new Set();
+      for (const c of rows) {
+        const t = canonicalTicker(c.ticker);
+        if (t) tickerSet.add(t);
+      }
+      for (const t of tickerSet) {
+        const stock = this.db.prepare('SELECT first_date FROM stocks WHERE ticker = ?').get(t);
+        if (stock && (!stock.first_date || String(stock.first_date).trim() === '')) {
+          let minDate = null;
+          for (const c of rows) {
+            if (canonicalTicker(c.ticker) !== t || !c.date) continue;
+            if (!minDate || c.date < minDate) minDate = c.date;
+          }
+          if (minDate) this.updateStockFirstDate(t, minDate);
+        }
+      }
       return changes;
     });
 
@@ -863,6 +881,94 @@ class DB {
     };
   }
 
+  // Complementar à checkIndexStatus: auditoria com o intervalo real de
+  // cotações armazenado e a lista de ativos pendentes de 1º registo.
+  auditIndexStocks(indexName) {
+    const stocks = this.getStocksByIndex(indexName);
+    const canonicalName = (indexName && indexName !== 'ALL') ? canonicalIndexId(indexName) : indexName;
+
+    if (!stocks || stocks.length === 0) {
+      return {
+        indexName: canonicalName || indexName || 'ALL',
+        totalStocks: 0,
+        completeCount: 0,
+        pendingCount: 0,
+        stocks: []
+      };
+    }
+
+    const tickers = stocks.map(s => s.ticker);
+    const placeholders = tickers.map(() => '?').join(',');
+    // Query agregada (sem N+1) com o intervalo real por ativo.
+    const priceRows = this.db.prepare(`
+      SELECT ticker,
+             MIN(date) as min_date,
+             MAX(date) as max_date,
+             COUNT(*) as total_candles
+      FROM historical_prices
+      WHERE ticker IN (${placeholders})
+      GROUP BY ticker
+    `).all(...tickers);
+
+    const priceMap = {};
+    for (const row of priceRows) priceMap[row.ticker] = row;
+
+    const oneYearAfter = (firstDate) => {
+      const d = new Date(firstDate + 'T00:00:00Z');
+      if (Number.isNaN(d.getTime())) return null;
+      d.setUTCFullYear(d.getUTCFullYear() + 1);
+      return d.toISOString().slice(0, 10);
+    };
+
+    const details = stocks.map((s) => {
+      const p = priceMap[s.ticker] || null;
+      const firstDate = s.first_date ? String(s.first_date).trim() : '';
+      const minDate = p ? p.min_date : null;
+      const maxDate = p ? p.max_date : null;
+      const totalCandles = p ? p.total_candles : 0;
+      const fullHistoryFetched = !!s.full_history_fetched;
+
+      const needsFirstDate = !firstDate;
+      const hasStoredData = totalCandles > 0;
+      const toleranceDate = firstDate ? oneYearAfter(firstDate) : null;
+      // Sem registos OU min_date substancialmente mais recente que a origem
+      // (tolerância ~1 ano) => falta descarregar o bloco antigo.
+      const minTooRecent = !!toleranceDate && !!minDate && minDate > toleranceDate;
+      const needsHistoricalDownload = !hasStoredData || (!!firstDate && !minDate) || minTooRecent;
+
+      const historyFromOrigin = !needsFirstDate && hasStoredData && (
+        fullHistoryFetched ||
+        (!!minDate && minDate <= firstDate)
+      );
+
+      return {
+        ticker: s.ticker,
+        name: s.name,
+        country: s.country,
+        indexName: s.index_name,
+        firstDate: firstDate || null,
+        fullHistoryFetched,
+        minStoredDate: minDate,
+        maxStoredDate: maxDate,
+        totalStoredCandles: totalCandles,
+        needsFirstDate,
+        needsHistoricalDownload,
+        historyFromOrigin,
+        isComplete: !needsFirstDate && hasStoredData && historyFromOrigin
+      };
+    });
+
+    const completeCount = details.filter(d => d.isComplete).length;
+
+    return {
+      indexName: canonicalName || indexName || 'ALL',
+      totalStocks: details.length,
+      completeCount,
+      pendingCount: details.length - completeCount,
+      stocks: details
+    };
+  }
+
   upsertStock(stock) {
     const ticker = canonicalTicker(stock.ticker);
     const name = String(stock.name || '').trim();
@@ -898,6 +1004,57 @@ class DB {
     return this.db.prepare(
       'UPDATE stocks SET first_date = ? WHERE LOWER(ticker) = LOWER(?) OR LOWER(ticker) = LOWER(?)'
     ).run(value, symbol, baseSymbol);
+  }
+
+  updateStockMetadata(ticker, data) {
+    const symbol = canonicalTicker(ticker);
+    if (!symbol) return { success: false, error: 'invalid-input' };
+
+    // Empty/NULL fields stay untouched (COALESCE): only non-empty values are
+    // actually updated.  Whitespace-only strings are converted to NULL so the
+    // COALESCE keeps the current column value.
+    const clean = (value) => {
+      if (value == null) return null;
+      const s = String(value).trim();
+      return s === '' ? null : s;
+    };
+
+    const name = clean(data && data.name);
+    const country = clean(data && data.country);
+    // Normalize the index via canonicalIndexId for consistency with the rest
+    // of the app (labels → stable id).  Custom/new index names are accepted:
+    // canonicalIndexId returns the raw value when the id is unknown.
+    const rawIndex = clean(data && data.index_name);
+    const indexName = rawIndex ? canonicalIndexId(rawIndex) : null;
+
+    if (!name && !country && !indexName) return { success: false, error: 'invalid-input' };
+
+    // Exact ticker only (unlike updateStockFirstDate, no base-variant update).
+    // Update BOTH tables: `stocks` (source of truth for the detail modal) and
+    // `custom_tickers` (what feeds the My List cards / hover card). Keeping them
+    // in sync guarantees the edit is reflected immediately in the UI.
+    const updateStocks = this.db.prepare(`
+      UPDATE stocks SET
+        name = COALESCE(?, name),
+        country = COALESCE(?, country),
+        index_name = COALESCE(?, index_name)
+      WHERE ticker = ?
+    `);
+    const updateCustom = this.db.prepare(`
+      UPDATE custom_tickers SET
+        name = COALESCE(?, name),
+        country = COALESCE(?, country),
+        index_name = COALESCE(?, index_name)
+      WHERE ticker = ?
+    `);
+
+    const tx = this.db.transaction(() => {
+      const stockResult = updateStocks.run(name, country, indexName, symbol);
+      updateCustom.run(name, country, indexName, symbol);
+      return stockResult.changes;
+    });
+
+    return { success: true, ticker: symbol, changes: tx() };
   }
 
   getFullHistoryFetched(ticker) {
@@ -937,6 +1094,12 @@ class DB {
           c.volume
         );
         changes += r.changes || 0;
+      }
+      // Preencher first_date automaticamente quando ainda não existe:
+      // a primeira vela do lote (ordenado ASC) marca a origem.
+      const stock = this.db.prepare('SELECT first_date FROM stocks WHERE ticker = ?').get(canonicalTicker(ticker));
+      if (stock && (!stock.first_date || String(stock.first_date).trim() === '') && rows.length > 0 && rows[0].date) {
+        this.updateStockFirstDate(ticker, rows[0].date);
       }
       return changes;
     });

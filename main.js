@@ -1238,6 +1238,20 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('update-stock-metadata', async (_event, payload) => {
+      const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
+      if (!ticker) return { ok: false, error: 'missing-ticker' };
+      try {
+        const result = db.updateStockMetadata(ticker, payload && payload.data);
+        if (!result || result.success === false) {
+          return { ok: false, error: (result && result.error) || 'invalid-input' };
+        }
+        return { ok: true, ...result };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     ipcMain.handle('ticker:syncYahoo', async (_event, payload) => {
       const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
       if (!ticker) return { ok: false, error: 'missing-ticker' };
@@ -1786,6 +1800,114 @@ app.whenReady().then(async () => {
           ticker: '', status: 'done', state: 'failed', error, errorCount: errors.length
         });
         return { ok: false, success: false, status: 'failed', operationId: operation.operationId, errors, error };
+      } finally {
+        finishPipelineOperation(operation);
+      }
+    });
+
+    ipcMain.handle('audit-index', async (_event, indexName) => {
+      const index = indexName && typeof indexName === 'string' ? indexName.trim() : '';
+      if (!index) return { ok: false, error: 'missing-index-name' };
+      try {
+        const audit = db.auditIndexStocks(index);
+        return { ok: true, ...audit };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    ipcMain.handle('sync-index-first-records', async (event, input) => {
+      const { index, operationId: requestedId } = indexInput(input);
+      if (!index) return { ok: false, success: false, status: 'failed', error: 'missing-index-name' };
+      if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, success: false, status: 'failed', error: 'window-unavailable' };
+      const lock = beginPipelineOperation('first-registo', requestedId);
+      if (lock.busy) return lock.result;
+      const operation = lock.operation;
+
+      const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+      const jitterSleep = () => sleep(350 + Math.random() * 350);
+      const errors = [];
+      let completed = 0;
+      let updated = 0;
+      const emit = payload => sendPipelineProgress(event, 'index-sync-progress', {
+        operationId: operation.operationId, indexId: index, ...payload
+      });
+
+      try {
+        const audit = db.auditIndexStocks(index);
+        const pending = audit.stocks.filter(s => !s.isComplete);
+
+        if (audit.totalStocks === 0 || pending.length === 0) {
+          emit({ current: 0, total: audit.totalStocks, ticker: '', status: 'done',
+            state: 'complete', totalStocks: audit.totalStocks, completeCount: audit.completeCount });
+          return { ok: true, success: true, status: 'complete', operationId: operation.operationId,
+            total: audit.totalStocks, updated: 0, errorCount: 0, errors: [], cancelled: false };
+        }
+
+        const total = pending.length;
+
+        for (let i = 0; i < pending.length; i++) {
+          if (isPipelineCancelled(operation)) break;
+          const stock = pending[i];
+          const ticker = stock.ticker;
+          emit({ current: i + 1, total, ticker, name: stock.name || '', status: 'syncing', state: 'syncing' });
+
+          try {
+            // 1) first_date: reutilizar o existente ou obter do Yahoo.
+            let firstDate = stock.firstDate || null;
+            if (!firstDate) {
+              firstDate = await yahooClient.fetchFirstAvailableDate(ticker);
+            }
+            if (isPipelineCancelled(operation)) break;
+            if (firstDate) db.updateStockFirstDate(ticker, firstDate);
+
+            // 2) Bloco histórico diário desde a origem.
+            const candles = await yahooClient.fetchFullHistoryFromIPO(ticker);
+            if (isPipelineCancelled(operation)) break;
+
+            if (!candles || candles.length === 0) {
+              const error = 'empty-history';
+              errors.push({ ticker, error });
+              emit({ current: i + 1, total, ticker, name: stock.name || '', firstDate: firstDate || null,
+                status: 'error', state: 'failed', error, errorCount: errors.length });
+            } else {
+              db.saveHistoricalCandlesFromImport(ticker, candles);
+              db.cacheOHLCV(ticker, candles);
+              db.setFullHistoryFetched(ticker);
+              updated++;
+              emit({ current: i + 1, total, ticker, name: stock.name || '', firstDate: firstDate || null,
+                percent: Math.round((i + 1) / total * 100), status: 'updated', state: 'success',
+                candles: candles.length, errorCount: errors.length });
+            }
+          } catch (err) {
+            const error = err.message || String(err);
+            errors.push({ ticker, error });
+            console.error(`[sync-index-first-records] ${ticker}: ${error}`);
+            emit({ current: i + 1, total, ticker, name: stock.name || '', status: 'error', state: 'failed',
+              error, errorCount: errors.length });
+          }
+
+          completed++;
+          if (i + 1 < pending.length && !isPipelineCancelled(operation)) {
+            await jitterSleep();
+          }
+        }
+
+        const finalStatus = operationStatus(total, errors, operation.cancelled, completed, updated);
+        const finalAudit = db.auditIndexStocks(index);
+        emit({ current: completed, total, ticker: '', status: 'done', state: finalStatus,
+          updated, errorCount: errors.length, errors, cancelled: operation.cancelled,
+          totalStocks: finalAudit.totalStocks, completeCount: finalAudit.completeCount });
+
+        return { ok: finalStatus !== 'failed', success: finalStatus !== 'failed', status: finalStatus,
+          operationId: operation.operationId, total, updated, errorCount: errors.length,
+          errors, cancelled: operation.cancelled };
+      } catch (err) {
+        const error = err.message || String(err);
+        errors.push({ ticker: null, error });
+        emit({ current: completed, total, ticker: '', status: 'done', state: 'failed', error, errorCount: errors.length });
+        return { ok: false, success: false, status: 'failed', operationId: operation.operationId,
+          total, updated, errorCount: errors.length, errors, cancelled: operation.cancelled, error };
       } finally {
         finishPipelineOperation(operation);
       }

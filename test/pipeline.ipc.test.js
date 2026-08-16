@@ -44,3 +44,41 @@ test('check-index-status usa o validador completo checkIndexStatus', () => {
   assert.match(main, /db\.checkIndexStatus\(index\)/);
   assert.match(preload, /checkIndexStatus:\s*\(indexName\)\s*=>\s*ipcRenderer\.invoke\('check-index-status', indexName\)/);
 });
+
+test('auditoria do índice expõe um único handler e preload coerente', () => {
+  assert.equal((main.match(/ipcMain\.handle\(['"]audit-index['"]/g) || []).length, 1);
+  assert.match(main, /db\.auditIndexStocks\(index\)/);
+  assert.match(main, /return \{ ok: true, \.\.\.audit \}/);
+  assert.match(preload, /auditIndex:\s*\(indexName\)\s*=>\s*ipcRenderer\.invoke\('audit-index', indexName\)/);
+});
+
+test('sync-index-first-records expõe um único handler com progresso e contrato de estado', () => {
+  assert.equal((main.match(/ipcMain\.handle\(['"]sync-index-first-records['"]/g) || []).length, 1);
+  assert.match(main, /db\.auditIndexStocks\(index\)/);
+  assert.match(main, /sendPipelineProgress\(event, 'index-sync-progress'/);
+  assert.match(main, /db\.updateStockFirstDate\(ticker, firstDate\)/);
+  assert.match(main, /db\.saveHistoricalCandlesFromImport\(ticker, candles\)/);
+  assert.match(main, /db\.setFullHistoryFetched\(ticker\)/);
+  // Contrato de retorno: status ∈ success | partial | failed | complete
+  assert.match(main, /status: finalStatus/);
+  assert.match(main, /status: 'complete'/);
+  assert.match(main, /status: 'failed'/);
+  assert.match(main, /state: finalStatus/);
+  assert.match(main, /return \{ ok: true, success: true, status: 'complete'/);
+  assert.match(preload, /syncIndexFirstRecords:\s*\(index,\s*operationId\)\s*=>\s*ipcRenderer\.invoke\('sync-index-first-records'/);
+  assert.match(preload, /onIndexSyncProgress/);
+  assert.match(preload, /'index-sync-progress'/);
+});
+
+test('update-stock-metadata expõe um único handler que delega em db.updateStockMetadata', () => {
+  assert.equal((main.match(/ipcMain\.handle\(['"]update-stock-metadata['"]/g) || []).length, 1);
+  assert.match(main, /db\.updateStockMetadata\(ticker, payload && payload\.data\)/);
+  // Guarda de ticker em falta antes de tocar na BD.
+  assert.match(main, /if \(!ticker\) return \{ ok: false, error: 'missing-ticker' \};/);
+  // Contrato de retorno: sucesso espalha o resultado { success, ticker, changes };
+  // erro normaliza result.success === false → { ok: false, error }.
+  assert.match(main, /if \(!result \|\| result\.success === false\)/);
+  assert.match(main, /return \{ ok: true, \.\.\.result \};/);
+  assert.match(main, /return \{ ok: false, error: \(result && result\.error\) \|\| 'invalid-input' \};/);
+  assert.match(preload, /updateStockMetadata:\s*\(ticker,\s*data\)\s*=>\s*ipcRenderer\.invoke\('update-stock-metadata',\s*\{\s*ticker,\s*data\s*\}\)/);
+});
