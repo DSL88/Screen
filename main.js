@@ -1252,6 +1252,15 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('get-distinct-indices', async () => {
+      try {
+        const indices = db.getAllDistinctIndices();
+        return { ok: true, indices };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     ipcMain.handle('ticker:syncYahoo', async (_event, payload) => {
       const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
       if (!ticker) return { ok: false, error: 'missing-ticker' };

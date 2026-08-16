@@ -3300,11 +3300,20 @@
   const assetDetailClose = document.getElementById('asset-detail-close');
   const assetDetailTickerEl = document.getElementById('asset-detail-ticker');
   const assetDetailNameEl = document.getElementById('asset-detail-name');
-  const modalStockName = document.getElementById('modal-stock-name');
-  const modalStockCountry = document.getElementById('modal-stock-country');
-  const modalStockIndex = document.getElementById('modal-stock-index');
-  const modalStockIndexCustom = document.getElementById('modal-stock-index-custom');
-  const btnSaveStockMetadata = document.getElementById('btn-save-stock-metadata');
+  const displayStockName = document.getElementById('display-stock-name');
+  const displayStockCountry = document.getElementById('display-stock-country');
+  const displayStockIndex = document.getElementById('display-stock-index');
+  const editStockName = document.getElementById('edit-stock-name');
+  const editStockCountry = document.getElementById('edit-stock-country');
+  const editStockIndex = document.getElementById('edit-stock-index');
+  const editStockIndexCustom = document.getElementById('edit-stock-index-custom');
+  const btnEditStockModal = document.getElementById('btn-edit-stock-modal');
+  const btnSaveStockModal = document.getElementById('btn-save-stock-modal');
+  const btnCancelEditModal = document.getElementById('btn-cancel-edit-modal');
+  const assetDetailMetaView = document.getElementById('asset-detail-meta-view');
+  const assetDetailMetaEdit = document.getElementById('asset-detail-meta-edit');
+  const assetDetailMetaActionsView = document.getElementById('asset-detail-metadata-actions-view');
+  const assetDetailMetaActionsEdit = document.getElementById('asset-detail-metadata-actions-edit');
   const assetMetadataError = document.getElementById('asset-metadata-error');
   const assetDetailFirstDate = document.getElementById('asset-detail-first-date');
   const assetDetailLastDate = document.getElementById('asset-detail-last-date');
@@ -3329,6 +3338,8 @@
 
   let currentAssetTicker = null;
   let assetSelectedFile = null;
+  // Valores de metadados ativos (fonte de verdade para a camada de edição).
+  let assetDetailCurrentValues = { name: '', country: '', indexName: '' };
 
   function fmtDate(d) {
     if (!d) return '—';
@@ -3382,16 +3393,10 @@
     // 2. Full clean reset of all modal DOM elements & inputs
     if (assetDetailTickerEl) assetDetailTickerEl.textContent = cleanTicker;
     if (assetDetailNameEl) assetDetailNameEl.textContent = '';
-    if (modalStockName) modalStockName.value = '';
-    if (modalStockCountry) modalStockCountry.value = '';
-    if (modalStockIndex) {
-      modalStockIndex.innerHTML = '<option value="" disabled selected>-- Seleciona o Índice --</option>';
-    }
-    if (modalStockIndexCustom) {
-      modalStockIndexCustom.value = '';
-      modalStockIndexCustom.hidden = true;
-    }
-    if (btnSaveStockMetadata) btnSaveStockMetadata.disabled = false;
+    // Reverter sempre para .view-mode ao abrir, descartando edições pendentes.
+    assetDetailCurrentValues = { name: '', country: '', indexName: '' };
+    setAssetDetailViewValues({});
+    setAssetDetailViewMode(true);
     if (assetMetadataError) { assetMetadataError.textContent = ''; assetMetadataError.hidden = true; }
 
     const firstEl = document.getElementById('asset-detail-first-date');
@@ -3452,14 +3457,24 @@
       if (res && res.ok) {
         if (res.stock) {
           if (assetDetailNameEl) assetDetailNameEl.textContent = res.stock.name || '';
-          if (modalStockName) modalStockName.value = res.stock.name || '';
-          if (modalStockCountry) modalStockCountry.value = res.stock.country || '';
-          populateModalStockIndexDropdown(res.stock.index_name);
+          assetDetailCurrentValues = {
+            name: res.stock.name || '',
+            country: res.stock.country || '',
+            indexName: res.stock.index_name || ''
+          };
+          setAssetDetailViewValues(assetDetailCurrentValues);
+          // Pré-preenche também os inputs de edição (usados como fallback pela
+          // importação CSV e para entrar em modo de edição com os valores atuais).
+          if (editStockName) editStockName.value = assetDetailCurrentValues.name;
+          if (editStockCountry) editStockCountry.value = assetDetailCurrentValues.country;
+          if (editStockIndexCustom) editStockIndexCustom.value = '';
         } else if (res.custom) {
           if (assetDetailNameEl) assetDetailNameEl.textContent = res.custom.name || '';
-          if (modalStockName) modalStockName.value = res.custom.name || '';
-          if (modalStockCountry) modalStockCountry.value = '';
-          populateModalStockIndexDropdown('');
+          assetDetailCurrentValues = { name: res.custom.name || '', country: '', indexName: '' };
+          setAssetDetailViewValues(assetDetailCurrentValues);
+          if (editStockName) editStockName.value = assetDetailCurrentValues.name;
+          if (editStockCountry) editStockCountry.value = '';
+          if (editStockIndexCustom) editStockIndexCustom.value = '';
         }
         const summary = res.summary || {};
         renderModalState(!!summary.hasData, summary);
@@ -3481,84 +3496,142 @@
     assetSelectedFile = null;
   }
 
-  // ── Edição de Metadados do Ativo (Nome / País / Índice) ──
+  // ── Modo de Edição Dinâmico do Ativo (Nome / País / Índice) ──
+
+  // Alterna o modal de detalhe entre a camada de visualização (.view-mode) e a
+  // de edição (.edit-mode). Abrir o modal regressa sempre a .view-mode.
+  function setAssetDetailViewMode(view) {
+    const edit = !view;
+    if (assetDetailMetaView) assetDetailMetaView.hidden = !view;
+    if (assetDetailMetaEdit) assetDetailMetaEdit.hidden = !edit;
+    if (assetDetailMetaActionsView) assetDetailMetaActionsView.hidden = !view;
+    if (assetDetailMetaActionsEdit) assetDetailMetaActionsEdit.hidden = !edit;
+  }
+
+  // Atualiza os textos da camada de visualização. Mantém os IDs canónicos
+  // internamente; os nomes amigáveis (indexLabel) são apenas apresentação.
+  function setAssetDetailViewValues(vals) {
+    const v = vals || {};
+    const name = v.name || '';
+    const country = v.country || '';
+    const indexName = v.indexName || '';
+    if (displayStockName) displayStockName.textContent = 'Nome: ' + (name || '—');
+    if (displayStockCountry) displayStockCountry.textContent = 'País: ' + (country || '—');
+    const idxLabel = indexName ? indexLabel(canonicalIndexId(indexName), indexName) : '';
+    if (displayStockIndex) displayStockIndex.textContent = 'Índice: ' + (idxLabel || '—');
+  }
+
+  // Getters partilhados (usados também pela importação CSV e pelo save):
+  // lêem sempre a camada de edição, pré-preenchida com os valores atuais.
   function getModalStockNameValue() {
-    return modalStockName ? modalStockName.value.trim() : '';
+    return editStockName ? editStockName.value.trim() : '';
   }
 
   function getModalStockCountryValue() {
-    return modalStockCountry ? modalStockCountry.value.trim() : '';
+    return editStockCountry ? editStockCountry.value.trim() : '';
   }
 
   function getModalStockIndexValue() {
-    if (!modalStockIndex) return '';
-    if (modalStockIndex.value === 'CUSTOM_NEW') {
-      return modalStockIndexCustom ? modalStockIndexCustom.value.trim() : '';
+    if (!editStockIndex) return '';
+    if (editStockIndex.value === 'CUSTOM_NEW') {
+      return editStockIndexCustom ? editStockIndexCustom.value.trim() : '';
     }
-    return modalStockIndex.value.trim();
+    return editStockIndex.value.trim();
   }
 
-  function setModalStockIndexCustomVisible(visible) {
-    if (modalStockIndexCustom) modalStockIndexCustom.hidden = !visible;
+  function setEditStockIndexCustomVisible(visible) {
+    if (editStockIndexCustom) editStockIndexCustom.hidden = !visible;
   }
 
   // Seleciona o índice atual do ativo por defeito. O valor vindo da BD é o ID
   // canónico (ex.: 'PSI', 'IBEX35') ou o nome de um índice personalizado; os
   // nomes amigáveis são apenas apresentação. Se não houver opção equivalente,
-  // ativa o modo "+ Digitar Novo Índice / Personalizado..." com o valor preenchido.
-  function setModalStockIndexValue(raw) {
-    if (!modalStockIndex) return;
+  // ativa o modo "+ Novo Índice..." com o valor preenchido.
+  function setEditStockIndexValue(raw) {
+    if (!editStockIndex) return;
     const clean = String(raw || '').trim();
     if (!clean) {
-      modalStockIndex.value = '';
-      setModalStockIndexCustomVisible(false);
+      editStockIndex.value = '';
+      setEditStockIndexCustomVisible(false);
       return;
     }
     const canonical = canonicalIndexId(clean);
-    const options = Array.from(modalStockIndex.options);
+    const options = Array.from(editStockIndex.options);
     const matchedOpt = options.find((opt) => {
       if (!opt.value || opt.value === 'CUSTOM_NEW') return false;
       return opt.value.toUpperCase() === clean.toUpperCase()
         || canonicalIndexId(opt.value) === canonical;
     });
     if (matchedOpt) {
-      modalStockIndex.value = matchedOpt.value;
-      setModalStockIndexCustomVisible(false);
+      editStockIndex.value = matchedOpt.value;
+      setEditStockIndexCustomVisible(false);
     } else {
-      modalStockIndex.value = 'CUSTOM_NEW';
-      if (modalStockIndexCustom) modalStockIndexCustom.value = clean;
-      setModalStockIndexCustomVisible(true);
+      editStockIndex.value = 'CUSTOM_NEW';
+      if (editStockIndexCustom) editStockIndexCustom.value = clean;
+      setEditStockIndexCustomVisible(true);
     }
   }
 
-  // Preenche o dropdown de índice do modal com os índices da BD (watchlist +
-  // PREDEFINED_INDEXES), seguindo o padrão de populateIndexDropdown().
-  function populateModalStockIndexDropdown(selectedRaw) {
-    if (!modalStockIndex) return;
+  // Preenche o dropdown de índice do modo de edição. Primeiro tenta os índices
+  // distintos da BD (getDistinctIndices); em caso de falha usa os índices da
+  // watchlist como fallback, seguindo o padrão de populateIndexDropdown().
+  // Inclui sempre a opção "+ Novo Índice..." que revela o input custom.
+  async function populateEditStockIndexDropdown(selectedRaw) {
+    if (!editStockIndex) return;
+    let distinctIndices = [];
+    try {
+      const res = await window.api.getDistinctIndices();
+      if (res && res.ok && Array.isArray(res.indices)) {
+        distinctIndices = res.indices;
+      } else {
+        console.warn('getDistinctIndices failed:', (res && res.error) || 'unknown');
+      }
+    } catch (err) {
+      console.warn('getDistinctIndices threw:', err);
+    }
+
     const currentIndexes = new Map();
-    for (const t of watchlist) {
-      const idxId = canonicalIndexId(t.indexId || t.indexName);
-      if (idxId && !currentIndexes.has(idxId)) {
-        currentIndexes.set(idxId, t.indexName || idxId);
+    // Fallback: índices da watchlist (padrão populateIndexDropdown).
+    if (distinctIndices.length === 0) {
+      for (const t of watchlist) {
+        const idxId = canonicalIndexId(t.indexId || t.indexName);
+        if (idxId && !currentIndexes.has(idxId)) {
+          currentIndexes.set(idxId, t.indexName || idxId);
+        }
+      }
+    } else {
+      for (const idxRaw of distinctIndices) {
+        const idxId = canonicalIndexId(idxRaw);
+        if (!idxId || idxId === 'CUSTOM') continue;
+        if (!currentIndexes.has(idxId)) currentIndexes.set(idxId, indexLabel(idxId, idxRaw));
+      }
+      // Garante também os índices da watchlist que ainda não constem dos
+      // distintos da BD (ex.: asset adicionado com índice recente).
+      for (const t of watchlist) {
+        const idxId = canonicalIndexId(t.indexId || t.indexName);
+        if (idxId && idxId !== 'CUSTOM' && !currentIndexes.has(idxId)) {
+          currentIndexes.set(idxId, t.indexName || idxId);
+        }
       }
     }
-    modalStockIndex.innerHTML = '';
+
+    editStockIndex.innerHTML = '';
     const defaultOpt = document.createElement('option');
     defaultOpt.value = '';
     defaultOpt.disabled = true;
     defaultOpt.selected = true;
     defaultOpt.textContent = '-- Seleciona o Índice --';
-    modalStockIndex.appendChild(defaultOpt);
+    editStockIndex.appendChild(defaultOpt);
     if (currentIndexes.size > 0) {
       const groupCurrent = document.createElement('optgroup');
-      groupCurrent.label = '⭐ Índices Atuais na My List';
+      groupCurrent.label = '⭐ Índices na Base de Dados';
       for (const [idxId, idxName] of currentIndexes) {
         const opt = document.createElement('option');
         opt.value = idxId;
         opt.textContent = idxName || idxId;
         groupCurrent.appendChild(opt);
       }
-      modalStockIndex.appendChild(groupCurrent);
+      editStockIndex.appendChild(groupCurrent);
     }
     const groupOther = document.createElement('optgroup');
     groupOther.label = '🌐 Outros Índices de Mercado';
@@ -3572,32 +3645,48 @@
         hasOther = true;
       }
     }
-    if (hasOther) modalStockIndex.appendChild(groupOther);
+    if (hasOther) editStockIndex.appendChild(groupOther);
     const groupCustom = document.createElement('optgroup');
     groupCustom.label = '➕ Personalizado';
     const customOpt = document.createElement('option');
     customOpt.value = 'CUSTOM_NEW';
-    customOpt.textContent = '+ Digitar Novo Índice / Personalizado...';
+    customOpt.textContent = '+ Novo Índice...';
     groupCustom.appendChild(customOpt);
-    modalStockIndex.appendChild(groupCustom);
-    setModalStockIndexValue(selectedRaw);
+    editStockIndex.appendChild(groupCustom);
+    setEditStockIndexValue(selectedRaw);
   }
 
-  if (modalStockIndex) {
-    modalStockIndex.addEventListener('change', () => {
-      if (modalStockIndex.value === 'CUSTOM_NEW') {
-        setModalStockIndexCustomVisible(true);
-        if (modalStockIndexCustom) modalStockIndexCustom.focus();
-      } else {
-        setModalStockIndexCustomVisible(false);
-      }
-    });
-  }
-
-  async function saveStockMetadata() {
+  // "✏️ Editar": pré-preenche os inputs com os valores atuais e alterna para
+  // .edit-mode, carregando dinamicamente os índices via getDistinctIndices().
+  async function enterAssetDetailEditMode() {
     if (!currentAssetTicker) return;
     const ticker = currentAssetTicker;
-    if (btnSaveStockMetadata) btnSaveStockMetadata.disabled = true;
+    const vals = assetDetailCurrentValues || {};
+    // Repovoar o dropdown ANTES de alternar para edit-mode: evita que um
+    // "Guardar" rápido durante o load leia um valor vazio no índice.
+    await populateEditStockIndexDropdown(vals.indexName || '');
+    if (currentAssetTicker !== ticker) return;
+    if (editStockName) editStockName.value = vals.name || '';
+    if (editStockCountry) editStockCountry.value = vals.country || '';
+    if (editStockIndexCustom) { editStockIndexCustom.value = ''; editStockIndexCustom.hidden = true; }
+    setAssetDetailViewMode(false);
+  }
+
+  // "❌ Cancelar": regressa a .view-mode sem alterar dados.
+  function cancelAssetDetailEdit() {
+    setAssetDetailViewMode(true);
+    setAssetDetailViewValues(assetDetailCurrentValues || {});
+    if (assetMetadataError) { assetMetadataError.textContent = ''; assetMetadataError.hidden = true; }
+  }
+
+  // "💾 Guardar Alterações": valida, grava via IPC e, em sucesso, atualiza a
+  // memória local, os textos .view-mode, o card na My List (reload preserva
+  // filtros/grupos e Hover Card) e o dropdown/badge de índices.
+  async function saveStockModal() {
+    if (!currentAssetTicker) return;
+    const ticker = currentAssetTicker;
+    if (btnSaveStockModal) btnSaveStockModal.disabled = true;
+    if (btnCancelEditModal) btnCancelEditModal.disabled = true;
     if (assetMetadataError) { assetMetadataError.textContent = ''; assetMetadataError.hidden = true; }
     try {
       const name = getModalStockNameValue();
@@ -3622,29 +3711,63 @@
         return;
       }
 
-      showToast('Metadados atualizados com sucesso', 'success');
-      if (name && assetDetailNameEl) assetDetailNameEl.textContent = name;
+      // Atualiza o objeto local do ativo na memória do renderer.
+      const localEntry = watchlist.find(t => t.ticker === ticker);
+      if (localEntry) {
+        if (name) localEntry.name = name;
+        if (country) localEntry.country = country;
+        if (indexName) {
+          const canonical = canonicalIndexId(indexName);
+          localEntry.indexId = canonical;
+          localEntry.indexName = indexLabel(canonical, indexName);
+          localEntry.indexDbName = indexName;
+        }
+      }
+      assetDetailCurrentValues = {
+        name: name || (assetDetailCurrentValues && assetDetailCurrentValues.name) || '',
+        country: country || (assetDetailCurrentValues && assetDetailCurrentValues.country) || '',
+        indexName: indexName || (assetDetailCurrentValues && assetDetailCurrentValues.indexName) || ''
+      };
+      if (assetDetailNameEl) assetDetailNameEl.textContent = assetDetailCurrentValues.name;
+      setAssetDetailViewValues(assetDetailCurrentValues);
+      setAssetDetailViewMode(true);
 
-      // Recarregar a My List a partir da BD (preserva busca/grupos) e fechar
-      // o modal para refletir as mudanças. reloadMyListFromDatabase() já
-      // repovoa o dropdown de bulk-fetch e o badge de estado do índice; as
-      // chamadas explícitas seguintes são idempotentes e cobrem falhas parciais.
-      closeAssetDetailModal();
+      showToast('Metadados atualizados com sucesso', 'success');
+
+      // Recarrega a My List a partir da BD (preserva busca/grupos) para
+      // refletir o novo nome/índice, incluindo Hover Card (dataset.name) e
+      // re-agrupamento por índice. reloadMyListFromDatabase() já repovoa o
+      // dropdown de bulk-fetch e o badge de estado do índice; as chamadas
+      // explícitas seguintes são idempotentes e cobrem falhas parciais.
       try {
         await reloadMyListFromDatabase();
       } catch (err) {
-        console.warn('saveStockMetadata: reloadMyListFromDatabase failed:', err);
+        console.warn('saveStockModal: reloadMyListFromDatabase failed:', err);
       }
       populateIndexBulkFetchDropdown();
       await refreshIndexStatusBadge();
     } catch (err) {
       showToast('Erro: ' + (err.message || String(err)), 'error');
     } finally {
-      if (btnSaveStockMetadata) btnSaveStockMetadata.disabled = false;
+      if (btnSaveStockModal) btnSaveStockModal.disabled = false;
+      if (btnCancelEditModal) btnCancelEditModal.disabled = false;
     }
   }
 
-  if (btnSaveStockMetadata) btnSaveStockMetadata.addEventListener('click', saveStockMetadata);
+  if (btnEditStockModal) btnEditStockModal.addEventListener('click', enterAssetDetailEditMode);
+  if (btnSaveStockModal) btnSaveStockModal.addEventListener('click', saveStockModal);
+  if (btnCancelEditModal) btnCancelEditModal.addEventListener('click', cancelAssetDetailEdit);
+
+  if (editStockIndex) {
+    editStockIndex.addEventListener('change', () => {
+      if (editStockIndex.value === 'CUSTOM_NEW') {
+        setEditStockIndexCustomVisible(true);
+        if (editStockIndexCustom) editStockIndexCustom.focus();
+      } else {
+        setEditStockIndexCustomVisible(false);
+      }
+    });
+  }
 
   if (assetDetailClose) assetDetailClose.addEventListener('click', closeAssetDetailModal);
   if (modalAssetDetail) {

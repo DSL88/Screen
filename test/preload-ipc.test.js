@@ -98,6 +98,36 @@ test('preload expõe auditIndex, syncIndexFirstRecords e onIndexSyncProgress', (
   }
 });
 
+test('preload expõe getDistinctIndices que invoca o canal get-distinct-indices', () => {
+  const preload = require.resolve('../preload');
+  delete require.cache[preload];
+  let api;
+  const ipcRenderer = {
+    invoked: [],
+    invoke(channel, payload) { this.invoked.push({ channel, payload }); return Promise.resolve({ ok: true }); },
+    on() {},
+    removeListener() {}
+  };
+  const originalLoad = Module._load;
+  Module._load = function (request, parent, isMain) {
+    if (request === 'electron') return { contextBridge: { exposeInMainWorld(_name, value) { api = value; } }, ipcRenderer };
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  try {
+    originalLoad(preload, module, false);
+    assert.ok(api);
+    assert.equal(typeof api.getDistinctIndices, 'function');
+
+    api.getDistinctIndices();
+    assert.equal(ipcRenderer.invoked[0].channel, 'get-distinct-indices');
+    // Sem argumentos: o main devolve { ok: true, indices } sem payload.
+    assert.equal(ipcRenderer.invoked[0].payload, undefined);
+  } finally {
+    Module._load = originalLoad;
+    delete require.cache[preload];
+  }
+});
+
 test('preload expõe updateStockMetadata que invoca o canal com { ticker, data }', () => {
   const preload = require.resolve('../preload');
   delete require.cache[preload];

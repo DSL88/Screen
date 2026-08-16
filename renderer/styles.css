@@ -3184,6 +3184,33 @@ select.param-input option {
   cursor: not-allowed;
 }
 
+/* ── Modo de Edição Dinâmico (view-mode / edit-mode) ── */
+.asset-detail-meta-grid[hidden],
+.asset-detail-metadata-actions[hidden] {
+  display: none;
+}
+
+.asset-detail-meta-view .asset-detail-meta-row,
+.asset-detail-meta-edit .asset-detail-meta-row {
+  min-width: 0;
+}
+
+.asset-detail-meta-value {
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.asset-detail-edit-btn {
+  justify-content: center;
+  min-width: 140px;
+}
+
+#btn-cancel-edit-modal:disabled,
+.asset-detail-edit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .asset-detail-section-title {
   font-size: 10px;
   font-weight: 700;

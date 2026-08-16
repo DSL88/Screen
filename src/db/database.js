@@ -1057,6 +1057,19 @@ class DB {
     return { success: true, ticker: symbol, changes: tx() };
   }
 
+  // Distinct index_name values stored in `stocks` (stable ids after
+  // canonicalIndexId normalization), sorted ASC.  Empty/NULL names are
+  // excluded; returns an empty array when no stocks exist.
+  getAllDistinctIndices() {
+    const rows = this.db.prepare(`
+      SELECT DISTINCT index_name
+      FROM stocks
+      WHERE index_name IS NOT NULL AND TRIM(index_name) != ''
+      ORDER BY index_name ASC
+    `).all();
+    return rows.map(r => r.index_name);
+  }
+
   getFullHistoryFetched(ticker) {
     const row = this.db.prepare('SELECT full_history_fetched FROM stocks WHERE ticker = ?').get(canonicalTicker(ticker));
     return row ? !!row.full_history_fetched : false;
