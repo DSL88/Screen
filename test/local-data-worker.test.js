@@ -31,35 +31,45 @@ const END = dateAt(START, 249);
 //  Emulador do main process (DB request-response)
 // ═══════════════════════════════════════════════════════════
 
-function runSimulationWorker({ ticker, candles, params }) {
+function runSimulationWorker({ ticker, candles, params, startDate = START, endDate = END }) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(path.join(__dirname, '../src/engine/simulationWorker.js'));
     const simErrors = [];
-    const timer = setTimeout(() => reject(new Error('worker timeout')), 8000);
+    const timer = setTimeout(() => { worker.terminate().catch(() => {}); reject(new Error('worker timeout')); }, 8000);
 
     const finish = (value) => { clearTimeout(timer); resolve(value); };
+    const fail = (err) => { clearTimeout(timer); worker.terminate().catch(() => {}); reject(err); };
 
     worker.on('message', message => {
-      if (message.type === 'getAllHistoricalPrices') {
-        assert.equal(message.payload.ticker, 'BAS.DE', 'worker deve sanitizar o ticker para UPPERCASE');
-        worker.postMessage({
-          type: 'dbResponse',
-          requestId: message.requestId,
-          ok: true,
-          data: candles
-        });
-        return;
-      }
-      if (message.type === 'simError') {
-        simErrors.push(message.payload);
-        return;
-      }
-      if (message.type === 'simResult') {
-        finish({ result: message.payload.result, simErrors, worker });
+      try {
+        if (message.type === 'getHistoricalPricesForSimulation' || message.type === 'getAllHistoricalPrices') {
+          assert.equal(message.payload.ticker, 'BAS.DE', 'worker deve sanitizar o ticker para UPPERCASE');
+          if (message.type === 'getHistoricalPricesForSimulation') {
+            const norm = v => v ? String(v).slice(0, 10) : '';
+            assert.equal(message.payload.startDate, norm(startDate), 'worker deve reencaminhar startDate normalizado');
+            assert.equal(message.payload.endDate, norm(endDate), 'worker deve reencaminhar endDate normalizado');
+          }
+          worker.postMessage({
+            type: 'dbResponse',
+            requestId: message.requestId,
+            ok: true,
+            data: candles
+          });
+          return;
+        }
+        if (message.type === 'simError') {
+          simErrors.push(message.payload);
+          return;
+        }
+        if (message.type === 'simResult') {
+          finish({ result: message.payload.result, simErrors, worker });
+        }
+      } catch (err) {
+        fail(err);
       }
     });
 
-    worker.on('error', err => { clearTimeout(timer); reject(err); });
+    worker.on('error', err => fail(err));
 
     worker.postMessage({
       action: 'start',
@@ -67,8 +77,8 @@ function runSimulationWorker({ ticker, candles, params }) {
       universe: [{ ticker, name: 'BAS' }],
       params,
       dbPath: undefined,
-      startDate: START,
-      endDate: END
+      startDate,
+      endDate
     });
   });
 }
@@ -118,6 +128,23 @@ test('worker emite simError quando o histórico devolve vazio', async () => {
     assert.equal(simErrors[0].ticker, 'BAS.DE');
     assert.equal(result.ok, true, 'simResult continua a ser emitido após o simError');
     assert.equal(result.trades.length, 0);
+  } finally {
+    await worker.terminate();
+  }
+});
+
+test('worker em modo histórico total pede startDate/endDate null e processa todas as velas', async () => {
+  const { result, simErrors, worker } = await runSimulationWorker({
+    ticker: 'bas.de',
+    candles: buildSeries(500),
+    params: baseParams,
+    startDate: null,
+    endDate: null
+  });
+  try {
+    assert.equal(simErrors.length, 0);
+    assert.equal(result.ok, true);
+    assert.ok(result.equityCurve.length >= 450, 'curva de capital deve cobrir praticamente todo o histórico sem warm-up de datas');
   } finally {
     await worker.terminate();
   }

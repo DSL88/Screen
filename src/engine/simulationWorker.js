@@ -72,24 +72,48 @@ parentPort.on('message', async (msg) => {
 //  SIMULAÇÃO
 // ═══════════════════════════════════════════════════════════
 
-function loadLocalCandles(dbPath, ticker, endDate) {
+function loadLocalCandles(dbPath, ticker, startDate, endDate) {
   const Database = require('better-sqlite3');
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
-    const rows = db.prepare(`
-      SELECT date, open, high, low, close, volume
-      FROM historical_prices
-      WHERE ticker = ? AND date <= ?
-      ORDER BY date ASC
-    `).all(ticker, endDate);
-    return rows.map(row => ({
-      date: row.date,
+    const cleanTicker = String(ticker || '').trim().toUpperCase();
+    const toRow = row => ({
+      date: String(row.date).slice(0, 10),
       open: Number(row.open),
       high: Number(row.high),
       low: Number(row.low),
       close: Number(row.close),
-      volume: Number(row.volume)
-    }));
+      volume: Number(row.volume || 0)
+    });
+
+    // CENÁRIO A: Sem filtro de data — 100% dos dados guardados
+    if (!startDate && !endDate) {
+      const rows = db.prepare(`
+        SELECT date, open, high, low, close, volume
+        FROM historical_prices
+        WHERE UPPER(TRIM(ticker)) = ?
+        ORDER BY date ASC
+      `).all(cleanTicker);
+      return rows.map(toRow);
+    }
+
+    // CENÁRIO B: Intervalo com warm-up prévio de 200 velas
+    const cleanStart = String(startDate || '').slice(0, 10);
+    const cleanEnd = endDate ? String(endDate).slice(0, 10) : '9999-12-31';
+    const warmup = db.prepare(`
+      SELECT date, open, high, low, close, volume
+      FROM historical_prices
+      WHERE UPPER(TRIM(ticker)) = ? AND date < ?
+      ORDER BY date DESC
+      LIMIT 200
+    `).all(cleanTicker, cleanStart).reverse();
+    const main = db.prepare(`
+      SELECT date, open, high, low, close, volume
+      FROM historical_prices
+      WHERE UPPER(TRIM(ticker)) = ? AND date >= ? AND date <= ?
+      ORDER BY date ASC
+    `).all(cleanTicker, cleanStart, cleanEnd);
+    return [...warmup, ...main].map(toRow);
   } finally {
     db.close();
   }
@@ -141,7 +165,7 @@ async function handleStart({ runId, universe, params, dbPath, startDate, endDate
     let candles = null;
     let candlesError = null;
     try {
-      candles = await requestDB('getAllHistoricalPrices', { ticker });
+      candles = await requestDB('getHistoricalPricesForSimulation', { ticker, startDate: start, endDate: end });
     } catch (err) {
       candlesError = err;
     }
@@ -149,7 +173,7 @@ async function handleStart({ runId, universe, params, dbPath, startDate, endDate
     if (!candles || candles.length === 0) {
       if (dbPath) {
         try {
-          candles = loadLocalCandles(dbPath, ticker, end);
+          candles = loadLocalCandles(dbPath, ticker, start, end);
         } catch (_) {
           candlesError = candlesError || new Error('falha ao carregar dados locais');
         }

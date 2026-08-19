@@ -338,6 +338,31 @@ function getSimulationWorker() {
         }
         break;
       }
+
+      case 'getHistoricalPricesForSimulation': {
+        const requestId = msg.requestId;
+        try {
+          const prices = db.getHistoricalPricesForSimulation(
+            msg.payload.ticker,
+            msg.payload.startDate,
+            msg.payload.endDate
+          );
+          simulationWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: true,
+            data: prices
+          });
+        } catch (err) {
+          simulationWorker.postMessage({
+            type: 'dbResponse',
+            requestId,
+            ok: false,
+            error: err.message
+          });
+        }
+        break;
+      }
     }
   });
 
@@ -634,8 +659,10 @@ app.whenReady().then(async () => {
       const runId = 'sim_' + Date.now();
       activeSimulationRunId = runId;
       const dbPath = path.join(app.getPath('userData'), 'trades.db');
-      const startDate = String(payload?.params?.startDate || '').slice(0, 10);
-      const endDate = String(payload?.params?.endDate || '').slice(0, 10);
+      const rawStart = payload?.params?.startDate;
+      const rawEnd = payload?.params?.endDate;
+      const startDate = rawStart ? String(rawStart).slice(0, 10) : null;
+      const endDate = rawEnd ? String(rawEnd).slice(0, 10) : null;
       const normalizedUniverse = (Array.isArray(universe) ? universe : []).map(t => ({
         ticker: String(t.ticker || '').trim().toUpperCase(),
         name: t.name || t.ticker

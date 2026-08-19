@@ -16,6 +16,10 @@ try {
 }
 const { makeCandle, makeTempDir, removeTempDir } = require('./helpers');
 
+function dateAt(start, i) {
+  return new Date(new Date(start + 'T00:00:00Z').getTime() + i * 86400000).toISOString().slice(0, 10);
+}
+
 test('migra schema legado, preserva metadata e é idempotente', { skip: !SQLITE_AVAILABLE }, async () => {
   const dir = makeTempDir();
   const file = path.join(dir, 'trades.db');
@@ -137,6 +141,84 @@ test('deleteIndexAndStocks remove o índice e os seus ativos em cascata, sem toc
   assert.equal(noName.success, false);
   assert.equal(noName.error, 'missing-index-name');
 
+  db.close();
+  removeTempDir(dir);
+});
+
+test('getHistoricalPricesForSimulation cenário A devolve 100% do histórico ASC sem LIMIT', { skip: !SQLITE_AVAILABLE }, async () => {
+  const dir = makeTempDir();
+  const db = new DB(dir);
+  await db.init();
+
+  const candles = [];
+  for (let i = 0; i < 500; i++) {
+    candles.push(makeCandle('AAA', dateAt('2000-01-01', i), 100 + i));
+  }
+  db.saveHistoricalCandlesFromImport('AAA', candles);
+
+  const out = db.getHistoricalPricesForSimulation(' aaa ', null, null);
+  assert.equal(out.length, 500, 'sem filtro de datas não pode truncar o histórico');
+  assert.equal(out[0].date, '2000-01-01');
+  assert.equal(out[out.length - 1].date, dateAt('2000-01-01', 499));
+  const asc = out.every((c, i) => i === 0 || out[i - 1].date <= c.date);
+  assert.equal(asc, true, 'datas em ordenação estrita ASC');
+  assert.equal(out[0].close, 100);
+  assert.equal(out[10].volume, 1000);
+  assert.equal(typeof out[0].open, 'number');
+
+  assert.deepEqual(db.getHistoricalPricesForSimulation('', null, null), []);
+  db.close();
+  removeTempDir(dir);
+});
+
+test('getHistoricalPricesForSimulation cenário B inclui warm-up de 200 velas antes da data inicial', { skip: !SQLITE_AVAILABLE }, async () => {
+  const dir = makeTempDir();
+  const db = new DB(dir);
+  await db.init();
+
+  // 300 velas antes do start + 100 velas no período de teste
+  const candles = [];
+  for (let i = 0; i < 400; i++) {
+    candles.push(makeCandle('BBB', dateAt('2018-01-01', i), 50 + i));
+  }
+  db.saveHistoricalCandlesFromImport('BBB', candles);
+
+  const start = dateAt('2018-01-01', 300);
+  const end = dateAt('2018-01-01', 399);
+  const out = db.getHistoricalPricesForSimulation('bbb', start, end);
+
+  assert.equal(out.length, 300, '200 velas de warm-up + 100 velas do período');
+  assert.equal(out[0].date, dateAt('2018-01-01', 100), 'primeira vela é o início do warm-up');
+  assert.equal(out[200].date, start, 'a vela 200 corresponde exatamente à data inicial');
+  assert.equal(out[out.length - 1].date, end, 'não ultrapassa a data final');
+  const asc = out.every((c, i) => i === 0 || out[i - 1].date <= c.date);
+  assert.equal(asc, true, 'warm-up + período concatenados em ordem ASC');
+
+  // Sem endDate → estende até ao fim do histórico guardado
+  const noEnd = db.getHistoricalPricesForSimulation('BBB', start, null);
+  assert.equal(noEnd.length, 300, 'sem endDate usa todo o histórico após o start');
+  assert.equal(noEnd[noEnd.length - 1].date, end);
+
+  db.close();
+  removeTempDir(dir);
+});
+
+test('getHistoricalPricesForSimulation cenário B com warm-up insuficiente devolve apenas o disponível', { skip: !SQLITE_AVAILABLE }, async () => {
+  const dir = makeTempDir();
+  const db = new DB(dir);
+  await db.init();
+
+  const candles = [];
+  for (let i = 0; i < 50; i++) {
+    candles.push(makeCandle('CCC', dateAt('2020-01-01', i), 10 + i));
+  }
+  db.saveHistoricalCandlesFromImport('CCC', candles);
+
+  const start = dateAt('2020-01-01', 30);
+  const out = db.getHistoricalPricesForSimulation('CCC', start, null);
+  assert.equal(out.length, 50, '30 velas de warm-up disponíveis + 20 do período = 50');
+  assert.equal(out[0].date, dateAt('2020-01-01', 0));
+  assert.equal(out[30].date, start);
   db.close();
   removeTempDir(dir);
 });
