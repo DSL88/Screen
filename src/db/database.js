@@ -705,6 +705,57 @@ class DB {
     }));
   }
 
+  // Extração dedicada à simulação: carrega 100% do histórico guardado
+  // (cenário A) ou o intervalo pedido com um buffer de warm-up de 200
+  // velas anteriores à data inicial (cenário B). Nunca trunca o histórico
+  // além da subquery de warm-up. Datas normalizadas para YYYY-MM-DD,
+  // valores coerzidos para Number e ordenação estrita ASC.
+  getHistoricalPricesForSimulation(ticker, startDate = null, endDate = null) {
+    if (!ticker) return [];
+    const cleanTicker = canonicalTicker(ticker);
+
+    const toRow = (r) => ({
+      date: String(r.date).slice(0, 10),
+      open: Number(r.open),
+      high: Number(r.high),
+      low: Number(r.low),
+      close: Number(r.close),
+      volume: Number(r.volume || 0)
+    });
+
+    // CENÁRIO A: Sem filtro de data — 100% dos dados guardados
+    if (!startDate && !endDate) {
+      const rows = this.db.prepare(`
+        SELECT date, open, high, low, close, volume
+        FROM historical_prices
+        WHERE UPPER(TRIM(ticker)) = ?
+        ORDER BY date ASC
+      `).all(cleanTicker);
+      return rows.map(toRow);
+    }
+
+    // CENÁRIO B: Intervalo definido com warm-up prévio de 200 velas
+    const cleanStart = String(startDate).slice(0, 10);
+    const cleanEnd = endDate ? String(endDate).slice(0, 10) : '9999-12-31';
+
+    const warmupRows = this.db.prepare(`
+      SELECT date, open, high, low, close, volume
+      FROM historical_prices
+      WHERE UPPER(TRIM(ticker)) = ? AND date < ?
+      ORDER BY date DESC
+      LIMIT 200
+    `).all(cleanTicker, cleanStart).reverse();
+
+    const mainRows = this.db.prepare(`
+      SELECT date, open, high, low, close, volume
+      FROM historical_prices
+      WHERE UPPER(TRIM(ticker)) = ? AND date >= ? AND date <= ?
+      ORDER BY date ASC
+    `).all(cleanTicker, cleanStart, cleanEnd);
+
+    return [...warmupRows, ...mainRows].map(toRow);
+  }
+
   getTickerDataRange(ticker) {
     const row = this.db.prepare(`
       SELECT 

@@ -268,6 +268,24 @@ test('Warm-up dinâmico ajusta o início e não ignora o ativo', { concurrency: 
   assert.equal(result.messages.some(m => m.includes('sem registos suficientes')), false);
 });
 
+test('histórico total (milhares de velas) é processado por completo sem truncamento', { concurrency: false }, async () => {
+  const { runSimulation } = loadEngine({ directionAt: () => 'COMPRA' });
+  const series = buildSeries(Array.from({ length: 5000 }, (_, i) => ({
+    date: dateAt('2000-01-01', i),
+    open: 100, high: 101, low: 99, close: 100 + (i % 3)
+  })));
+  const result = await runSimulation({
+    universe: [{ ticker: 'FULL', name: 'Histórico', candles: series }],
+    params: baseParams({ startDate: '', endDate: '' }),
+    hooks: {}
+  });
+  assert.equal(result.ok, true);
+  assert.ok(result.equityCurve.length >= 4800, 'curva de capital deve cobrir praticamente todas as velas do histórico');
+  assert.equal(result.messages.some(m => m.includes('sem registos suficientes')), false);
+  const last = result.equityCurve[result.equityCurve.length - 1];
+  assert.equal(last.date, dateAt('2000-01-01', 4999), 'a simulação termina na última vela do histórico');
+});
+
 test('Preços em String são coerzidos para números com o mesmo resultado', { concurrency: false }, async () => {
   const { runSimulation } = loadEngine({ directionAt: date => (date === '2020-02-08' ? 'COMPRA' : 'NEUTRO') });
   const numeric = longTpSeries();

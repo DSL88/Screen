@@ -134,26 +134,30 @@ async function runSimulation(options) {
     if (candles.length === 0) continue;
 
     let requestedStartIdx = 0;
-    while (requestedStartIdx < candles.length && String(candles[requestedStartIdx].date) < cfg.startDate) requestedStartIdx++;
+    if (cfg.startDate) {
+      while (requestedStartIdx < candles.length && String(candles[requestedStartIdx].date) < cfg.startDate) requestedStartIdx++;
+    }
 
     if (candles.length <= cfg.warmup) {
       messages.push(`${u.ticker || '?'}: Ativo sem registos suficientes na base de dados SQLite.`);
       continue;
     }
 
-    if (requestedStartIdx >= candles.length) {
+    if (cfg.startDate && requestedStartIdx >= candles.length) {
       messages.push(`IGNORADO ${u.ticker || '?'}: startDate fora do histórico disponível`);
       continue;
     }
 
     const effectiveStartIdx = Math.max(requestedStartIdx, cfg.warmup);
 
-    if (effectiveStartIdx > requestedStartIdx) {
+    if (cfg.startDate && effectiveStartIdx > requestedStartIdx) {
       messages.push(`${u.ticker || '?'}: warm-up insuficiente até ${cfg.startDate}; início ajustado para ${candles[effectiveStartIdx].date}`);
     }
 
     let endIdx = candles.length - 1;
-    while (endIdx >= 0 && String(candles[endIdx].date) > cfg.endDate) endIdx--;
+    if (cfg.endDate) {
+      while (endIdx >= 0 && String(candles[endIdx].date) > cfg.endDate) endIdx--;
+    }
     if (endIdx < effectiveStartIdx) continue;
 
     assets.push({ ticker: u.ticker, name: u.name || u.ticker, candles, startIdx: effectiveStartIdx, endIdx, ptr: effectiveStartIdx });
