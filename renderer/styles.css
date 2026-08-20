@@ -2474,6 +2474,25 @@ tr.removing .portfolio-row-remove { opacity: 0.4; }
   flex-shrink: 0;
   white-space: nowrap;
 }
+.modal-result.is-added { cursor: pointer; }
+.modal-result-open {
+  border: none;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: all var(--duration) var(--ease);
+}
+.modal-result-open:hover {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 12px var(--accent-soft);
+}
 .modal-result-empty {
   padding: 14px;
   text-align: center;
