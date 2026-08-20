@@ -738,7 +738,17 @@
         ${r.exchange ? `<span class="suggestion-exchange">${escapeHtml(r.exchange)}</span>` : ''}
         <button class="suggestion-add">${isInWatchlist(r.ticker) ? 'Adicionado' : 'Adicionar'}</button>
       `;
-      if (!isInWatchlist(r.ticker)) {
+      if (isInWatchlist(r.ticker)) {
+        const open = () => {
+          hideSuggestions();
+          openAssetDetailModal(r.ticker);
+        };
+        div.querySelector('.suggestion-add').addEventListener('click', (e) => {
+          e.stopPropagation();
+          open();
+        });
+        div.addEventListener('click', open);
+      } else {
         const handler = (e) => {
           e.stopPropagation();
           promptAddTickerWithIndex(r);
@@ -1348,14 +1358,23 @@
     }
     modalResults.innerHTML = '';
     for (const t of tickers) {
+      const alreadyAdded = isInWatchlist(t.ticker);
       const div = document.createElement('div');
-      div.className = 'modal-result';
+      div.className = 'modal-result' + (alreadyAdded ? ' is-added' : '');
       div.innerHTML = `
         <span class="modal-result-ticker">${escapeHtml(t.ticker)}</span>
         <span class="modal-result-name" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
         ${t.exchange ? `<span class="modal-result-exchange">${escapeHtml(t.exchange)}</span>` : ''}
+        ${alreadyAdded
+          ? '<button type="button" class="modal-result-open" title="Abrir a janela do ativo (já adicionado)">Abrir Janela</button>'
+          : ''}
       `;
       div.addEventListener('click', () => {
+        if (alreadyAdded) {
+          closeAddModal();
+          openAssetDetailModal(t.ticker);
+          return;
+        }
         modalTicker.value = t.ticker;
         modalName.value = t.name;
         if (modalCountry) modalCountry.value = t.country || '';
@@ -1363,6 +1382,16 @@
         showModalHint('invalid', '⚠️ Ticker preenchido. Seleciona obrigatoriamente o Índice na caixa de seleção.');
         modalResults.innerHTML = '';
       });
+      if (alreadyAdded) {
+        const openBtn = div.querySelector('.modal-result-open');
+        if (openBtn) {
+          openBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeAddModal();
+            openAssetDetailModal(t.ticker);
+          });
+        }
+      }
       modalResults.appendChild(div);
     }
   }
@@ -1588,7 +1617,14 @@
           ${r.exchange ? `<span class="modal-search-exchange">${escapeHtml(r.exchange)}</span>` : ''}
           <button class="modal-search-add-btn">${isAdded ? 'Adicionado' : 'Adicionar'}</button>
         `;
-        if (!isAdded) {
+        if (isAdded) {
+          const open = () => {
+            closeSearchModal();
+            openAssetDetailModal(r.ticker);
+          };
+          div.querySelector('.modal-search-add-btn').addEventListener('click', (e) => { e.stopPropagation(); open(); });
+          div.addEventListener('click', open);
+        } else {
           const add = () => promptAddTickerWithIndex(r);
           div.querySelector('.modal-search-add-btn').addEventListener('click', (e) => { e.stopPropagation(); add(); });
           div.addEventListener('click', add);
