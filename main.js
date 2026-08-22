@@ -10,6 +10,7 @@ const { getCountryIndex } = require('./src/data/countryIndexMap');
 const wikipediaScraper = require('./src/services/wikipediaScraper');
 const marketDataService = require('./src/services/marketDataService');
 const { isIncrementalUpToDate, addDays } = require('./src/utils/dateUtils');
+const { createProgressReporter } = require('./src/utils/progressThrottle');
 const { parseFile, importFromCsvFile } = require('./src/importer/historicalImporter');
 
 // Pre-calculate mapping from ticker to index ID for fast lookup
@@ -1436,10 +1437,6 @@ app.whenReady().then(async () => {
       const operation = lock.operation;
       const filter = requested.index || null;
 
-      const SYNC_CHUNK_SIZE = 5;
-      const SYNC_IPC_BATCH = 10;
-      const sleep = ms => new Promise(res => setTimeout(res, ms));
-
       try {
         const tickers = db.getCustomTickersByIndex(filter);
         if (!tickers || tickers.length === 0) {
@@ -1447,77 +1444,81 @@ app.whenReady().then(async () => {
             totalNewCandles: 0, errors: [], error: 'no-stocks', message: 'Nenhum ativo na lista para sincronizar.' };
         }
 
+        const total = tickers.length;
+        let completed = 0;
         let updatedCount = 0;
         let totalNewCandles = 0;
         const errors = [];
-        const expected = db.getLastExpectedTradingDay();
         const updatedSummaries = [];
-        let completed = 0;
 
-        for (let i = 0; i < tickers.length; i += SYNC_CHUNK_SIZE) {
-          if (isPipelineCancelled(operation)) break;
-          const chunk = tickers.slice(i, i + SYNC_CHUNK_SIZE);
+        const expected = db.getLastExpectedTradingDay();
+        const reporter = createProgressReporter({ minIntervalMs: 100, everyN: 10 });
 
-          const results = await Promise.all(chunk.map(async (ticker) => {
-            try {
-              const lastDate = db.getLastStoredDate(ticker);
-              if (!lastDate || isIncrementalUpToDate(lastDate, expected)) {
-                return { ticker, status: 'skipped' };
-              }
+        const sendProgress = (current, updated) => {
+          if (!mainWindow || mainWindow.isDestroyed()) return;
+          mainWindow.webContents.send('sync-all-progress', {
+            current,
+            total,
+            percent: Math.round(current / total * 100),
+            status: 'batch',
+            updated
+          });
+        };
 
-              const candles = await yahooClient.fetchIncrementalYahooHistory(ticker, lastDate);
-              if (!candles || candles.length === 0) {
-                return { ticker, status: 'noop' };
-              }
-
-              return { ticker, candles, status: 'updated' };
-            } catch (err) {
-              return { ticker, status: 'error', error: err.message || String(err) };
+        const results = await yahooClient.syncTickersBatch(tickers, {
+          expectedTradingDay: expected,
+          getLastDate: t => db.getLastStoredDate(t),
+          shouldContinue: () => !isPipelineCancelled(operation),
+          fetchOne: async (t, lastDate) => {
+            const candles = await yahooClient.fetchIncrementalYahooHistory(t, lastDate, { throwOnError: true });
+            completed += 1;
+            const isLast = completed === total;
+            if ((reporter.report({ isLast }) || isLast)
+              && mainWindow && !mainWindow.isDestroyed()) {
+              sendProgress(completed, []);
             }
-          }));
-
-          const updatedEntries = results.filter(r => r.status === 'updated');
-          if (isPipelineCancelled(operation)) {
-            for (const result of updatedEntries) result.status = 'cancelled';
-          } else if (updatedEntries.length > 0) {
-            const saved = db.saveHistoricalCandlesBatch(updatedEntries.map(r => ({ ticker: r.ticker, candles: r.candles })));
-            totalNewCandles += saved.changes;
-            updatedCount += updatedEntries.length;
-            for (const r of updatedEntries) {
-              db.cacheOHLCV(r.ticker, r.candles);
-              updatedSummaries.push({ ticker: r.ticker, summary: db.getHistoricalSummary(r.ticker) });
-            }
+            return candles;
           }
+        });
 
-          for (const r of results) {
-            if (r.status === 'error') {
-              errors.push({ ticker: r.ticker, error: r.error });
-            }
+        // Velas já descarregadas antes de um cancelamento são válidas:
+        // gravam-se sempre numa única transação; só as CANCELLED/não
+        // iniciadas ficam sem dados.
+        const allFlat = [];
+        for (const r of results) {
+          if (r.status === 'ERROR') {
+            errors.push({ ticker: r.ticker, error: r.error });
+            continue;
           }
-
-          completed += chunk.length;
-
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            if (completed % SYNC_IPC_BATCH === 0 || completed >= tickers.length) {
-              mainWindow.webContents.send('sync-all-progress', {
-                current: completed,
-                total: tickers.length,
-                percent: tickers.length > 0 ? Math.round(completed / tickers.length * 100) : 0,
-                status: 'batch',
-                updated: updatedSummaries.splice(0)
-              });
-            }
-          }
-
-          if (i + SYNC_CHUNK_SIZE < tickers.length) {
-            await sleep(150 + Math.random() * 150);
+          if (Array.isArray(r.candles) && r.candles.length > 0) {
+            for (const c of r.candles) allFlat.push({ ...c, ticker: r.ticker });
           }
         }
 
-        const status = operationStatus(tickers.length, errors, operation.cancelled, completed, updatedCount);
+        let processed = 0;
+        for (const r of results) {
+          if (r.status !== 'CANCELLED') processed += 1;
+        }
+
+        if (allFlat.length > 0) {
+          const saved = db.saveBulkHistoricalCandles(allFlat);
+          totalNewCandles = saved.changes;
+        }
+
+        for (const r of results) {
+          if (r.status === 'SUCCESS' && Array.isArray(r.candles) && r.candles.length > 0) {
+            updatedCount += 1;
+            db.cacheOHLCV(r.ticker, r.candles);
+            updatedSummaries.push({ ticker: r.ticker, summary: db.getHistoricalSummary(r.ticker) });
+          }
+        }
+
+        sendProgress(total, updatedSummaries);
+
+        const status = operationStatus(total, errors, operation.cancelled, processed, updatedCount);
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('sync-all-done', {
-            totalStocks: tickers.length,
+            totalStocks: total,
             updatedCount,
             totalNewCandles,
             errorCount: errors.length,
@@ -1531,12 +1532,13 @@ app.whenReady().then(async () => {
           ok: status !== 'failed',
           success: status !== 'failed',
           status,
-          totalStocks: tickers.length,
+          totalStocks: total,
           updatedCount,
           totalNewCandles,
           errors
         };
       } catch (err) {
+        console.error('[sync-all-list-stocks] falhou:', err && err.message ? err.message : err);
         return { ok: false, error: err.message || String(err) };
       } finally {
         finishPipelineOperation(operation);

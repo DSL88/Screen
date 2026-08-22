@@ -63,6 +63,8 @@ class DB {
     this.db.pragma('foreign_keys = ON');
     this._migrate();
     this._seedParams();
+    // Statements quentes compilados uma única vez, com o schema já migrado.
+    this._prepareStatements();
     return Promise.resolve();
   }
 
@@ -128,6 +130,7 @@ class DB {
           created_at  TEXT DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_stocks_ticker ON stocks (ticker);
+        CREATE INDEX IF NOT EXISTS idx_stocks_index ON stocks (index_name);
 
         CREATE TABLE IF NOT EXISTS custom_tickers (
           ticker     TEXT PRIMARY KEY,
@@ -302,6 +305,25 @@ class DB {
       for (const [k, v] of Object.entries(DEFAULT_PARAMS)) stmt.run(k, v);
     });
     tx();
+  }
+
+  // Prepared statements de hot path (gravação de velas no sync em lote e nas
+  // mensagens do scanner). Compilados uma única vez em init(); o UPSERT
+  // condicional (`WHERE ... IS NOT excluded...`) evita reescritas idênticas,
+  // pelo que r.changes conta apenas mudanças reais.
+  _prepareStatements() {
+    this._stmtUpsertPrice = this.db.prepare(`
+      INSERT INTO historical_prices (ticker, date, open, high, low, close, volume)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(ticker, date) DO UPDATE SET
+        open = excluded.open, high = excluded.high, low = excluded.low,
+        close = excluded.close, volume = excluded.volume
+      WHERE historical_prices.open IS NOT excluded.open
+         OR historical_prices.high IS NOT excluded.high
+         OR historical_prices.low IS NOT excluded.low
+         OR historical_prices.close IS NOT excluded.close
+         OR historical_prices.volume IS NOT excluded.volume
+    `);
   }
 
   getAdaptiveParams() {
@@ -552,18 +574,9 @@ class DB {
   saveHistoricalCandles(candles) {
     if (!Array.isArray(candles) || candles.length === 0) return { changes: 0 };
 
-    const stmt = this.db.prepare(`
-      INSERT INTO historical_prices (ticker, date, open, high, low, close, volume)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(ticker, date) DO UPDATE SET
-        open = excluded.open, high = excluded.high, low = excluded.low,
-        close = excluded.close, volume = excluded.volume
-      WHERE historical_prices.open IS NOT excluded.open
-         OR historical_prices.high IS NOT excluded.high
-         OR historical_prices.low IS NOT excluded.low
-         OR historical_prices.close IS NOT excluded.close
-         OR historical_prices.volume IS NOT excluded.volume
-    `);
+    // Statement hoisted em _prepareStatements() — chamado por ticker no ciclo
+    // de mensagens do scanner worker, não deve recompilar por invocação.
+    const stmt = this._stmtUpsertPrice;
 
     const tx = this.db.transaction((rows) => {
       let changes = 0;
@@ -606,18 +619,9 @@ class DB {
   saveHistoricalCandlesBatch(entries) {
     if (!Array.isArray(entries) || entries.length === 0) return { changes: 0 };
 
-    const stmt = this.db.prepare(`
-      INSERT INTO historical_prices (ticker, date, open, high, low, close, volume)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(ticker, date) DO UPDATE SET
-        open = excluded.open, high = excluded.high, low = excluded.low,
-        close = excluded.close, volume = excluded.volume
-      WHERE historical_prices.open IS NOT excluded.open
-         OR historical_prices.high IS NOT excluded.high
-         OR historical_prices.low IS NOT excluded.low
-         OR historical_prices.close IS NOT excluded.close
-         OR historical_prices.volume IS NOT excluded.volume
-    `);
+    // Statement hoisted em _prepareStatements() — usado pelo sync em lote
+    // (sync-all-list-stocks) uma vez por chunk; sem prepare por chamada.
+    const stmt = this._stmtUpsertPrice;
 
     const tx = this.db.transaction((batch) => {
       let changes = 0;
@@ -639,6 +643,51 @@ class DB {
     });
 
     return { changes: tx(entries) };
+  }
+
+  // API flat para gravação consolidada via IPC: recebe velas já "achatadas"
+  // [{ ticker, date:'YYYY-MM-DD', open, high, low, close, volume }] numa
+  // única transação. Coerção defensiva por linha; linhas inválidas (sem
+  // ticker/data ou preços não finitos) são ignoradas sem abortar o lote.
+  // Devolve { changes, skipped }: changes tem a mesma semântica do método
+  // acima (soma de r.changes do UPSERT condicional).
+  saveBulkHistoricalCandles(candlesArray) {
+    if (!Array.isArray(candlesArray) || candlesArray.length === 0) {
+      return { changes: 0, skipped: 0 };
+    }
+
+    const stmt = this._stmtUpsertPrice;
+
+    const tx = this.db.transaction((rows) => {
+      let changes = 0;
+      let skipped = 0;
+      for (const raw of rows) {
+        const row = raw || {};
+        const ticker = canonicalTicker(row.ticker);
+        const date = String(row.date || '').slice(0, 10);
+        const open = Number(row.open);
+        const high = Number(row.high);
+        const low = Number(row.low);
+        const close = Number(row.close);
+        const volumeNum = Number(row.volume || 0);
+        const volume = Number.isFinite(volumeNum) ? volumeNum : 0;
+
+        // NaN/Infinity não são vinculáveis pelo better-sqlite3: filtra antes
+        // de correr o statement para nunca abortar o lote inteiro.
+        if (!ticker || !date || !Number.isFinite(close)
+          || !Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low)) {
+          skipped++;
+          continue;
+        }
+
+        const r = stmt.run(ticker, date, open, high, low, close, volume);
+        changes += r.changes || 0;
+      }
+      return { changes, skipped };
+    });
+
+    const { changes, skipped } = tx(candlesArray);
+    return { changes, skipped };
   }
 
   getLocalHistoricalPrices(ticker, limit = 300) {
