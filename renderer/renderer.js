@@ -347,6 +347,31 @@
       .replace(/"/g, '&quot;');
   }
 
+  function iconSvg(name, cls = '') {
+    return `<svg class="icon ${cls}" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
+  }
+
+  function renderSkeletonRows(tbodyId, cols, rows = 6) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    const widths = [85, 60, 75, 50, 70, 65, 80, 55];
+    let html = '';
+    for (let i = 0; i < rows; i++) {
+      const w = widths[i % widths.length];
+      html += `<tr class="skeleton-row"><td colspan="${cols}"><div class="skeleton-line" style="width:${w}%"></div></td></tr>`;
+    }
+    tbody.innerHTML = html;
+  }
+
+  function emptyStateRowHtml(cols, iconName, title, desc) {
+    return '<tr class="empty"><td colspan="' + cols + '">' +
+      '<div class="empty-state">' +
+      '<div class="empty-state-icon">' + iconSvg(iconName, 'icon-lg') + '</div>' +
+      '<div class="empty-state-title">' + title + '</div>' +
+      '<div class="empty-state-desc">' + desc + '</div>' +
+      '</div></td></tr>';
+  }
+
   function isInWatchlist(ticker) {
     const needle = String(ticker || '').toUpperCase().trim();
     return watchlist.some(t => String(t.ticker || '').toUpperCase().trim() === needle);
@@ -855,7 +880,7 @@
       modalIndexSelect.appendChild(groupOther);
     }
     const groupCustom = document.createElement('optgroup');
-    groupCustom.label = '➕ Personalizado';
+    groupCustom.label = 'Personalizado';
     const customOpt = document.createElement('option');
     customOpt.value = 'CUSTOM_NEW';
     customOpt.textContent = '+ Digitar Novo Índice / Personalizado...';
@@ -1031,25 +1056,25 @@
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = msg;
           if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
           if (typeof status !== 'undefined' && status) status.textContent = msg;
-          if (btnOriginalLabel) btnOriginalLabel.textContent = '✅ Concluído!';
+          if (btnOriginalLabel) btnOriginalLabel.innerHTML = iconSvg('check-circle') + ' Concluído!';
           showToast(msg, 'success');
           await reloadMyListFromDatabase();
         } else if (res && res.success) {
           const processed = res.total || res.count || res.updated || 0;
           const errMsg = `Atualização parcial: ${res.count || res.updated || 0}/${processed} ativos; ${operationErrors} falha(s).`;
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = errMsg;
-          if (btnOriginalLabel) btnOriginalLabel.textContent = '⚠️ Parcial';
+          if (btnOriginalLabel) btnOriginalLabel.innerHTML = iconSvg('alert-triangle') + ' Parcial';
           showToast(errMsg, 'info');
           await reloadMyListFromDatabase();
         } else {
           const errMsg = (res && res.message) || (res && res.error) || 'Erro desconhecido';
           if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + errMsg;
-          if (btnOriginalLabel) btnOriginalLabel.textContent = '❌ Falhou';
+          if (btnOriginalLabel) btnOriginalLabel.innerHTML = iconSvg('x-circle') + ' Falhou';
           showToast('Erro na atualização: ' + errMsg, 'error');
         }
       } catch (err) {
         if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = 'Erro: ' + (err.message || String(err));
-        if (btnOriginalLabel) btnOriginalLabel.textContent = '❌ Falhou';
+        if (btnOriginalLabel) btnOriginalLabel.innerHTML = iconSvg('x-circle') + ' Falhou';
         showToast('Erro na atualização: ' + (err.message || String(err)), 'error');
       } finally {
         setTimeout(() => {
@@ -1283,10 +1308,14 @@
     return { valid: true };
   }
 
-  function showModalHint(state, msg) {
+  function showModalHint(state, msg, iconName) {
     if (!modalHint) return;
     modalHint.className = 'form-hint ' + (state === 'valid' ? 'is-valid' : state === 'invalid' ? 'is-invalid' : '');
-    modalHint.textContent = msg || '';
+    if (!msg) {
+      modalHint.textContent = '';
+      return;
+    }
+    modalHint.innerHTML = (iconName ? iconSvg(iconName) : '') + escapeHtml(msg);
   }
 
   function showModalError(msg) {
@@ -1340,7 +1369,7 @@
     const indexName = getSelectedModalIndex();
     if (!indexName) {
       showModalError('Seleção de Índice é obrigatória. Por favor, seleciona um índice da lista.');
-      showModalHint('invalid', '⚠️ Seleção de Índice é obrigatória.');
+      showModalHint('invalid', 'Seleção de Índice é obrigatória.', 'alert-triangle');
       if (modalIndexSelect) modalIndexSelect.focus();
       return;
     }
@@ -1379,7 +1408,7 @@
         modalName.value = t.name;
         if (modalCountry) modalCountry.value = t.country || '';
         setModalIndexValue('');
-        showModalHint('invalid', '⚠️ Ticker preenchido. Seleciona obrigatoriamente o Índice na caixa de seleção.');
+        showModalHint('invalid', 'Ticker preenchido. Seleciona obrigatoriamente o Índice na caixa de seleção.', 'alert-triangle');
         modalResults.innerHTML = '';
       });
       if (alreadyAdded) {
@@ -1599,7 +1628,7 @@
       section.className = 'modal-search-section';
       section.innerHTML = `
         <div class="modal-search-section-header">
-          <div class="modal-search-section-title">📈 Resultados</div>
+          <div class="modal-search-section-title">${iconSvg('trending-up')} Resultados</div>
           <div class="modal-search-section-count">${tickers.length}</div>
         </div>
       `;
@@ -1829,7 +1858,7 @@
   }
 
   function clearTable() {
-    body.innerHTML = '<tr class="empty"><td colspan="12">A processar...</td></tr>';
+    renderSkeletonRows('results-body', 12, 6);
     scannerRows = []; // Limpar dados armazenados
     currentSort = { column: null, direction: 'asc' }; // Reset ordenação
     updateSortIndicator();
@@ -1842,8 +1871,8 @@
   }
 
   function appendRow(r) {
-    const empty = body.querySelector('tr.empty');
-    if (empty) empty.remove();
+    const placeholders = body.querySelectorAll('tr.empty, tr.skeleton-row');
+    if (placeholders.length) placeholders.forEach(el => el.remove());
     
     scannerRows.push(r);
     
@@ -1911,7 +1940,7 @@
   function renderAllRows() {
     body.innerHTML = '';
     if (scannerRows.length === 0) {
-      body.innerHTML = '<tr class="empty"><td colspan="12">Aguardando execução do scanner...</td></tr>';
+      body.innerHTML = emptyStateRowHtml(12, 'search', 'Sem resultados', 'Aguardando execução do scanner...');
       return;
     }
     
@@ -2232,7 +2261,7 @@
             : `1º Registo concluído: ${res.updated} ativos com histórico desde a origem (${idxLabel}).`;
           showToast(msg, 'success');
           if (typeof status !== 'undefined' && status) status.textContent = msg;
-          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `✅ ${msg}`;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.innerHTML = iconSvg('check-circle') + ' ' + escapeHtml(msg);
           if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
         } else if (res && (res.cancelled || (res.ok && errorCount > 0))) {
           const msg = res.cancelled
@@ -2240,7 +2269,7 @@
             : `1º Registo parcial: ${res.updated}/${res.total} ativos atualizados (${idxLabel}); ${errorCount} falha(s).`;
           showToast(msg, 'info');
           if (typeof status !== 'undefined' && status) status.textContent = msg;
-          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `⚠️ ${msg}`;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.innerHTML = iconSvg('alert-triangle') + ' ' + escapeHtml(msg);
           const firstErr = errors[0];
           if (firstErr && typeof status !== 'undefined' && status) {
             status.textContent += ` Ex.: ${firstErr.ticker || '?'}: ${firstErr.error || firstErr}`;
@@ -2249,12 +2278,12 @@
           const errMsg = (res && (res.error || res.message)) || 'Erro desconhecido';
           showToast('Erro no 1º Registo: ' + errMsg, 'error');
           if (typeof status !== 'undefined' && status) status.textContent = 'Erro no 1º Registo: ' + errMsg;
-          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = '❌ ' + errMsg;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.innerHTML = iconSvg('x-circle') + ' ' + escapeHtml(errMsg);
         }
       } catch (err) {
         showToast('Erro no 1º Registo: ' + (err.message || String(err)), 'error');
         if (typeof status !== 'undefined' && status) status.textContent = 'Erro no 1º Registo: ' + (err.message || String(err));
-        if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = '❌ ' + (err.message || String(err));
+        if (indexBulkProgressLabel) indexBulkProgressLabel.innerHTML = iconSvg('x-circle') + ' ' + escapeHtml(err.message || String(err));
       } finally {
         firstRegistoActive = false;
         setFirstRegistoBusy(false);
@@ -2291,7 +2320,7 @@
             : (res.message || 'Lista já estava atualizada até ao último dia de mercado.');
           showToast(msg, 'success');
           if (typeof status !== 'undefined' && status) status.textContent = msg;
-          if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `✅ ${msg}`;
+          if (indexBulkProgressLabel) indexBulkProgressLabel.innerHTML = iconSvg('check-circle') + ' ' + escapeHtml(msg);
           if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
         } else {
           const errMsg = res && res.error ? res.error : 'Erro desconhecido';
@@ -2357,7 +2386,7 @@
             ? freshness.maxStoredDate.split('-').reverse().join('-')
             : '—';
           freshnessBannerMessage.innerHTML =
-            `⚠️ A sua base de dados local tem cotações pendentes de atualização ` +
+            `${iconSvg('alert-triangle')} A sua base de dados local tem cotações pendentes de atualização ` +
             `(dados até <strong>${maxDateFormatted}</strong>, última sessão de mercado esperada <strong>${expectedDateFormatted}</strong>). ` +
             `Atualize a <strong>"My List"</strong> para resultados 100% precisos.`;
           freshnessBanner.hidden = false;
@@ -2403,10 +2432,12 @@
       if (!res || !res.ok) {
         status.textContent = 'Erro ao iniciar scanner.';
         setRunning(false);
+        renderAllRows();
       }
     } catch (err) {
       status.textContent = 'Erro: ' + (err.message || err);
       setRunning(false);
+      renderAllRows();
     }
   });
 
@@ -2487,8 +2518,8 @@
 
     status.textContent = summaryMsg;
     footerSummary.textContent = `${d.totalSignals || 0} sinais emitidos · ${totalProcessed}/${total} tickers processados`;
-    if (!wasCancelled && (d.totalSignals || 0) === 0) {
-      body.innerHTML = '<tr class="empty"><td colspan="12">Nenhum ativo cumpriu os critérios (Edge ≥ 15%, Volume ≥ 1.2× SMA20, direção válida).</td></tr>';
+    if ((d.totalSignals || 0) === 0) {
+      body.innerHTML = emptyStateRowHtml(12, 'search', 'Sem sinais', 'Nenhum ativo cumpriu os critérios (Edge ≥ 15%, Volume ≥ 1.2× SMA20, direção válida).');
     }
   });
 
@@ -2897,7 +2928,7 @@
   function renderPortfolioTable() {
     portfolioBody.innerHTML = '';
     if (lastActiveTrades.length === 0) {
-      portfolioBody.innerHTML = '<tr class="empty"><td colspan="12">Nenhuma posição ativa. Clique em "Investir" num sinal do scanner para começar.</td></tr>';
+      portfolioBody.innerHTML = emptyStateRowHtml(12, 'trending-up', 'Sem posições ativas', 'Nenhuma posição ativa. Clique em "Investir" num sinal do scanner para começar.');
       if (btnClearTrades) btnClearTrades.disabled = true;
       return;
     }
@@ -2912,7 +2943,7 @@
     try {
       const res = await window.api.listTrades();
       if (!res || !res.ok) {
-        portfolioBody.innerHTML = '<tr class="empty"><td colspan="11">Erro ao carregar posições.</td></tr>';
+        portfolioBody.innerHTML = emptyStateRowHtml(11, 'alert-triangle', 'Erro', 'Erro ao carregar posições.');
         return;
       }
 
@@ -3135,7 +3166,7 @@
     try {
       const res = await window.api.listTrades();
       if (!res || !res.ok) {
-        historyBody.innerHTML = '<tr class="empty"><td colspan="11">Erro ao carregar histórico.</td></tr>';
+        historyBody.innerHTML = emptyStateRowHtml(11, 'alert-triangle', 'Erro', 'Erro ao carregar histórico.');
         return;
       }
 
@@ -3143,7 +3174,7 @@
       historyBody.innerHTML = '';
       
       if (closed.length === 0) {
-        historyBody.innerHTML = '<tr class="empty"><td colspan="11">Nenhum trade no histórico. As operações fechadas aparecerão aqui.</td></tr>';
+        historyBody.innerHTML = emptyStateRowHtml(11, 'file-text', 'Histórico vazio', 'Nenhum trade no histórico. As operações fechadas aparecerão aqui.');
         if (btnClearHistory) btnClearHistory.disabled = true;
       } else {
         // Ordenar por data de fecho (mais recente primeiro)
@@ -3683,7 +3714,7 @@
     }
     if (hasOther) editStockIndex.appendChild(groupOther);
     const groupCustom = document.createElement('optgroup');
-    groupCustom.label = '➕ Personalizado';
+    groupCustom.label = 'Personalizado';
     const customOpt = document.createElement('option');
     customOpt.value = 'CUSTOM_NEW';
     customOpt.textContent = '+ Novo Índice...';
@@ -3692,7 +3723,7 @@
     setEditStockIndexValue(selectedRaw);
   }
 
-  // "✏️ Editar": pré-preenche os inputs com os valores atuais e alterna para
+  // "Editar": pré-preenche os inputs com os valores atuais e alterna para
   // .edit-mode, carregando dinamicamente os índices via getDistinctIndices().
   async function enterAssetDetailEditMode() {
     if (!currentAssetTicker) return;
@@ -3708,14 +3739,14 @@
     setAssetDetailViewMode(false);
   }
 
-  // "❌ Cancelar": regressa a .view-mode sem alterar dados.
+  // "Cancelar": regressa a .view-mode sem alterar dados.
   function cancelAssetDetailEdit() {
     setAssetDetailViewMode(true);
     setAssetDetailViewValues(assetDetailCurrentValues || {});
     if (assetMetadataError) { assetMetadataError.textContent = ''; assetMetadataError.hidden = true; }
   }
 
-  // "💾 Guardar Alterações": valida, grava via IPC e, em sucesso, atualiza a
+  // "Guardar Alterações": valida, grava via IPC e, em sucesso, atualiza a
   // memória local, os textos .view-mode, o card na My List (reload preserva
   // filtros/grupos e Hover Card) e o dropdown/badge de índices.
   async function saveStockModal() {

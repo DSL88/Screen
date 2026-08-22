@@ -11,6 +11,28 @@
   <link rel="stylesheet" href="styles.css?v=7" />
 </head>
 <body>
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-sunrise" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m8 6 4-4 4 4"/><path d="M16 18a4 4 0 0 0-8 0"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+    <symbol id="i-file-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+    <symbol id="i-eraser" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></symbol>
+    <symbol id="i-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11 3 3L22 4"/></symbol>
+    <symbol id="i-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+    <symbol id="i-trending-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-chevrons-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+  </svg>
   <div class="app">
     <div class="title-bar">
       <span class="title-bar-text">Markov Stock Scanner</span>
@@ -132,7 +154,13 @@
           </thead>
           <tbody id="results-body">
             <tr class="empty">
-              <td colspan="12">Aguardando execução do scanner...</td>
+              <td colspan="12">
+                <div class="empty-state">
+                  <div class="empty-state-icon"><svg class="icon icon-lg"><use href="#i-search"></use></svg></div>
+                  <div class="empty-state-title">Sem resultados</div>
+                  <div class="empty-state-desc">Aguardando execução do scanner...</div>
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -144,13 +172,13 @@
       </footer>
       <div class="freshness-banner" id="freshness-banner" hidden>
         <div class="freshness-banner-content">
-          <span class="freshness-banner-icon">⚠️</span>
+          <span class="freshness-banner-icon"><svg class="icon" aria-hidden="true"><use href="#i-alert-triangle"></use></svg></span>
           <div class="freshness-banner-text">
             <strong>Atenção: Dados Desatualizados Detetados</strong><br/>
             <span id="freshness-banner-message">A sua base de dados local tem cotações pendentes de atualização. Atualize a My List para resultados 100% precisos.</span>
           </div>
           <div class="freshness-banner-actions">
-            <button class="btn-primary" id="btn-freshness-go-mylist">🔄 Ir para My List e Atualizar</button>
+            <button class="btn-primary" id="btn-freshness-go-mylist"><svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg> Ir para My List e Atualizar</button>
             <button class="btn-secondary" id="btn-freshness-continue">Continuar Mesmo Assim</button>
           </div>
         </div>
@@ -168,30 +196,30 @@
 
           <div class="toolbar-group search-group">
             <div class="search-input-wrapper">
-              <i class="search-icon">🔍</i>
+              <i class="search-icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></i>
               <input type="text" id="mylist-search-input" placeholder="Pesquisar por Ticker ou Nome..." class="toolbar-input" />
             </div>
           </div>
 
           <div class="toolbar-group data-actions-group">
             <button id="btn-first-registo" class="btn btn-secondary toolbar-btn" title="1º Registo (Baixar histórico desde o IPO/Origem)">
-              <i class="toolbar-btn-icon">🌅</i><span>1º Registo</span>
+              <i class="toolbar-btn-icon"><svg class="icon" aria-hidden="true"><use href="#i-sunrise"></use></svg></i><span>1º Registo</span>
             </button>
             <button id="btn-most-recent" class="btn btn-primary toolbar-btn" title="Mais Recente (Sincronizar até à última sessão de mercado)">
-              <i class="toolbar-btn-icon">⬇️</i><span>Mais Recente</span>
+              <i class="toolbar-btn-icon"><svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg></i><span>Mais Recente</span>
             </button>
           </div>
 
           <div class="toolbar-group add-action-group">
             <button id="btn-add-stock-modal" class="btn btn-success toolbar-btn" title="Adicionar novo ativo à My List">
-              <i class="toolbar-btn-icon">➕</i><span>Adicionar Ativo</span>
+              <i class="toolbar-btn-icon"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg></i><span>Adicionar Ativo</span>
             </button>
           </div>
 
           <div class="toolbar-group index-actions-group">
             <div class="index-actions-menu" id="index-actions-menu">
               <button id="btn-index-actions" class="btn btn-secondary toolbar-btn" title="Opções / Ações do Índice">
-                <i class="toolbar-btn-icon">⚙️</i><span>Ações do Índice</span>
+                <i class="toolbar-btn-icon"><svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg></i><span>Ações do Índice</span>
               </button>
               <div class="index-actions-dropdown" id="index-actions-dropdown" hidden>
                 <div class="index-actions-dropdown-label">Importar índice do país</div>
@@ -214,19 +242,19 @@
                 </button>
                 <div class="index-actions-divider"></div>
                 <button id="btn-update-index-dates" class="index-action-item" title="Obter no Yahoo Finance a 1ª data registada (IPO) de TODOS os ativos deste índice e gravar na SQLite">
-                  <i class="toolbar-btn-icon">🔄</i><span>Atualizar 1ª Data</span>
+                  <i class="toolbar-btn-icon"><svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg></i><span>Atualizar 1ª Data</span>
                 </button>
                 <button id="btn-delete-index" class="index-action-item index-action-danger" title="Eliminar o índice selecionado e todos os seus ativos da base de dados">
-                  <i class="toolbar-btn-icon">🗑️</i><span>Eliminar Índice</span>
+                  <i class="toolbar-btn-icon"><svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg></i><span>Eliminar Índice</span>
                 </button>
                 <button id="btn-download-all-mylist" class="index-action-item" title="Descarregar histórico de todos os ativos da My List">
-                  <i class="toolbar-btn-icon">⬇️</i><span>Baixar Tudo</span>
+                  <i class="toolbar-btn-icon"><svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg></i><span>Baixar Tudo</span>
                 </button>
                 <button id="btn-import-csv" class="index-action-item" title="Importar histórico de CSV">
-                  <i class="toolbar-btn-icon">📄</i><span>Importar CSV</span>
+                  <i class="toolbar-btn-icon"><svg class="icon" aria-hidden="true"><use href="#i-file-text"></use></svg></i><span>Importar CSV</span>
                 </button>
                 <button id="btn-purge-inactive" class="index-action-item" title="Remover ativos sem registos de cotação nos últimos 60 dias">
-                  <i class="toolbar-btn-icon">🧹</i><span>Limpar Inativos</span>
+                  <i class="toolbar-btn-icon"><svg class="icon" aria-hidden="true"><use href="#i-eraser"></use></svg></i><span>Limpar Inativos</span>
                 </button>
               </div>
             </div>
@@ -300,7 +328,13 @@
             </thead>
             <tbody id="portfolio-body">
               <tr class="empty">
-                <td colspan="12">Nenhuma posição ativa. Clique em "Investir" num sinal do scanner para começar.</td>
+                <td colspan="12">
+                  <div class="empty-state">
+                    <div class="empty-state-icon"><svg class="icon icon-lg"><use href="#i-trending-up"></use></svg></div>
+                    <div class="empty-state-title">Sem posições ativas</div>
+                    <div class="empty-state-desc">Nenhuma posição ativa. Clique em "Investir" num sinal do scanner para começar.</div>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -340,7 +374,13 @@
             </thead>
             <tbody id="history-body">
               <tr class="empty">
-                <td colspan="11">Nenhum trade no histórico. As operações fechadas aparecerão aqui.</td>
+                <td colspan="11">
+                  <div class="empty-state">
+                    <div class="empty-state-icon"><svg class="icon icon-lg"><use href="#i-file-text"></use></svg></div>
+                    <div class="empty-state-title">Histórico vazio</div>
+                    <div class="empty-state-desc">Nenhum trade no histórico. As operações fechadas aparecerão aqui.</div>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -572,7 +612,7 @@
             <div class="sim-trades-toolbar">
               <div class="sim-section-title">Trades Simulados</div>
               <div class="sim-trades-search-wrap">
-                <span class="search-icon">🔍</span>
+                <span class="search-icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span>
                 <input type="text" id="sim-trades-search" class="toolbar-input sim-trades-search-input" placeholder="Pesquisar por Ticker ou Nome..." autocomplete="off" spellcheck="false" />
               </div>
             </div>
@@ -592,7 +632,13 @@
                   </tr>
                 </thead>
                 <tbody id="sim-trades-body">
-                  <tr class="empty"><td colspan="9">Sem resultado de simulação ainda.</td></tr>
+                  <tr class="empty"><td colspan="9">
+                    <div class="empty-state">
+                      <div class="empty-state-icon"><svg class="icon icon-lg"><use href="#i-database"></use></svg></div>
+                      <div class="empty-state-title">Sem simulação</div>
+                      <div class="empty-state-desc">Sem resultado de simulação ainda.</div>
+                    </div>
+                  </td></tr>
                 </tbody>
               </table>
             </div>
@@ -887,7 +933,7 @@
               <div class="asset-detail-meta-value" id="display-stock-index">Índice: —</div>
             </div>
           </div>
-          <!-- Camada de edição dinâmica (oculta até clicar em "✏️ Editar") -->
+          <!-- Camada de edição dinâmica (oculta até clicar em "Editar") -->
           <div class="asset-detail-meta-grid asset-detail-meta-edit" id="asset-detail-meta-edit" hidden>
             <div class="asset-detail-meta-row asset-detail-meta-row-full">
               <span class="asset-detail-meta-label">Nome</span>
@@ -907,12 +953,12 @@
           </div>
           <!-- Ações: modo de visualização -->
           <div class="asset-detail-metadata-actions" id="asset-detail-metadata-actions-view">
-            <button type="button" class="btn-secondary asset-detail-edit-btn" id="btn-edit-stock-modal">✏️ Editar</button>
+            <button type="button" class="btn-secondary asset-detail-edit-btn" id="btn-edit-stock-modal"><svg class="icon" aria-hidden="true"><use href="#i-pencil"></use></svg> Editar</button>
           </div>
-          <!-- Ações: modo de edição (oculto até clicar em "✏️ Editar") -->
+          <!-- Ações: modo de edição (oculto até clicar em "Editar") -->
           <div class="asset-detail-metadata-actions" id="asset-detail-metadata-actions-edit" hidden>
             <button type="button" class="btn-primary asset-detail-save-metadata-btn" id="btn-save-stock-modal">
-              <span class="btn-label">💾 Guardar Alterações</span>
+              <span class="btn-label"><svg class="icon" aria-hidden="true"><use href="#i-save"></use></svg> Guardar Alterações</span>
             </button>
             <button type="button" class="btn-secondary" id="btn-cancel-edit-modal">Cancelar</button>
             <div class="form-error" id="asset-metadata-error" hidden></div>
@@ -924,7 +970,7 @@
             <div class="asset-detail-section-title-row">
               <div class="asset-detail-section-title">Histórico Local</div>
               <button class="asset-detail-delete-btn" id="asset-detail-delete-history" title="Apagar Histórico">
-                <span class="asset-delete-icon">🗑️</span>
+                <span class="asset-delete-icon"><svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg></span>
                 <span>Apagar Histórico</span>
               </button>
             </div>
@@ -999,7 +1045,7 @@
       </div>
       <div class="hover-card-body">
         <div class="hover-card-info-row">
-          <span class="hover-card-label">📅 Primeiro Registo Yahoo:</span>
+          <span class="hover-card-label"><svg class="icon" aria-hidden="true"><use href="#i-calendar"></use></svg> Primeiro Registo Yahoo:</span>
           <span id="hover-card-first-date" class="hover-card-value">--</span>
         </div>
       </div>
