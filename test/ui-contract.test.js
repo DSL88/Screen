@@ -75,8 +75,9 @@ test('modal de edição de metadados expõe camadas view/edit e os controlos din
   for (const id of ['display-stock-name', 'display-stock-country', 'display-stock-index', 'edit-stock-name', 'edit-stock-country', 'edit-stock-index', 'edit-stock-index-custom', 'btn-edit-stock-modal', 'btn-save-stock-modal', 'btn-cancel-edit-modal']) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
-  assert.match(html, /✏️ Editar/);
-  assert.match(html, /💾 Guardar Alterações/);
+  // Ícones foram migrados de emojis para sprite SVG inline (refinamento visual).
+  assert.match(html, /id=["']btn-edit-stock-modal["'][^>]*><svg class="icon"[^>]*><use href="#i-pencil"><\/use><\/svg> Editar</);
+  assert.match(html, /<svg class="icon"[^>]*><use href="#i-save"><\/use><\/svg> Guardar Alterações/);
   // Os IDs antigos sempre-editáveis foram substituídos pelos novos.
   for (const id of ['modal-stock-name', 'modal-stock-country', 'modal-stock-index', 'modal-stock-index-custom', 'btn-save-stock-metadata']) {
     assert.doesNotMatch(html, new RegExp(`id=["']${id}["']`));

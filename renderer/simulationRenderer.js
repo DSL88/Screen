@@ -463,6 +463,29 @@
   }
 
   // ── Gráfico canvas (sem bibliotecas) ──
+  const CHART_COLORS = {
+    grid: 'rgba(255,255,255,0.06)',
+    axis: 'rgba(255,255,255,0.35)',
+    legendText: '#a3a9b8',
+    muted: '#6b7384',
+    accent: '#818cf8',
+    bear: '#fb7185',
+    benchLine: 'rgba(255,255,255,0.35)',
+    crosshair: 'rgba(255,255,255,0.18)',
+    tooltipBg: 'rgba(14,16,23,0.95)',
+    tooltipBorder: 'rgba(255,255,255,0.12)'
+  };
+
+  // Ref partilhada entre o desenho e os handlers de hover.
+  // Listeners registados UMA vez (flag bound); handlers leem sempre
+  // data/geom/hoverIndex daqui, por isso redraws nunca duplicam binding.
+  const chartRef = {
+    bound: false,
+    hoverIndex: null,
+    mouseY: null,
+    geom: null
+  };
+
   function fmtAxisDate(d, spanDays) {
     if (spanDays > 800) {
       return d.toLocaleDateString('pt-PT', { month: '2-digit', year: '2-digit' });
@@ -470,181 +493,429 @@
     return d.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' });
   }
 
-  function drawChart(equity, benchmark, drawdown) {
-    const canvas = els.canvas;
-    if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const cssWidth = canvas.clientWidth || 900;
-    const cssHeight = 300;
-    canvas.width = Math.round(cssWidth * dpr);
-    canvas.height = Math.round(cssHeight * dpr);
-    const ctx = canvas.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  function fmtTooltipDate(d) {
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return '—';
+    return dt.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  }
 
-    const W = cssWidth;
-    const H = cssHeight;
+  function roundRectPath(ctx, x, y, w, h, r) {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+
+  function prepSeries(series) {
+    const out = [];
+    if (!Array.isArray(series)) return out;
+    for (const p of series) {
+      if (!p) continue;
+      const v = Number(p.value);
+      const t = new Date(p.date).getTime();
+      if (!isFinite(v) || isNaN(t)) continue;
+      out.push({ t, v, date: p.date });
+    }
+    return out;
+  }
+
+  function nearestPointByX(pts, x, tol) {
+    let bestI = -1, bestD = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const d = Math.abs(pts[i].x - x);
+      if (d < bestD) { bestD = d; bestI = i; }
+      else if (pts[i].x > x && bestD <= tol) break; // pts ordenados por x
+    }
+    return bestI >= 0 && bestD <= tol ? bestI : -1;
+  }
+
+  function bindChartHover(canvas) {
+    if (chartRef.bound || !canvas) return;
+    chartRef.bound = true;
+    canvas.addEventListener('mousemove', onChartMove);
+    canvas.addEventListener('mouseleave', onChartLeave);
+  }
+
+  function onChartMove(e) {
+    const g = chartRef.geom;
+    if (!g || !g.hoverable || g.eqPts.length === 0) return;
+    const rect = els.canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    chartRef.mouseY = e.clientY - rect.top;
+    const cx = Math.min(g.plotX1, Math.max(g.plotX0, mx)); // hover fora do plot → clamp ao ponto mais próximo
+    chartRef.hoverIndex = nearestPointByX(g.eqPts, cx, g.W);
+    renderChart();
+  }
+
+  function onChartLeave() {
+    if (chartRef.hoverIndex == null) return;
+    chartRef.hoverIndex = null;
+    chartRef.mouseY = null;
+    renderChart();
+  }
+
+  function drawEmptyState(ctx, W, H) {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '12px JetBrains Mono, monospace';
+    ctx.fillStyle = CHART_COLORS.muted;
+    ctx.fillText('Sem dados de curva de capital', W / 2, H / 2 - 9);
+    ctx.font = '10px JetBrains Mono, monospace';
+    ctx.fillStyle = 'rgba(107,115,132,0.75)';
+    ctx.fillText('Executa uma simulação para veres a curva', W / 2, H / 2 + 11);
+  }
+
+  function computeChartGeom(equityRaw, benchmarkRaw, drawdownRaw, W, H) {
+    const eq = prepSeries(equityRaw);
+    const bm = prepSeries(benchmarkRaw);
+    const dd = prepSeries(drawdownRaw);
+    if (eq.length === 0 && bm.length === 0) return null;
+
     const padL = 74, padR = 18, padT = 26, padB = 34;
     const bandH = 56;
     const plotX0 = padL, plotX1 = W - padR;
     const plotY0 = padT, plotY1 = H - padB - bandH;
     const bandY0 = plotY1 + 12, bandY1 = H - padB;
 
-    const all = (equity || []).concat(benchmark || []);
     let minV = Infinity, maxV = -Infinity;
-    for (const p of all) {
-      const v = Number(p.value);
-      if (!isNaN(v)) {
-        if (v < minV) minV = v;
-        if (v > maxV) maxV = v;
-      }
-    }
-    if (!isFinite(minV) || !isFinite(maxV)) {
-      ctx.clearRect(0, 0, W, H);
-      ctx.fillStyle = 'rgba(255,255,255,0.45)';
-      ctx.font = '12px Inter, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('Sem dados de curva de capital', W / 2, H / 2);
-      return;
-    }
+    for (const p of eq) { if (p.v < minV) minV = p.v; if (p.v > maxV) maxV = p.v; }
+    for (const p of bm) { if (p.v < minV) minV = p.v; if (p.v > maxV) maxV = p.v; }
     if (minV === maxV) { minV -= 1; maxV += 1; }
     const range = maxV - minV;
     const paddedMin = minV - range * 0.08;
     const paddedMax = maxV + range * 0.08;
 
-    const timePoints = [];
-    for (const p of all) if (p.date) timePoints.push(new Date(p.date).getTime());
     let tMin = Infinity, tMax = -Infinity;
-    for (const t of timePoints) {
-      if (isNaN(t)) continue;
-      if (t < tMin) tMin = t;
-      if (t > tMax) tMax = t;
-    }
+    for (const p of eq) { if (p.t < tMin) tMin = p.t; if (p.t > tMax) tMax = p.t; }
+    for (const p of bm) { if (p.t < tMin) tMin = p.t; if (p.t > tMax) tMax = p.t; }
     if (!isFinite(tMin) || !isFinite(tMax)) { tMin = Date.now() - 86400000; tMax = Date.now(); }
     if (tMin === tMax) { tMin -= 86400000; tMax += 86400000; }
 
-    const xOf = (date) => {
-      const t = new Date(date).getTime();
-      if (isNaN(t)) return plotX0;
-      return plotX0 + (t - tMin) / (tMax - tMin) * (plotX1 - plotX0);
-    };
-    const yOf = (v) => plotY1 - (v - paddedMin) / (paddedMax - paddedMin) * (plotY1 - plotY0);
+    const spanT = tMax - tMin;
+    const xOf = (t) => plotX0 + ((t - tMin) / spanT) * (plotX1 - plotX0);
+    const yOf = (v) => plotY1 - ((v - paddedMin) / (paddedMax - paddedMin)) * (plotY1 - plotY0);
 
+    const mapPts = (arr) => arr.map((p) => ({ x: xOf(p.t), y: yOf(p.v), v: p.v, date: p.date }));
+
+    let ddMaxAbs = 0;
+    for (const p of dd) { const a = Math.abs(p.v); if (a > ddMaxAbs) ddMaxAbs = a; }
+
+    return {
+      W, H, plotX0, plotX1, plotY0, plotY1, bandY0, bandY1,
+      tMin, tMax, spanDays: spanT / 86400000,
+      eqPts: mapPts(eq),
+      bmPts: mapPts(bm),
+      ddPts: dd.map((p) => ({ x: xOf(p.t), v: p.v })),
+      ddActive: dd.length > 0 && ddMaxAbs > 1e-9,
+      ddMaxAbs,
+      hoverable: eq.length > 0
+    };
+  }
+
+  function strokePath(ctx, pts, style, width, dash) {
+    if (pts.length < 2) return false;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.strokeStyle = style;
+    ctx.lineWidth = width;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    if (dash) ctx.setLineDash(dash);
+    ctx.stroke();
+    ctx.restore();
+    return true;
+  }
+
+  function fillEquityArea(ctx, g) {
+    const pts = g.eqPts;
+    if (pts.length < 2) return;
+    let curveTop = Infinity;
+    for (const p of pts) if (p.y < curveTop) curveTop = p.y;
+    const top = Math.max(g.plotY0, curveTop); // topo da curva
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.lineTo(pts[pts.length - 1].x, g.plotY1);
+    ctx.lineTo(pts[0].x, g.plotY1);
+    ctx.closePath();
+    ctx.clip();
+    const grad = ctx.createLinearGradient(0, top, 0, g.plotY1);
+    grad.addColorStop(0, 'rgba(99,102,241,0.25)');
+    grad.addColorStop(1, 'rgba(99,102,241,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(g.plotX0, top - 1, g.plotX1 - g.plotX0, g.plotY1 - top + 1);
+    ctx.restore();
+  }
+
+  function drawDrawdownBand(ctx, g) {
+    const n = g.ddPts.length;
+    if (!g.ddActive || n === 0) return;
+    const hBand = g.bandY1 - g.bandY0;
+    const yBand = (v) => g.bandY0 + Math.min(1, Math.abs(v) / g.ddMaxAbs) * hBand;
+
+    // área subtil
+    ctx.beginPath();
+    ctx.moveTo(g.ddPts[0].x, g.bandY1);
+    for (let i = 0; i < n; i++) ctx.lineTo(g.ddPts[i].x, yBand(g.ddPts[i].v));
+    ctx.lineTo(g.ddPts[n - 1].x, g.bandY1);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(251,113,133,0.08)';
+    ctx.fill();
+
+    // linha superior discreta
+    ctx.beginPath();
+    ctx.moveTo(g.ddPts[0].x, yBand(g.ddPts[0].v));
+    for (let i = 1; i < n; i++) ctx.lineTo(g.ddPts[i].x, yBand(g.ddPts[i].v));
+    ctx.strokeStyle = 'rgba(251,113,133,0.45)';
+    ctx.lineWidth = 1;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.fillStyle = 'rgba(251,113,133,0.55)';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillText('DD', g.plotX1, g.bandY0 + 3);
+  }
+
+  function drawLegend(ctx, g) {
+    const items = [
+      { label: 'Equidade', kind: 'fill', color: CHART_COLORS.accent },
+      { label: 'Benchmark', kind: 'dashed' }
+    ];
+    if (g.ddActive) items.push({ label: 'Drawdown', kind: 'fill', color: CHART_COLORS.bear });
+
+    ctx.font = '10px JetBrains Mono, monospace';
+    ctx.textBaseline = 'middle';
+    const chip = 10, chipGap = 6, itemGap = 16;
+    const cy = g.plotY0 + 5;
+
+    let widths = items.map((it) => chip + chipGap + ctx.measureText(it.label).width);
+    let total = widths.reduce((a, b) => a + b, 0) + itemGap * (items.length - 1);
+
+    let x = g.plotX1 - total;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      roundRectPath(ctx, x, cy - chip / 2, chip, chip, 2);
+      if (it.kind === 'dashed') {
+        ctx.strokeStyle = CHART_COLORS.benchLine;
+        ctx.lineWidth = 1.25;
+        ctx.setLineDash([3, 2]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        ctx.fillStyle = it.color;
+        ctx.fill();
+      }
+      ctx.fillStyle = CHART_COLORS.legendText;
+      ctx.textAlign = 'left';
+      ctx.fillText(it.label, x + chip + chipGap, cy + 0.5);
+      x += widths[i] + itemGap;
+    }
+  }
+
+  function drawCrosshair(ctx, g) {
+    const idx = chartRef.hoverIndex;
+    if (idx == null || idx < 0 || idx >= g.eqPts.length) return null;
+    const hp = g.eqPts[idx];
+
+    ctx.strokeStyle = CHART_COLORS.crosshair;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(hp.x, g.plotY0);
+    ctx.lineTo(hp.x, g.plotY1);
+    ctx.stroke();
+
+    let bmPt = null;
+    if (g.bmPts.length > 0) {
+      const j = nearestPointByX(g.bmPts, hp.x, 20);
+      if (j >= 0) {
+        bmPt = g.bmPts[j];
+        ctx.beginPath();
+        ctx.arc(bmPt.x, bmPt.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.fill();
+      }
+    }
+
+    // dot equity com halo
+    ctx.beginPath();
+    ctx.arc(hp.x, hp.y, 7, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(129,140,248,0.22)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(hp.x, hp.y, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = CHART_COLORS.accent;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(14,16,23,0.9)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    return { equity: hp, benchmark: bmPt };
+  }
+
+  function drawTooltip(ctx, g, hits) {
+    const rows = [{ label: 'Data', value: fmtTooltipDate(hits.equity.date) }];
+    rows.push({ label: 'Equidade', value: fmtMoney(hits.equity.v) });
+    if (hits.benchmark) rows.push({ label: 'Benchmark', value: fmtMoney(hits.benchmark.v) });
+    if (g.ddActive && g.ddPts.length > 0) {
+      const k = nearestPointByX(g.ddPts, hits.equity.x, 20);
+      if (k >= 0) {
+        const ddPct = drawdownValue(g.ddPts[k].v); // normaliza a negativo
+        rows.push({ label: 'Drawdown', value: ddPct == null ? '—' : fmtPct(ddPct, 2) });
+      }
+    }
+
+    ctx.textBaseline = 'middle';
+    ctx.font = '9px Inter, sans-serif';
+    let labelW = 0;
+    for (const r of rows) labelW = Math.max(labelW, ctx.measureText(r.label).width);
+    ctx.font = '11px JetBrains Mono, monospace';
+    let valW = 0;
+    for (const r of rows) valW = Math.max(valW, ctx.measureText(r.value).width);
+
+    const pad = 10, rowH = 17, gap = 14;
+    const boxW = Math.ceil(pad * 2 + labelW + gap + valW);
+    const boxH = Math.ceil(pad * 2 + rows.length * rowH);
+
+    let bx = hits.equity.x + 14;
+    if (bx + boxW > g.W - 4) bx = hits.equity.x - 14 - boxW; // flip junto à borda direita
+    bx = Math.min(Math.max(4, bx), g.W - boxW - 4);
+    const my = chartRef.mouseY == null ? g.plotY0 : chartRef.mouseY;
+    const by = Math.min(Math.max(4, my - boxH / 2), g.H - boxH - 4);
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.45)';
+    ctx.shadowBlur = 16;
+    ctx.shadowOffsetY = 4;
+    roundRectPath(ctx, bx, by, boxW, boxH, 8);
+    ctx.fillStyle = CHART_COLORS.tooltipBg;
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    roundRectPath(ctx, bx, by, boxW, boxH, 8);
+    ctx.strokeStyle = CHART_COLORS.tooltipBorder;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+
+    const valRight = bx + boxW - pad;
+    rows.forEach((r, i) => {
+      const ry = by + pad + rowH * i + rowH / 2;
+      ctx.font = '9px Inter, sans-serif';
+      ctx.fillStyle = CHART_COLORS.muted;
+      ctx.textAlign = 'left';
+      ctx.fillText(r.label, bx + pad, ry);
+      ctx.font = '11px JetBrains Mono, monospace';
+      ctx.fillStyle = 'rgba(255,255,255,0.96)';
+      ctx.textAlign = 'right';
+      ctx.fillText(r.value, valRight, ry);
+    });
+  }
+
+  function renderChart() {
+    const canvas = els.canvas;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const g = chartRef.geom;
+    const W = g ? g.W : (canvas.clientWidth || 900);
+    const H = 300;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
+    if (!g) { drawEmptyState(ctx, W, H); return; }
+
     // ── Grid horizontal + labels Y ──
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.strokeStyle = CHART_COLORS.grid;
     ctx.lineWidth = 1;
     ctx.font = '10px JetBrains Mono, monospace';
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillStyle = CHART_COLORS.axis;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     const steps = 5;
     for (let i = 0; i <= steps; i++) {
-      const v = paddedMax - (paddedMax - paddedMin) * i / steps;
-      const y = plotY0 + (plotY1 - plotY0) * i / steps;
+      const frac = i / steps;
+      const v = g.paddedMax - (g.paddedMax - g.paddedMin) * frac;
+      const y = g.plotY0 + (g.plotY1 - g.plotY0) * frac;
       ctx.beginPath();
-      ctx.moveTo(plotX0, y);
-      ctx.lineTo(plotX1, y);
+      ctx.moveTo(g.plotX0, y);
+      ctx.lineTo(g.plotX1, y);
       ctx.stroke();
-      ctx.fillText(shortMoney(v), plotX0 - 8, y);
+      ctx.fillText(shortMoney(v), g.plotX0 - 8, y);
     }
 
-    // ── Labels X (datas) ──
-    const spanDays = (tMax - tMin) / 86400000;
-    const xSteps = Math.min(6, Math.max(2, Math.floor((plotX1 - plotX0) / 90)));
-    ctx.textAlign = 'center';
+    // ── Ticks X (3–5 datas espaçadas) ──
+    const xSteps = Math.max(2, Math.min(4, Math.floor((g.plotX1 - g.plotX0) / 170)));
+    ctx.font = '10px JetBrains Mono, monospace';
+    ctx.fillStyle = CHART_COLORS.axis;
     ctx.textBaseline = 'top';
     for (let i = 0; i <= xSteps; i++) {
-      const t = tMin + (tMax - tMin) * i / xSteps;
-      const x = plotX0 + (plotX1 - plotX0) * i / xSteps;
-      ctx.fillText(fmtAxisDate(new Date(t), spanDays), x, plotY1 + 8);
+      const frac = i / xSteps;
+      const t = g.tMin + (g.tMax - g.tMin) * frac;
+      const x = g.plotX0 + (g.plotX1 - g.plotX0) * frac;
+      ctx.textAlign = i === 0 ? 'left' : (i === xSteps ? 'right' : 'center');
+      ctx.fillText(fmtAxisDate(new Date(t), g.spanDays), x, g.plotY1 + 8);
     }
 
-    // ── Série ──
-    const drawSeries = (series, color, width) => {
-      if (!series || series.length < 2) return;
+    // ── Drawdown (banda inferior, escala própria) ──
+    if (g.ddActive) drawDrawdownBand(ctx, g);
+
+    // ── Área gradient sob a equidade ──
+    fillEquityArea(ctx, g);
+
+    // ── Benchmark tracejado + curva de equidade ──
+    strokePath(ctx, g.bmPts, CHART_COLORS.benchLine, 1.25, [4, 4]);
+    strokePath(ctx, g.eqPts, CHART_COLORS.accent, 2);
+    if (g.eqPts.length === 1) {
       ctx.beginPath();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      let started = false;
-      for (const p of series) {
-        const v = Number(p.value);
-        if (isNaN(v)) continue;
-        const x = xOf(p.date);
-        const y = yOf(v);
-        if (!started) { ctx.moveTo(x, y); started = true; }
-        else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    };
-    drawSeries(benchmark, 'rgba(245, 158, 11, 0.75)', 1.4);
-    drawSeries(equity, '#6366f1', 2);
-
-    // ── Área de drawdown (banda inferior) ──
-    if (drawdown && drawdown.length > 0) {
-      let ddMin = Infinity, ddMax = -Infinity;
-      for (const p of drawdown) {
-        const v = Number(p.value);
-        if (!isNaN(v)) {
-          if (v < ddMin) ddMin = v;
-          if (v > ddMax) ddMax = v;
-        }
-      }
-      if (isFinite(ddMin) && isFinite(ddMax)) {
-        if (ddMin === ddMax) { ddMin -= 1; ddMax += 1; }
-        ctx.beginPath();
-        const first = drawdown[0];
-        ctx.moveTo(xOf(first.date), bandY1);
-        let lastPoint = first;
-        for (const p of drawdown) {
-          const v = Number(p.value);
-          if (isNaN(v)) continue;
-          const norm = (v - ddMin) / (ddMax - ddMin);
-          const x = xOf(p.date);
-          const y = bandY1 - norm * (bandY1 - bandY0);
-          ctx.lineTo(x, y);
-          lastPoint = p;
-        }
-        ctx.lineTo(xOf(lastPoint.date), bandY1);
-        ctx.closePath();
-        const grad = ctx.createLinearGradient(0, bandY0, 0, bandY1);
-        grad.addColorStop(0, 'rgba(251, 113, 133, 0.55)');
-        grad.addColorStop(1, 'rgba(251, 113, 133, 0.05)');
-        ctx.fillStyle = grad;
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(251, 113, 133, 0.8)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        ctx.fillStyle = 'rgba(251, 113, 133, 0.85)';
-        ctx.font = '9px JetBrains Mono, monospace';
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText('Drawdown', plotX1 - 2, bandY0 - 2);
-      }
+      ctx.arc(g.eqPts[0].x, g.eqPts[0].y, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = CHART_COLORS.accent;
+      ctx.fill();
+    } else if (g.eqPts.length === 0 && g.bmPts.length === 1) {
+      ctx.beginPath();
+      ctx.arc(g.bmPts[0].x, g.bmPts[0].y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.fill();
     }
 
-    // ── Legenda ──
-    ctx.font = '10px Inter, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    const legendY = plotY0;
-    ctx.fillStyle = '#6366f1';
-    ctx.fillRect(plotX0, legendY - 2, 12, 3);
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.fillText('Curva de Capital', plotX0 + 16, legendY);
-    ctx.fillStyle = '#f59e0b';
-    ctx.fillRect(plotX0 + 132, legendY - 2, 12, 3);
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.fillText('Benchmark', plotX0 + 148, legendY);
-    if (drawdown && drawdown.length > 0) {
-      ctx.fillStyle = '#fb7185';
-      ctx.fillRect(plotX0 + 224, legendY - 2, 12, 3);
-      ctx.fillStyle = 'rgba(255,255,255,0.75)';
-      ctx.fillText('Drawdown', plotX0 + 240, legendY);
+    // ── Crosshair (por cima das séries) ──
+    const hits = drawCrosshair(ctx, g);
+
+    // ── Legenda (chips, canto superior direito) ──
+    drawLegend(ctx, g);
+
+    // ── Tooltip (overlay no topo) ──
+    if (hits) drawTooltip(ctx, g, hits);
+  }
+
+  function drawChart(equity, benchmark, drawdown) {
+    const canvas = els.canvas;
+    if (!canvas) return;
+    bindChartHover(canvas); // regista listeners UMA vez
+
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = canvas.clientWidth || 900;
+    const cssHeight = 300;
+    const pw = Math.round(cssWidth * dpr);
+    const ph = Math.round(cssHeight * dpr);
+    if (canvas.width !== pw || canvas.height !== ph) { // evita flicker em redraws de hover
+      canvas.width = pw;
+      canvas.height = ph;
     }
+
+    chartRef.geom = computeChartGeom(equity, benchmark, drawdown, cssWidth, cssHeight);
+    chartRef.hoverIndex = null;
+    chartRef.mouseY = null;
+    renderChart();
   }
 
   // ── Tabela de trades ──
