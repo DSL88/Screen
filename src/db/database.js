@@ -736,6 +736,25 @@ class DB {
     }));
   }
 
+  getHistoricalPricesForScan(ticker) {
+    const cleanTicker = String(ticker).trim().toUpperCase();
+    const rows = this.db.prepare(`
+      SELECT date, open, high, low, close, volume
+      FROM historical_prices
+      WHERE UPPER(TRIM(ticker)) = ?
+      ORDER BY date DESC
+      LIMIT 300
+    `).all(cleanTicker).reverse();
+    return rows.map(r => ({
+      date: String(r.date).slice(0, 10),
+      open: Number(r.open),
+      high: Number(r.high),
+      low: Number(r.low),
+      close: Number(r.close),
+      volume: Number(r.volume || 0)
+    }));
+  }
+
   getAllHistoricalPrices(ticker) {
     const rows = this.db.prepare(`
       SELECT date, open, high, low, close, volume
