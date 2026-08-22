@@ -1,4 +1,5 @@
 const yahooFinance = require('yahoo-finance2').default || require('yahoo-finance2');
+const pLimit = require('p-limit');
 const tickerLists = require('./tickerLists');
 
 // Suprimir avisos de validação de esquema no terminal
@@ -15,8 +16,67 @@ const WARMUP_TARGET = 250;
 
 const sleep = ms => new Promise(res => setTimeout(res, ms));
 
+// ── Pool de rede partilhada ─────────────────────────────────
+// Máximo de pedidos HTTP concorrentes ao Yahoo. Todas as funções de
+// histórico passam por aqui: é o controlo primário de ritmo (evita 429),
+// substituindo os sleeps pré-fixos longos.
+const networkLimit = pLimit(5);
+
+// Micro-stagger (50–120ms) apenas para dessincronizar rajadas de tickers
+// que arrancam em simultâneo dentro da própria pool. Não é rate limiting.
+const microStagger = () => sleep(50 + Math.floor(Math.random() * 70));
+
 function isNum(v) {
   return typeof v === 'number' && Number.isFinite(v);
+}
+
+// Erros transitórios: retry faz sentido (rate limit, timeouts, sockets).
+function isTransientNetworkError(err) {
+  if (!err) return false;
+  const msg = String(err.message || '');
+  const code = err.code != null ? String(err.code) : null;
+  const status = err.statusCode != null ? err.statusCode : err.status;
+  if (status === 429 || /\b429\b|too many requests|rate.?limit/i.test(msg)) return true;
+  if (/\b(ECONNRESET|ETIMEDOUT|ECONNREFUSED|ECONNABORTED|EAI_AGAIN|ENOTFOUND)\b|socket hang up|network|timeout/i.test(msg)) return true;
+  if (code && /^(429|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ECONNABORTED|EAI_AGAIN)$/.test(code)) return true;
+  return false;
+}
+
+// Erros definitivos: retry nunca resolve (símbolo inexistente/deslistado,
+// janela sem dados). Não gastar backoff nestes casos.
+function isDefinitiveDataError(err) {
+  if (!err) return false;
+  if (err.isInactive || err.isNotFound) return true;
+  return /404|not found|no data|period1/i.test(String((err && err.message) || ''));
+}
+
+function isRateLimitError(err) {
+  if (!err) return false;
+  if (err.statusCode === 429 || err.status === 429) return true;
+  if (err.code === 429 || err.code === '429') return true;
+  return /\b429\b|too many requests|rate.?limit/i.test(String(err.message || ''));
+}
+
+// Retry genérico com backoff exponencial + jitter; delay duplicado em 429.
+// opts.sleepFn injetável para testes determinísticos.
+async function fetchWithBackoff(fn, opts = {}) {
+  const retries = opts.retries ?? 3;
+  const baseDelay = opts.baseDelay ?? 500;
+  const sleepFn = opts.sleepFn || sleep;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try { return await fn(); }
+    catch (error) {
+      if (attempt === retries) throw error;
+      // Definitivos (404/inativo): não desperdiçar tentativas
+      if (isDefinitiveDataError(error)) throw error;
+      const msg = String(error && error.message ? error.message : '');
+      const isRateLimit = isRateLimitError(error);
+      const jitter = Math.floor(Math.random() * 200);
+      const delay = (isRateLimit ? baseDelay * 2 : baseDelay) * Math.pow(2, attempt - 1) + jitter;
+      console.warn(`[yahooClient] Tentativa ${attempt}/${retries} falhou${isRateLimit ? ' (RATE LIMIT)' : ''}. A aguardar ${delay}ms... Motivo: ${msg}`);
+      await sleepFn(delay);
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -195,12 +255,15 @@ async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3, customPeri
     }
   }
 
-  for (let i = 0; i < attempts; i++) {
-    for (const tickerVariant of tickerVariants) {
-      try {
-        await sleep(1500 + Math.random() * 1000);
+  let lastErr = null;
 
-        const result = await yahooFinance.chart(
+  for (let v = 0; v < tickerVariants.length; v++) {
+    const tickerVariant = tickerVariants[v];
+    try {
+      await microStagger();
+
+      const result = await networkLimit(() => fetchWithBackoff(
+        () => yahooFinance.chart(
           tickerVariant,
           { period1, interval: timeframe },
           {
@@ -208,83 +271,66 @@ async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3, customPeri
               headers: { 'User-Agent': USER_AGENT }
             }
           }
-        );
+        ),
+        { retries: Math.max(1, attempts) }
+      ));
 
-        const quotes = result && result.quotes;
-        if (!Array.isArray(quotes) || quotes.length === 0) {
-          if (tickerVariants.indexOf(tickerVariant) < tickerVariants.length - 1) {
-            console.warn(`[yahooClient] ${ticker}: variante "${tickerVariant}" sem dados, a tentar próximo...`);
-            continue;
-          }
-          const err = new Error(`Ticker ${ticker} não encontrado / 404 no Yahoo Finance.`);
-          err.isNotFound = true;
-          err.isInactive = true;
-          throw err;
-        }
-
-        const candles = processQuotes(quotes, ticker);
-
-        if (candles.length < MIN_CANDLES) {
-          const droppedNull = quotes.length - candles.length;
-          const warn = `[yahooClient] AVISO: ${ticker} produziu apenas ${candles.length} velas válidas ` +
-            `(${droppedNull} removidas por nulos). Warm-up incompleto (mínimo ${MIN_CANDLES}).`;
-          if (candles.length === 0) {
-            const err = new Error(`Todas as velas nulas/vazias para ${ticker} (ativo deslistado/inativo).`);
-            err.isInactive = true;
-            throw err;
-          }
-          console.warn(warn);
-          if (candles.length < WARMUP_TARGET) {
-            console.warn(`[yahooClient] ${ticker}: série abaixo do warm-up ideal (${WARMUP_TARGET}). A usar ${candles.length} velas.`);
-          }
-        }
-
-        // Validar atividade recente do ativo (volume > 0 nos últimos 30 dias úteis)
-        validateStockActivity(candles, ticker);
-
-        if (tickerVariant !== ticker) {
-          console.log(`[yahooClient] ${ticker}: a usar variante "${tickerVariant}" com sucesso`);
-        }
-        return candles;
-      } catch (err) {
-        const code = err && err.code;
-        const msg = String(err && err.message ? err.message : '');
-        const isRateLimit = code === 429 || /rate|429|too many/i.test(msg);
-        const isNotFoundOrInactive = err.isInactive || err.isNotFound || /404|not found|quote not found/i.test(msg);
-        
-        if (isNotFoundOrInactive) {
-          err.isInactive = true;
-          err.isNotFound = true;
-          throw err; // Não tentar retries para tickers comprovadamente inexistentes/inativos
-        }
-
-        // Se é rate limit, não adianta tentar outros variantes
-        if (isRateLimit) {
-          if (i === attempts - 1) {
-            throw new Error('Yahoo Finance Rate Limit (429): Demasiados pedidos. Por favor, aguarde alguns minutos.');
-          }
-          await sleep(5000);
-          break; // Break do loop de variantes, continuar para próxima tentativa
-        }
-        
-        // Se não é rate limit e ainda há variantes para tentar, continuar
-        if (tickerVariants.indexOf(tickerVariant) < tickerVariants.length - 1) {
-          console.warn(`[yahooClient] ${ticker}: erro com variante "${tickerVariant}": ${err.message || err}`);
+      const quotes = result && result.quotes;
+      if (!Array.isArray(quotes) || quotes.length === 0) {
+        if (v < tickerVariants.length - 1) {
+          console.warn(`[yahooClient] ${ticker}: variante "${tickerVariant}" sem dados, a tentar próximo...`);
           continue;
         }
-        
-        // Se é a última variante e última tentativa, lançar erro
-        if (i === attempts - 1 && tickerVariants.indexOf(tickerVariant) === tickerVariants.length - 1) {
+        const err = new Error(`Ticker ${ticker} não encontrado / 404 no Yahoo Finance.`);
+        err.isNotFound = true;
+        err.isInactive = true;
+        throw err;
+      }
+
+      const candles = processQuotes(quotes, ticker);
+
+      if (candles.length < MIN_CANDLES) {
+        const droppedNull = quotes.length - candles.length;
+        const warn = `[yahooClient] AVISO: ${ticker} produziu apenas ${candles.length} velas válidas ` +
+          `(${droppedNull} removidas por nulos). Warm-up incompleto (mínimo ${MIN_CANDLES}).`;
+        if (candles.length === 0) {
+          const err = new Error(`Todas as velas nulas/vazias para ${ticker} (ativo deslistado/inativo).`);
+          err.isInactive = true;
           throw err;
         }
-        
-        // Caso contrário, esperar e tentar novamente
-        const backoff = 500 * Math.pow(2, i);
-        const jitter = Math.floor(Math.random() * 250);
-        await sleep(backoff + jitter);
+        console.warn(warn);
+        if (candles.length < WARMUP_TARGET) {
+          console.warn(`[yahooClient] ${ticker}: série abaixo do warm-up ideal (${WARMUP_TARGET}). A usar ${candles.length} velas.`);
+        }
       }
+
+      // Validar atividade recente do ativo (volume > 0 nos últimos 30 dias úteis)
+      validateStockActivity(candles, ticker);
+
+      if (tickerVariant !== ticker) {
+        console.log(`[yahooClient] ${ticker}: a usar variante "${tickerVariant}" com sucesso`);
+      }
+      return candles;
+    } catch (err) {
+      // Definitivo: símbolo inexistente/deslistado — nem retry nem troca de variante
+      if (isDefinitiveDataError(err)) {
+        err.isInactive = true;
+        err.isNotFound = true;
+        throw err;
+      }
+
+      // Transitório: os retries exponenciais já decorreram dentro de
+      // fetchWithBackoff; rodar para a variante seguinte e registar.
+      lastErr = err;
+      console.warn(`[yahooClient] ${ticker}: erro com variante "${tickerVariant}"${isRateLimitError(err) ? ' (RATE LIMIT)' : ''}: ${err.message || err}`);
     }
   }
+
+  // Todas as variantes esgotadas — preservar mensagem amigável em rate limit
+  if (isRateLimitError(lastErr)) {
+    throw new Error('Yahoo Finance Rate Limit (429): Demasiados pedidos. Por favor, aguarde alguns minutos.');
+  }
+  throw lastErr || new Error(`Ticker ${ticker}: falha desconhecida ao obter histórico (${timeframe}).`);
 }
 
 const MARKET_EXCHANGES = {
@@ -468,13 +514,15 @@ async function fetchFullYahooHistory(ticker) {
   }
 
   const attempts = 3;
+  let lastErr = null;
 
-  for (let i = 0; i < attempts; i++) {
-    for (const tickerVariant of tickerVariants) {
-      try {
-        await sleep(1500 + Math.random() * 1000);
+  for (let v = 0; v < tickerVariants.length; v++) {
+    const tickerVariant = tickerVariants[v];
+    try {
+      await microStagger();
 
-        const result = await yahooFinance.chart(
+      const result = await networkLimit(() => fetchWithBackoff(
+        () => yahooFinance.chart(
           tickerVariant,
           { period1, period2, interval: '1d' },
           {
@@ -482,64 +530,48 @@ async function fetchFullYahooHistory(ticker) {
               headers: { 'User-Agent': USER_AGENT }
             }
           }
-        );
+        ),
+        { retries: attempts }
+      ));
 
-        const quotes = result && result.quotes;
-        if (!Array.isArray(quotes) || quotes.length === 0) {
-          if (tickerVariants.indexOf(tickerVariant) < tickerVariants.length - 1) {
-            console.warn(`[yahooClient] ${ticker}: variante "${tickerVariant}" sem dados, a tentar próximo...`);
-            continue;
-          }
-          const err = new Error(`Ticker ${ticker} não encontrado / 404 no Yahoo Finance.`);
-          err.isNotFound = true;
-          throw err;
-        }
-
-        const candles = processQuotes(quotes, ticker);
-
-        if (candles.length === 0) {
-          const err = new Error(`Todas as velas nulas/vazias para ${ticker} (ativo deslistado/inativo).`);
-          err.isInactive = true;
-          throw err;
-        }
-
-        if (tickerVariant !== ticker) {
-          console.log(`[yahooClient] ${ticker}: a usar variante "${tickerVariant}" com sucesso`);
-        }
-        return candles;
-      } catch (err) {
-        const code = err && err.code;
-        const msg = String(err && err.message ? err.message : '');
-        const isRateLimit = code === 429 || /rate|429|too many/i.test(msg);
-        const isNotFoundOrInactive = err.isInactive || err.isNotFound || /404|not found|quote not found/i.test(msg);
-
-        if (isNotFoundOrInactive) {
-          throw err;
-        }
-
-        if (isRateLimit) {
-          if (i === attempts - 1) {
-            throw new Error('Yahoo Finance Rate Limit (429): Demasiados pedidos. Por favor, aguarde alguns minutos.');
-          }
-          await sleep(5000);
-          break;
-        }
-
-        if (tickerVariants.indexOf(tickerVariant) < tickerVariants.length - 1) {
-          console.warn(`[yahooClient] ${ticker}: erro com variante "${tickerVariant}": ${err.message || err}`);
+      const quotes = result && result.quotes;
+      if (!Array.isArray(quotes) || quotes.length === 0) {
+        if (v < tickerVariants.length - 1) {
+          console.warn(`[yahooClient] ${ticker}: variante "${tickerVariant}" sem dados, a tentar próximo...`);
           continue;
         }
-
-        if (i === attempts - 1 && tickerVariants.indexOf(tickerVariant) === tickerVariants.length - 1) {
-          throw err;
-        }
-
-        const backoff = 500 * Math.pow(2, i);
-        const jitter = Math.floor(Math.random() * 250);
-        await sleep(backoff + jitter);
+        const err = new Error(`Ticker ${ticker} não encontrado / 404 no Yahoo Finance.`);
+        err.isNotFound = true;
+        throw err;
       }
+
+      const candles = processQuotes(quotes, ticker);
+
+      if (candles.length === 0) {
+        const err = new Error(`Todas as velas nulas/vazias para ${ticker} (ativo deslistado/inativo).`);
+        err.isInactive = true;
+        throw err;
+      }
+
+      if (tickerVariant !== ticker) {
+        console.log(`[yahooClient] ${ticker}: a usar variante "${tickerVariant}" com sucesso`);
+      }
+      return candles;
+    } catch (err) {
+      // Definitivo: não vale retry nem troca de variante
+      if (isDefinitiveDataError(err)) {
+        throw err;
+      }
+
+      lastErr = err;
+      console.warn(`[yahooClient] ${ticker}: erro com variante "${tickerVariant}"${isRateLimitError(err) ? ' (RATE LIMIT)' : ''}: ${err.message || err}`);
     }
   }
+
+  if (isRateLimitError(lastErr)) {
+    throw new Error('Yahoo Finance Rate Limit (429): Demasiados pedidos. Por favor, aguarde alguns minutos.');
+  }
+  throw lastErr || new Error(`Ticker ${ticker}: falha desconhecida ao obter histórico completo.`);
 }
 
 function buildIncrementalPeriod1(lastStoredDate) {
@@ -557,9 +589,14 @@ function buildPeriod1FromDate(dateStr) {
   return date;
 }
 
-async function fetchIncrementalYahooHistory(ticker, lastStoredDate) {
+// Nota: a assinatura pública (ticker, lastStoredDate) mantém-se intacta.
+// O terceiro parâmetro é opcional e interno: opts.throwOnError=true lança
+// em vez de retornar [] (usado pelo orquestrador syncTickersBatch).
+async function fetchIncrementalYahooHistory(ticker, lastStoredDate, opts = {}) {
+  const throwOnError = !!opts.throwOnError;
   const period1 = buildIncrementalPeriod1(lastStoredDate);
   if (!period1) {
+    if (throwOnError) throw new Error(`fetchIncrementalYahooHistory(${ticker}): lastStoredDate inválido (${lastStoredDate}).`);
     return [];
   }
   const period2 = new Date();
@@ -568,19 +605,21 @@ async function fetchIncrementalYahooHistory(ticker, lastStoredDate) {
     return [];
   }
 
-  try {
-    await sleep(1500 + Math.random() * 1000);
+  const normalizedTicker = normalizeTicker(ticker);
 
-    const normalizedTicker = normalizeTicker(ticker);
-    const result = await yahooFinance.chart(
-      normalizedTicker,
-      { period1, period2, interval: '1d' },
-      {
-        fetchOptions: {
-          headers: { 'User-Agent': USER_AGENT }
+  try {
+    const result = await networkLimit(() => fetchWithBackoff(
+      () => yahooFinance.chart(
+        normalizedTicker,
+        { period1, period2, interval: '1d' },
+        {
+          fetchOptions: {
+            headers: { 'User-Agent': USER_AGENT }
+          }
         }
-      }
-    );
+      ),
+      { retries: 3 }
+    ));
 
     const quotes = result && result.quotes;
     if (!Array.isArray(quotes) || quotes.length === 0) {
@@ -590,10 +629,24 @@ async function fetchIncrementalYahooHistory(ticker, lastStoredDate) {
     return processQuotes(quotes, ticker);
   } catch (err) {
     const msg = String(err && err.message ? err.message : '');
-    if (/404|not found|no data|period1/i.test(msg)) {
+
+    // Definitivo: símbolo inexistente/deslistado ou janela sem dados novos.
+    if (isDefinitiveDataError(err)) {
+      console.warn(`[yahooClient] fetchIncrementalYahooHistory(${ticker}, desde ${lastStoredDate}): sem dados incrementais (${msg}).`);
+      if (throwOnError) throw err;
       return [];
     }
+
+    // Transitório esgotado (429/timeouts/rede): NÃO é "sem dados" — o sync
+    // diário perdia velas silenciosamente aqui. Marcar com console.error.
+    if (isTransientNetworkError(err)) {
+      console.error(`[yahooClient] ERRO TRANSITÓRIO NÃO RECUPERADO fetchIncrementalYahooHistory(${ticker}, desde ${lastStoredDate}) após esgotar retries: ${msg}. Retornando []; sincronização incremental INCOMPLETA para este ticker.`);
+      if (throwOnError) throw err;
+      return [];
+    }
+
     console.warn(`[yahooClient] fetchIncrementalYahooHistory(${ticker}): ${msg}`);
+    if (throwOnError) throw err;
     return [];
   }
 }
@@ -606,21 +659,33 @@ async function fetchHistorySince(ticker, sinceDate) {
 
   const normalizedTicker = normalizeTicker(ticker);
   try {
-    await sleep(1200 + Math.random() * 800);
-    const result = await yahooFinance.chart(
-      normalizedTicker,
-      { period1, period2, interval: '1d' },
-      {
-        fetchOptions: {
-          headers: { 'User-Agent': USER_AGENT }
+    await microStagger();
+    const result = await networkLimit(() => fetchWithBackoff(
+      () => yahooFinance.chart(
+        normalizedTicker,
+        { period1, period2, interval: '1d' },
+        {
+          fetchOptions: {
+            headers: { 'User-Agent': USER_AGENT }
+          }
         }
-      }
-    );
+      ),
+      { retries: 3 }
+    ));
     const quotes = result && result.quotes;
     if (!Array.isArray(quotes) || quotes.length === 0) return [];
     return processQuotes(quotes, ticker);
   } catch (err) {
-    console.warn(`[yahooClient] fetchHistorySince(${ticker}, ${sinceDate}): ${err && err.message ? err.message : err}`);
+    const msg = err && err.message ? err.message : String(err);
+    if (isDefinitiveDataError(err)) {
+      console.warn(`[yahooClient] fetchHistorySince(${ticker}, ${sinceDate}): sem dados (${msg}).`);
+      return [];
+    }
+    if (isTransientNetworkError(err)) {
+      console.error(`[yahooClient] ERRO TRANSITÓRIO NÃO RECUPERADO fetchHistorySince(${ticker}, ${sinceDate}) após esgotar retries: ${msg}. Retornando [].`);
+      return [];
+    }
+    console.warn(`[yahooClient] fetchHistorySince(${ticker}, ${sinceDate}): ${msg}`);
     return [];
   }
 }
@@ -698,4 +763,72 @@ async function fetchFullHistoryFromIPO(ticker) {
   return sanitized;
 }
 
-module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory, buildIncrementalPeriod1, fetchFirstTradeDate, fetchHistorySince, fetchFirstAvailableDate, fetchFullHistoryFromIPO };
+// ── Orquestrador de sync em lote ────────────────────────────
+// Coordena a atualização diária de N tickers sem tocar na rede fora da
+// pool. Cada task verifica shouldContinue() antes de arrancar. A decisão
+// de rede por ticker:
+//   - sem lastDate e !forceFull  → SKIPPED_NO_INITIAL_DATE (zero rede)
+//   - lastDate >= expectedTradingDay → ALREADY_UP_TO_DATE (zero rede)
+//   - caso contrário → fetchOne (por omissão: incremental, ou full se
+//     forceFull e sem lastDate). As defaults já passam por networkLimit;
+//     um fetchOne injetado é responsabilidade de quem o fornece.
+// Nota de implementação: as tasks NÃO são embrulhadas em networkLimit
+// (p-limit não é reentrante — aninhar acquisition causaria deadlock com
+// a pool saturada); quem adquire slots são as funções de rede finais.
+async function syncTickersBatch(tickers, options = {}) {
+  const list = Array.isArray(tickers) ? tickers.filter(Boolean) : [];
+  const getLastDate = typeof options.getLastDate === 'function' ? options.getLastDate : () => null;
+  const expectedTradingDay = options.expectedTradingDay ? String(options.expectedTradingDay).slice(0, 10) : null;
+  const forceFull = !!options.forceFull;
+  const shouldContinue = typeof options.shouldContinue === 'function' ? options.shouldContinue : () => true;
+
+  const defaultFetchOne = (ticker, lastDate) => {
+    if (lastDate) return fetchIncrementalYahooHistory(ticker, lastDate, { throwOnError: true });
+    return fetchFullHistoryFromIPO(ticker);
+  };
+  const fetchOne = typeof options.fetchOne === 'function' ? options.fetchOne : defaultFetchOne;
+
+  // Comparação lexicográfica segura para datas 'YYYY-MM-DD'
+  const normDay = d => (d ? String(d).slice(0, 10) : null);
+
+  const tasks = list.map(rawTicker => async () => {
+    const ticker = typeof rawTicker === 'string' ? rawTicker.trim() : rawTicker;
+
+    if (!shouldContinue(ticker)) {
+      return { ticker, status: 'CANCELLED' };
+    }
+
+    let storedLastDate = null;
+    try { storedLastDate = getLastDate(ticker); } catch (_) { storedLastDate = null; }
+    const lastDate = normDay(storedLastDate);
+
+    if (!lastDate && !forceFull) {
+      return { ticker, status: 'SKIPPED_NO_INITIAL_DATE' };
+    }
+
+    if (lastDate && expectedTradingDay && lastDate >= expectedTradingDay) {
+      return { ticker, status: 'ALREADY_UP_TO_DATE', lastDate };
+    }
+
+    try {
+      const candles = await fetchOne(ticker, lastDate || null);
+      const arr = Array.isArray(candles) ? candles : [];
+      if (arr.length === 0) {
+        return { ticker, status: 'NOOP', count: 0 };
+      }
+      const newLast = arr[arr.length - 1] && arr[arr.length - 1].date ? normDay(arr[arr.length - 1].date) : null;
+      return { ticker, status: 'SUCCESS', candles: arr, count: arr.length, lastDate: newLast };
+    } catch (err) {
+      return {
+        ticker,
+        status: 'ERROR',
+        error: err && err.message ? err.message : String(err),
+        ...(lastDate ? { lastDate } : {})
+      };
+    }
+  });
+
+  return Promise.all(tasks.map(run => run()));
+}
+
+module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory, buildIncrementalPeriod1, fetchFirstTradeDate, fetchHistorySince, fetchFirstAvailableDate, fetchFullHistoryFromIPO, networkLimit, fetchWithBackoff, syncTickersBatch };
