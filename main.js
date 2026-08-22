@@ -741,6 +741,33 @@ app.whenReady().then(async () => {
       return { ok: true };
     });
 
+    // Spec Passo 3 – 4.1 Handler START_SIMULATION (workerData)
+    ipcMain.handle('START_SIMULATION', async (event, params) => {
+      return new Promise((resolve, reject) => {
+        const dbPath = path.join(app.getPath('userData'), 'trades.db');
+        const workerScript = path.join(__dirname, 'src/engine/simulationWorker.js');
+        // params pode conter { tickers, startDate, endDate, config } ou { tickers, params }
+        const tickers = params.tickers || params.universe || [];
+        const startDate = params.startDate || params.params?.startDate || null;
+        const endDate = params.endDate || params.params?.endDate || null;
+        const config = params.config || params.params || {};
+        // normaliza tickers para array de strings
+        const normTickers = (Array.isArray(tickers) ? tickers : []).map(t => typeof t === 'string' ? t : (t.ticker || '')).filter(Boolean);
+        const worker = new Worker(workerScript, { workerData: { dbPath, tickers: normTickers, startDate, endDate, config } });
+        worker.on('message', (msg) => {
+          if (msg.type === 'PROGRESS') {
+            event.sender.send('SIMULATION_PROGRESS', msg.data);
+          } else if (msg.type === 'COMPLETE') {
+            resolve({ success: true, results: msg.results });
+          } else if (msg.type === 'ERROR') {
+            reject(new Error(msg.error || 'Worker error'));
+          }
+        });
+        worker.on('error', (err) => { console.error('[Simulation Error]', err); reject(err); });
+        worker.on('exit', (code) => { if (code !== 0) console.warn(`[Simulation Worker] Terminou com código de saída ${code}`); });
+      });
+    });
+
     // ═══════════════════════════════════════════════════════
     //  BACKTEST — Execução via Worker Thread
     // ═══════════════════════════════════════════════════════

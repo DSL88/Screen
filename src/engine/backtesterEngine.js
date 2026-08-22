@@ -518,4 +518,155 @@ function calculateKPIs(trades, equityCurve, initialCapital) {
   };
 }
 
-module.exports = { runSimulation, calculateKPIs };
+// ─────────────────────────────────────────────────────────────
+// Spec Passo 3 – Classe BacktesterEngine (bar-by-bar) – mantida em paralelo
+// com runSimulation (usada por testes existentes) para compatibilidade
+// com o prompt e com o worker spec (workerData).
+// ─────────────────────────────────────────────────────────────
+let __nativeForBacktester = null;
+try { __nativeForBacktester = require('../native'); } catch (_) {}
+
+function calculateMarkovMatrix(candles) {
+  try {
+    const me = require('../quant/markovEngine');
+    const ind = require('../quant/indicators');
+    const closes = candles.map(c=>c.close);
+    const highs = candles.map(c=>c.high);
+    const lows = candles.map(c=>c.low);
+    const rsi = ind.rsiWilder(closes, 21);
+    const adx = ind.adxWilder(highs, lows, closes, 14);
+    const bb = ind.bollingerBands(closes, 30, 2);
+    const { buildStateSeries, buildTransitionMatrix } = me;
+    const states = buildStateSeries(bb.pctB, rsi, adx);
+    const matrix = buildTransitionMatrix(states, 150);
+    const currentState = states[states.length-1];
+    const { buildStateReturnsMap } = require('../quant/monteCarloEngine');
+    const stateReturns = buildStateReturnsMap(candles);
+    if (currentState <0) return { isValid: false };
+    return { isValid: true, transitionMatrix: matrix, stateReturns, currentState };
+  } catch (_) {
+    return { isValid: false };
+  }
+}
+
+class BacktesterEngine {
+  constructor(config = {}) {
+    this.initialCapital = Number(config.initialCapital) || 10000;
+    this.capital = this.initialCapital;
+    this.riskPerTrade = Number(config.riskPerTradePct || 2) / 100;
+    this.stopLossPct = Number(config.stopLoss || 1.4) / 100;
+    this.takeProfitPct = Number(config.takeProfit || 2.8) / 100;
+    this.direction = config.direction || 'BOTH';
+    this.minMCWinRate = Number(config.minMCWinRate || 50);
+    this.trades = [];
+    this.equityCurve = [];
+  }
+
+  run(candles, quantEngine) {
+    if (!candles || candles.length < 220) return null;
+    const qe = quantEngine || __nativeForBacktester;
+    let inPosition = false;
+    let currentTrade = null;
+    let peakCapital = this.capital;
+    let maxDrawdown = 0;
+    for (let i = 200; i < candles.length; i++) {
+      const slice = candles.slice(0, i + 1);
+      const currentCandle = slice[slice.length - 1];
+      if (this.capital > peakCapital) peakCapital = this.capital;
+      const currentDrawdown = ((peakCapital - this.capital) / peakCapital) * 100;
+      if (currentDrawdown > maxDrawdown) maxDrawdown = currentDrawdown;
+      if (inPosition && currentTrade) {
+        let closed = false; let exitPrice = 0; let exitReason = '';
+        if (currentTrade.type === 'LONG') {
+          if (currentCandle.high >= currentTrade.tpPrice) { exitPrice = currentTrade.tpPrice; exitReason = 'TAKE_PROFIT'; closed = true; }
+          else if (currentCandle.low <= currentTrade.slPrice) { exitPrice = currentTrade.slPrice; exitReason = 'STOP_LOSS'; closed = true; }
+        } else if (currentTrade.type === 'SHORT') {
+          if (currentCandle.low <= currentTrade.tpPrice) { exitPrice = currentTrade.tpPrice; exitReason = 'TAKE_PROFIT'; closed = true; }
+          else if (currentCandle.high >= currentTrade.slPrice) { exitPrice = currentTrade.slPrice; exitReason = 'STOP_LOSS'; closed = true; }
+        }
+        if (closed) {
+          const pnlPct = currentTrade.type === 'LONG' ? (exitPrice - currentTrade.entryPrice) / currentTrade.entryPrice : (currentTrade.entryPrice - exitPrice) / currentTrade.entryPrice;
+          const pnlEur = currentTrade.positionSize * pnlPct;
+          this.capital += pnlEur;
+          this.trades.push({ ...currentTrade, exitDate: currentCandle.date, exitPrice, exitReason, pnlEur, pnlPct: pnlPct * 100, capitalAfter: this.capital });
+          this.equityCurve.push({ date: currentCandle.date, capital: this.capital });
+          inPosition = false; currentTrade = null; continue;
+        }
+      }
+      if (!inPosition && i < candles.length - 1) {
+        const signal = this.evaluateSignal(slice, qe);
+        if (signal && signal.approved) {
+          const entryPrice = currentCandle.close;
+          const positionSize = (this.capital * this.riskPerTrade) / this.stopLossPct;
+          currentTrade = {
+            ticker: signal.ticker,
+            type: signal.type,
+            entryDate: currentCandle.date,
+            entryPrice,
+            positionSize,
+            slPrice: signal.type === 'LONG' ? entryPrice * (1 - this.stopLossPct) : entryPrice * (1 + this.stopLossPct),
+            tpPrice: signal.type === 'LONG' ? entryPrice * (1 + this.takeProfitPct) : entryPrice * (1 - this.takeProfitPct),
+            mcWinRate: signal.mcWinRate,
+            mcTier: signal.mcTier
+          };
+          inPosition = true;
+        }
+      }
+    }
+    const wins = this.trades.filter(t => t.pnlEur > 0);
+    const losses = this.trades.filter(t => t.pnlEur <= 0);
+    const totalProfit = wins.reduce((acc, t) => acc + t.pnlEur, 0);
+    const totalLoss = Math.abs(losses.reduce((acc, t) => acc + t.pnlEur, 0));
+    return {
+      initialCapital: this.initialCapital,
+      finalCapital: this.capital,
+      netProfit: this.capital - this.initialCapital,
+      netProfitPct: ((this.capital - this.initialCapital) / this.initialCapital) * 100,
+      totalTrades: this.trades.length,
+      winsCount: wins.length,
+      lossesCount: losses.length,
+      winRate: this.trades.length > 0 ? (wins.length / this.trades.length) * 100 : 0,
+      profitFactor: totalLoss > 0 ? (totalProfit / totalLoss) : (totalProfit > 0 ? 99.9 : 0),
+      maxDrawdown,
+      equityCurve: this.equityCurve,
+      trades: this.trades
+    };
+  }
+
+  evaluateSignal(slice, quantEngine) {
+    const lastCandle = slice[slice.length - 1];
+    const lastClose = Number(lastCandle.close);
+    let cumVol = 0; let cumVolPrice = 0;
+    const vwapSlice = slice.slice(-20);
+    for (const c of vwapSlice) { const tp = (Number(c.high) + Number(c.low) + Number(c.close)) / 3; cumVolPrice += tp * Number(c.volume||0); cumVol += Number(c.volume||0); }
+    const rollingVWAP = cumVol > 0 ? (cumVolPrice / cumVol) : lastClose;
+    let targetDirection = null;
+    if ((this.direction === 'LONG' || this.direction === 'BOTH') && lastClose > rollingVWAP) targetDirection = 'LONG';
+    else if ((this.direction === 'SHORT' || this.direction === 'BOTH') && lastClose < rollingVWAP) targetDirection = 'SHORT';
+    if (!targetDirection) return null;
+    const markov = calculateMarkovMatrix(slice);
+    if (!markov || !markov.isValid) return null;
+    const qe = quantEngine || __nativeForBacktester;
+    if (!qe || typeof qe.runMonteCarlo !== 'function') return null;
+    // Spec signature: runMonteCarlo(matrix, stateReturns, currentState, lastClose, 1000, 20, sl, tp)
+    // Native signature: runMonteCarlo(matrix, returns, state, price, opts)
+    let mc = null;
+    try {
+      if (qe.runMonteCarlo.length >= 8) {
+        mc = qe.runMonteCarlo(markov.transitionMatrix, markov.stateReturns, markov.currentState, lastClose, 1000, 20, this.stopLossPct, this.takeProfitPct);
+      } else {
+        mc = qe.runMonteCarlo(markov.transitionMatrix, markov.stateReturns, markov.currentState, lastClose, { iterations: 1000, daysAhead: 20, slPct: this.stopLossPct, tpPct: this.takeProfitPct });
+        // normaliza winRateMC
+        if (mc && mc.winRate != null && mc.winRateMC == null) mc.winRateMC = mc.winRate;
+      }
+    } catch (_) { mc = null; }
+    if (!mc) return null;
+    const winRateMC = mc.winRateMC != null ? mc.winRateMC : (mc.winRate != null ? mc.winRate : 0);
+    if (winRateMC >= this.minMCWinRate) {
+      return { approved: true, type: targetDirection, mcWinRate: winRateMC, mcTier: mc.mcTier, ticker: slice[0].ticker };
+    }
+    return null;
+  }
+}
+
+module.exports = { runSimulation, calculateKPIs, BacktesterEngine, calculateMarkovMatrix };

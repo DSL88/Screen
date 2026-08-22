@@ -1,7 +1,52 @@
 'use strict';
 
-const { parentPort } = require('worker_threads');
+const { parentPort, workerData } = require('worker_threads');
 const { runSimulation } = require('./backtesterEngine');
+
+// Spec Passo 3 – modo workerData (START_SIMULATION) – execução direta ao arrancar
+// Mantém compatibilidade com modo message-based (simulation:start)
+if (workerData && workerData.dbPath && Array.isArray(workerData.tickers)) {
+  (async () => {
+    try {
+      const Database = require('better-sqlite3');
+      const BacktesterEngine = require('./backtesterEngine').BacktesterEngine || require('./backtesterEngine');
+      // normaliza quando BacktesterEngine é classe
+      const BE = (BacktesterEngine && BacktesterEngine.BacktesterEngine) ? BacktesterEngine.BacktesterEngine : BacktesterEngine;
+      const quantEngine = require('../native');
+      const { dbPath, tickers, startDate, endDate, config } = workerData;
+      const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+      db.pragma('journal_mode = WAL');
+      function loadCandlesForWorker(ticker, start, end) {
+        const cleanTicker = String(ticker).trim().toUpperCase();
+        if (!start && !end) {
+          return db.prepare(`SELECT date, open, high, low, close, volume FROM historical_prices WHERE UPPER(TRIM(ticker)) = ? ORDER BY date ASC`).all(cleanTicker);
+        }
+        const cleanStart = String(start).slice(0, 10);
+        const cleanEnd = end ? String(end).slice(0, 10) : '9999-12-31';
+        const warmup = db.prepare(`SELECT date, open, high, low, close, volume FROM historical_prices WHERE UPPER(TRIM(ticker)) = ? AND date < ? ORDER BY date DESC LIMIT 200`).all(cleanTicker, cleanStart).reverse();
+        const main = db.prepare(`SELECT date, open, high, low, close, volume FROM historical_prices WHERE UPPER(TRIM(ticker)) = ? AND date >= ? AND date <= ? ORDER BY date ASC`).all(cleanTicker, cleanStart, cleanEnd);
+        return [...warmup, ...main];
+      }
+      const results = []; const total = tickers.length;
+      for (let i = 0; i < total; i++) {
+        const ticker = tickers[i];
+        const rawCandles = loadCandlesForWorker(ticker, startDate, endDate);
+        const candles = rawCandles.map(c => ({ ticker, date: String(c.date).slice(0, 10), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: Number(c.volume || 0) }));
+        if (candles.length >= 220) {
+          const EngineCls = BE.BacktesterEngine || BE;
+          const engine = new EngineCls(config);
+          const simRes = engine.run(candles, quantEngine);
+          if (simRes) results.push({ ticker, ...simRes });
+        }
+        parentPort.postMessage({ type: 'PROGRESS', data: { current: i + 1, total, ticker, tradesCount: results.length } });
+      }
+      db.close();
+      parentPort.postMessage({ type: 'COMPLETE', results });
+    } catch (e) {
+      try { parentPort.postMessage({ type: 'ERROR', error: e.message }); } catch (_) {}
+    }
+  })();
+}
 
 const DB_TIMEOUT_MS = 60000;
 const PROGRESS_THROTTLE_MS = 100;

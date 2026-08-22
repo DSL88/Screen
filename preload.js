@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const ALLOWED_EVENTS = new Set([
+  'SIMULATION_PROGRESS',
   'SCAN_PROGRESS',
   'scan:progress',
   'scan:row',
@@ -132,6 +133,12 @@ contextBridge.exposeInMainWorld('api', {
   importHistoricalCsv: () => ipcRenderer.invoke('import-historical-csv'),
   importHistoricalData: (data) => ipcRenderer.invoke('import-historical-data', data),
   simulationStart: (payload) => ipcRenderer.invoke('simulation:start', payload),
+  startSimulation: (params) => ipcRenderer.invoke('START_SIMULATION', params),
+  onSimulationProgressSpec: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('SIMULATION_PROGRESS', handler);
+    return () => ipcRenderer.removeListener('SIMULATION_PROGRESS', handler);
+  },
   simulationCancel: (runId) => ipcRenderer.invoke('simulation:cancel', { runId }),
   simulationOptions: () => ipcRenderer.invoke('simulation:options'),
   onSimulationProgress: (callback) => {
