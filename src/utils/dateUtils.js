@@ -26,9 +26,9 @@ const getLastExpectedTradingDay = () => {
     target.setDate(target.getDate() - 2);
   } else {
     const currentHour = now.getHours();
-    if (currentHour < 22 && dayOfWeek === 1) {
+    if (currentHour < 18 && dayOfWeek === 1) {
       target.setDate(target.getDate() - 3);
-    } else if (currentHour < 22) {
+    } else if (currentHour < 18) {
       target.setDate(target.getDate() - 1);
     }
   }
