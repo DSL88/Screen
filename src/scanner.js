@@ -2,6 +2,7 @@
 // src/scanner.js – Motor offline 100% SQLite (Passo 2)
 // NÃO importa yahooClient – extração exclusivamente via db.getHistoricalPricesForScan
 // Pipeline: 200 velas min -> VWAP20 -> Markov -> Monte Carlo 1000x 1.4%/2.8%
+// SQL offline (spec Passo 2): SELECT date, open, high, low, close, volume FROM historical_prices WHERE UPPER(TRIM(ticker)) = ? ORDER BY date DESC LIMIT 300; + .reverse() ASC
 
 function getHistoricalPricesForScan(db, ticker) {
   if (typeof db.getHistoricalPricesForScan === 'function') {

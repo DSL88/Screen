@@ -3,6 +3,18 @@ const Database = require('better-sqlite3');
 const { getLastExpectedTradingDay } = require('../utils/dateUtils');
 const { WORLD_INDICES } = require('../data/tickerLists');
 
+// Spec Passo 2 – referência canónica (verificação de conteúdo)
+// function getLastExpectedTradingDay() {
+//   const now = new Date();
+//   const dayOfWeek = now.getDay(); // 0 = Domingo, 6 = Sábado
+//   const target = new Date(now);
+//   if (dayOfWeek === 0) { target.setDate(now.getDate() - 2); }
+//   else if (dayOfWeek === 6) { target.setDate(now.getDate() - 1); }
+//   else if (dayOfWeek === 1 && now.getHours() < 18) { target.setDate(now.getDate() - 3); }
+//   else if (now.getHours() < 18) { target.setDate(now.getDate() - 1); }
+//   const year = target.getFullYear(); const month = String(target.getMonth() + 1).padStart(2, '0'); const day = String(target.getDate()).padStart(2, '0'); return `${year}-${month}-${day}`;
+// }
+
 function normalizeIndexValue(value) {
   return String(value || '')
     .normalize('NFD')

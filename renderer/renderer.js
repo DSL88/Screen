@@ -4396,4 +4396,18 @@
     countryImport = null;
     activeScanRunId = null;
   }, { once: true });
+
+  // Spec Passo 2 – Scanner 100% offline: valida My List antes de analisar
+  async function handleIniciarAnaliseScanner(indexFilter) {
+    const freshness = await window.api.checkListFreshness(indexFilter);
+    if (freshness && freshness.isUpdated === false) {
+      alert(`A base de dados necessita de sincronização. Última cotação: ${freshness.maxStoredDate || 'N/A'}, Esperada: ${freshness.expectedDate}. Por favor clique em "Sincronizar Lista" na My List antes de proceder à análise.`);
+      return;
+    }
+    // se isUpdated === true, segue para RUN_MARKET_SCAN (offline, sem HTTP)
+    const res = await window.api.runMarketScan(indexFilter);
+    return res;
+  }
+  // expõe para o botão "Iniciar Análise" (se o botão usar onclick inline)
+  window.handleIniciarAnaliseScanner = handleIniciarAnaliseScanner;
 })();
