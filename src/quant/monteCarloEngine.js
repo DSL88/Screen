@@ -3,6 +3,11 @@
 const { rsiWilder, adxWilder, bollingerBands } = require('./indicators');
 const { buildStateSeries, NUM_STATES, SL_PCT, TP_PCT } = require('./markovEngine');
 
+let quantEngine = null;
+try {
+  quantEngine = require('../native');
+} catch (_) {}
+
 const MC_ITERATIONS = 1000;
 const MC_DAYS_AHEAD = 20;
 const MC_THRESHOLD = 50;
@@ -71,21 +76,7 @@ function classifyMCTier(winRate) {
   return { mcTier: MC_TIERS.REJECTED, mcApproved: false, mcLabel: 'Rejeitado' };
 }
 
-function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, currentPrice, options) {
-  const opts = options || {};
-  const iterations = opts.iterations || MC_ITERATIONS;
-  const daysAhead = opts.daysAhead || MC_DAYS_AHEAD;
-  const slPct = opts.slPct != null ? opts.slPct : SL_PCT;
-  const tpPct = opts.tpPct != null ? opts.tpPct : TP_PCT;
-  const rng = typeof opts.random === 'function' ? opts.random : Math.random;
-  const isShort = String(opts.side || 'LONG').toUpperCase() === 'SHORT';
-
-  if (!transitionMatrix || currentState < 0 || !candles || candles.length < 60 || !currentPrice || currentPrice <= 0) {
-    return { winRate: 0, tpHits: 0, slHits: 0, expired: iterations, isApproved: false, mcTier: 'REJECTED', mcLabel: 'Rejeitado' };
-  }
-
-  const returnsByState = buildStateReturnsMap(candles);
-
+function _runLegacyLoop(transitionMatrix, returnsByState, currentState, currentPrice, rng, isShort, iterations, daysAhead, slPct, tpPct) {
   // LONG:  TP acima (1+tpPct) / SL abaixo (1-slPct)
   // SHORT: TP abaixo (1-tpPct) / SL acima (1+slPct)
   const tpPrice = currentPrice * (1 + (isShort ? -tpPct : tpPct));
@@ -139,10 +130,48 @@ function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, 
     }
   }
 
-  const winRate = (tpHits / iterations) * 100;
-  const tier = classifyMCTier(winRate);
-
-  return { winRate, tpHits, slHits, expired, isApproved: tier.mcApproved, mcTier: tier.mcTier, mcLabel: tier.mcLabel };
+  return { tpHits, slHits, expired };
 }
 
-module.exports = { runMarkovMonteCarloSimulation, MC_ITERATIONS, MC_DAYS_AHEAD, MC_THRESHOLD, MC_TIERS, classifyMCTier };
+function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, currentPrice, options) {
+  const opts = options || {};
+  const iterations = opts.iterations || MC_ITERATIONS;
+  const daysAhead = opts.daysAhead || MC_DAYS_AHEAD;
+  const slPct = opts.slPct != null ? opts.slPct : SL_PCT;
+  const tpPct = opts.tpPct != null ? opts.tpPct : TP_PCT;
+  const isShort = String(opts.side || 'LONG').toUpperCase() === 'SHORT';
+
+  if (!transitionMatrix || currentState < 0 || !candles || candles.length < 60 || !currentPrice || currentPrice <= 0) {
+    return { winRate: 0, tpHits: 0, slHits: 0, expired: iterations, isApproved: false, mcTier: 'REJECTED', mcLabel: 'Rejeitado' };
+  }
+
+  const returnsByState = buildStateReturnsMap(candles);
+
+  if (typeof opts.random !== 'function' && quantEngine) {
+    try {
+      const engineOpts = { iterations, daysAhead, slPct, tpPct, side: isShort ? 'SHORT' : 'LONG' };
+      if (opts.seed != null) engineOpts.seed = opts.seed >>> 0;
+
+      const res = quantEngine.runMonteCarlo(transitionMatrix, returnsByState, currentState, currentPrice, engineOpts);
+      if (res && Number.isFinite(res.winRate)) {
+        const tier = classifyMCTier(res.winRate);
+        return Object.assign({}, res, {
+          isApproved: tier.mcApproved,
+          mcTier: tier.mcTier,
+          mcLabel: tier.mcLabel
+        });
+      }
+    } catch (_) {
+    }
+  }
+
+  const rng = typeof opts.random === 'function' ? opts.random : Math.random;
+  const counts = _runLegacyLoop(transitionMatrix, returnsByState, currentState, currentPrice, rng, isShort, iterations, daysAhead, slPct, tpPct);
+
+  const winRate = (counts.tpHits / iterations) * 100;
+  const tier = classifyMCTier(winRate);
+
+  return { winRate, tpHits: counts.tpHits, slHits: counts.slHits, expired: counts.expired, isApproved: tier.mcApproved, mcTier: tier.mcTier, mcLabel: tier.mcLabel };
+}
+
+module.exports = { runMarkovMonteCarloSimulation, buildStateReturnsMap, MC_ITERATIONS, MC_DAYS_AHEAD, MC_THRESHOLD, MC_TIERS, classifyMCTier };
