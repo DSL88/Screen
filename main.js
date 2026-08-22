@@ -12,6 +12,9 @@ const marketDataService = require('./src/services/marketDataService');
 const { isIncrementalUpToDate, addDays } = require('./src/utils/dateUtils');
 const { createProgressReporter } = require('./src/utils/progressThrottle');
 const { parseFile, importFromCsvFile } = require('./src/importer/historicalImporter');
+const { scanStock } = require('./src/scanner');
+let quantEngine = null;
+try { quantEngine = require('./src/native'); } catch (_) { quantEngine = null; }
 
 // Pre-calculate mapping from ticker to index ID for fast lookup
 const tickerToIndexMap = {};
@@ -597,6 +600,34 @@ app.whenReady().then(async () => {
       });
 
       return { ok: true, runId };
+    });
+
+    // Spec Passo 2 – 3.1 Handler RUN_MARKET_SCAN 100% offline com validação prévia
+    ipcMain.handle('RUN_MARKET_SCAN', async (event, { indexFilter } = {}) => {
+      const freshness = db.checkListFreshness(indexFilter);
+      if (!freshness.isUpdated) {
+        return {
+          success: false,
+          outdated: true,
+          maxStoredDate: freshness.maxStoredDate,
+          expectedDate: freshness.expectedDate,
+          message: `A base de dados necessita de sincronização. Última cotação: ${freshness.maxStoredDate || 'N/A'}, Esperada: ${freshness.expectedDate}.`
+        };
+      }
+      const stocks = db.getStocksByIndex(indexFilter);
+      const results = [];
+      for (let i = 0; i < stocks.length; i++) {
+        const stock = stocks[i];
+        const scanRes = await scanStock(stock.ticker, db, quantEngine);
+        results.push({ ...scanRes, name: stock.name, country: stock.country });
+        if (i % 5 === 0 || i === stocks.length - 1) {
+          try { event.sender.send('SCAN_PROGRESS', { current: i + 1, total: stocks.length, ticker: stock.ticker }); } catch (_) {}
+        }
+      }
+      // ordena Elite primeiro
+      const order = { ELITE: 0, MODERATE: 1, REJECTED: 2 };
+      results.sort((a,b) => (order[a.mcTier] ?? 9) - (order[b.mcTier] ?? 9));
+      return { success: true, results };
     });
 
     // ═══════════════════════════════════════════════════════

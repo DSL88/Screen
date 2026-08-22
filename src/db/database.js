@@ -1513,36 +1513,39 @@ class DB {
     return getLastExpectedTradingDay();
   }
 
-  checkListFreshness(indexName = null) {
+  checkListFreshness(indexFilter = null) {
+    // Spec 1.2 – query direta com JOIN opcional (stocks) + compat com custom_tickers
+    let query = `SELECT MAX(hp.date) as maxStoredDate FROM historical_prices hp`;
+    const params = [];
+    if (indexFilter && indexFilter !== 'ALL') {
+      query += ` JOIN stocks s ON hp.ticker = s.ticker WHERE LOWER(TRIM(s.index_name)) = LOWER(TRIM(?))`;
+      params.push(indexFilter);
+    }
+    let row = null;
+    try { row = this.db.prepare(query).get(...params); } catch (_) { row = null; }
     const expectedDate = this.getLastExpectedTradingDay();
+    const maxStoredDate = row && row.maxStoredDate ? String(row.maxStoredDate).slice(0, 10) : null;
+    const isUpdated = maxStoredDate ? (maxStoredDate >= expectedDate) : false;
 
-    const tickers = this.getCustomTickersByIndex(indexName);
+    // Compat: manter outdatedTickers para callers existentes (main renderer)
+    const tickers = this.getCustomTickersByIndex(indexFilter);
     if (tickers.length === 0) {
-      return { isUpdated: false, maxStoredDate: null, expectedDate, outdatedTickers: [] };
+      return { isUpdated, maxStoredDate, expectedDate, outdatedTickers: [] };
     }
-
-    let overallMax = null;
+    let overallMax = maxStoredDate;
     const outdatedTickers = [];
-
     for (const ticker of tickers) {
-      const row = this.db.prepare(
-        'SELECT MAX(date) as last_date FROM historical_prices WHERE ticker = ?'
-      ).get(ticker);
-
-      const lastDate = row ? row.last_date : null;
-
-      if (lastDate && (!overallMax || lastDate > overallMax)) {
-        overallMax = lastDate;
-      }
-
-      if (!lastDate || lastDate < expectedDate) {
-        outdatedTickers.push(ticker);
-      }
+      const r = this.db.prepare('SELECT MAX(date) as last_date FROM historical_prices WHERE ticker = ?').get(ticker);
+      const lastDate = r ? r.last_date : null;
+      if (lastDate && (!overallMax || lastDate > overallMax)) overallMax = lastDate;
+      if (!lastDate || lastDate < expectedDate) outdatedTickers.push(ticker);
     }
+    const finalMax = overallMax || maxStoredDate;
+    const finalUpdated = finalMax ? (finalMax >= expectedDate) : false;
 
     return {
-      isUpdated: outdatedTickers.length === 0,
-      maxStoredDate: overallMax,
+      isUpdated: finalUpdated,
+      maxStoredDate: finalMax,
       expectedDate,
       outdatedTickers
     };

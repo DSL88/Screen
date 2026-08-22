@@ -17,20 +17,17 @@ const isIncrementalUpToDate = (lastStoredDate, expectedTradingDay) => {
 
 const getLastExpectedTradingDay = () => {
   const now = new Date();
-  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dayOfWeek = target.getDay();
+  const dayOfWeek = now.getDay(); // 0 = Domingo, 6 = Sábado
+  const target = new Date(now);
 
-  if (dayOfWeek === 6) {
-    target.setDate(target.getDate() - 1);
-  } else if (dayOfWeek === 0) {
-    target.setDate(target.getDate() - 2);
-  } else {
-    const currentHour = now.getHours();
-    if (currentHour < 18 && dayOfWeek === 1) {
-      target.setDate(target.getDate() - 3);
-    } else if (currentHour < 18) {
-      target.setDate(target.getDate() - 1);
-    }
+  if (dayOfWeek === 0) {
+    target.setDate(now.getDate() - 2); // Sexta-feira
+  } else if (dayOfWeek === 6) {
+    target.setDate(now.getDate() - 1); // Sexta-feira
+  } else if (dayOfWeek === 1 && now.getHours() < 18) {
+    target.setDate(now.getDate() - 3); // Sexta-feira se for Segunda de manhã/tarde
+  } else if (now.getHours() < 18) {
+    target.setDate(now.getDate() - 1); // Dia útil anterior antes das 18h
   }
 
   const year = target.getFullYear();
