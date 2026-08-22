@@ -96,10 +96,12 @@ Napi::Array MatrixToArray(Napi::Env env,
 Napi::Object BuildResultObject(Napi::Env env, const MonteCarloResult& r) {
   Napi::Object out = Napi::Object::New(env);
   out.Set("winRate", Napi::Number::New(env, r.winRate));
+  out.Set("winRateMC", Napi::Number::New(env, r.winRate));
   out.Set("tpHits", Napi::Number::New(env, static_cast<double>(r.tpHits)));
   out.Set("slHits", Napi::Number::New(env, static_cast<double>(r.slHits)));
   out.Set("expired", Napi::Number::New(env, static_cast<double>(r.expired)));
   out.Set("isApproved", Napi::Boolean::New(env, r.mcApproved));
+  out.Set("mcApproved", Napi::Boolean::New(env, r.mcApproved));
   out.Set("mcTier", Napi::String::New(env, r.mcTier));
   out.Set("mcLabel", Napi::String::New(env, r.mcLabel));
   out.Set("expectedValue", Napi::Number::New(env, r.expectedValue));
@@ -132,49 +134,56 @@ Napi::Value RunMonteCarlo(const Napi::CallbackInfo& info) {
   const int currentState = info[2].As<Napi::Number>().Int32Value();
   const double startPrice = info[3].As<Napi::Number>().DoubleValue();
 
-  const Napi::Object opts =
-      (info.Length() >= 5 && info[4].IsObject()) ? info[4].As<Napi::Object>()
-                                                 : Napi::Object::New(env);
-
-  // Defaults paridade JS: iterations/daysAhead com `||`, sl/tp com `!= null`
+  // Spec compat: 8 args (matrix, returns, state, price, iterations, horizon, sl, tp)
+  bool isSpecCall = info.Length() >= 8 && info[4].IsNumber() && info[5].IsNumber() && info[6].IsNumber() && info[7].IsNumber();
   double iterationsD = kDefaultIterations;
-  {
-    const Napi::Value v = opts.Get("iterations");
-    if (v.IsNumber()) {
-      const double d = v.As<Napi::Number>().DoubleValue();
-      if (d >= 1.0) iterationsD = d;
-    }
-  }
   double daysAheadD = kDefaultDaysAhead;
-  {
-    const Napi::Value v = opts.Get("daysAhead");
-    if (v.IsNumber()) {
-      const double d = v.As<Napi::Number>().DoubleValue();
-      if (d >= 1.0) daysAheadD = d;
-    }
-  }
-
-  const double slPct = GetFiniteNumberOr(opts, "slPct", kDefaultSlPct);
-  const double tpPct = GetFiniteNumberOr(opts, "tpPct", kDefaultTpPct);
-
+  double slPct = kDefaultSlPct;
+  double tpPct = kDefaultTpPct;
   std::string side = "LONG";
-  {
-    const Napi::Value v = opts.Get("side");
-    if (v.IsString()) side = v.As<Napi::String>().Utf8Value();
-    for (char& c : side) {
-      c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    }
-  }
-
   bool useSeed = false;
   uint32_t seed = 0;
-  {
-    const Napi::Value v = opts.Get("seed");
-    if (v.IsNumber()) {
-      const double d = v.As<Napi::Number>().DoubleValue();
-      if (std::isfinite(d)) {
-        useSeed = true;
-        seed = v.As<Napi::Number>().Uint32Value(); // semântica ToUint32 do JS
+
+  if (isSpecCall) {
+    iterationsD = info[4].As<Napi::Number>().DoubleValue();
+    daysAheadD = info[5].As<Napi::Number>().DoubleValue();
+    slPct = info[6].As<Napi::Number>().DoubleValue();
+    tpPct = info[7].As<Napi::Number>().DoubleValue();
+    if (iterationsD < 1.0) iterationsD = kDefaultIterations;
+    if (daysAheadD < 1.0) daysAheadD = kDefaultDaysAhead;
+    if (!std::isfinite(slPct)) slPct = kDefaultSlPct;
+    if (!std::isfinite(tpPct)) tpPct = kDefaultTpPct;
+  } else {
+    const Napi::Object opts =
+        (info.Length() >= 5 && info[4].IsObject()) ? info[4].As<Napi::Object>()
+                                                   : Napi::Object::New(env);
+    // Defaults paridade JS: iterations/daysAhead com `||`, sl/tp com `!= null`
+    {
+      const Napi::Value v = opts.Get("iterations");
+      if (v.IsNumber()) {
+        const double d = v.As<Napi::Number>().DoubleValue();
+        if (d >= 1.0) iterationsD = d;
+      }
+    }
+    {
+      const Napi::Value v = opts.Get("daysAhead");
+      if (v.IsNumber()) {
+        const double d = v.As<Napi::Number>().DoubleValue();
+        if (d >= 1.0) daysAheadD = d;
+      }
+    }
+    slPct = GetFiniteNumberOr(opts, "slPct", kDefaultSlPct);
+    tpPct = GetFiniteNumberOr(opts, "tpPct", kDefaultTpPct);
+    {
+      const Napi::Value v = opts.Get("side");
+      if (v.IsString()) side = v.As<Napi::String>().Utf8Value();
+      for (char& c : side) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    }
+    {
+      const Napi::Value v = opts.Get("seed");
+      if (v.IsNumber()) {
+        const double d = v.As<Napi::Number>().DoubleValue();
+        if (std::isfinite(d)) { useSeed = true; seed = v.As<Napi::Number>().Uint32Value(); }
       }
     }
   }

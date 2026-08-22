@@ -129,10 +129,12 @@ function runMonteCarloJSFallback(matrix, returnsByState, currentState, startPric
 
   return {
     winRate,
+    winRateMC: winRate,
     tpHits,
     slHits,
     expired,
     isApproved: tier.isApproved,
+    mcApproved: tier.isApproved,
     mcTier: tier.mcTier,
     mcLabel: tier.mcLabel,
     expectedValue: expectedValuePct(winRate, tpPct, slPct)
@@ -141,8 +143,26 @@ function runMonteCarloJSFallback(matrix, returnsByState, currentState, startPric
 
 module.exports = {
   isNativeAvailable: () => nativeModule !== null,
-  runMonteCarlo(matrix, returnsByState, currentState, startPrice, opts) {
+  // Compat Passo 4: suporta spec (matrix, returns, state, price, iterations, horizon, sl, tp)
+  // e legacy opts object. Detecta pelo tipo do 5º argumento.
+  runMonteCarlo(matrix, returnsByState, currentState, startPrice, a, b, c, d) {
+    let opts = {};
+    if (typeof a === 'object' && a !== null) {
+      opts = a;
+    } else if (typeof a === 'number' || typeof b === 'number') {
+      // spec 8-args
+      opts = {
+        iterations: typeof a === 'number' ? a : MC_ITERATIONS,
+        daysAhead: typeof b === 'number' ? b : MC_DAYS_AHEAD,
+        slPct: typeof c === 'number' ? c : SL_PCT,
+        tpPct: typeof d === 'number' ? d : TP_PCT
+      };
+    }
     if (nativeModule) {
+      // Se spec 8-args, encaminha direto com 8 args para evitar conversão opts->nativo
+      if (typeof a === 'number') {
+        return nativeModule.runMonteCarlo(matrix, returnsByState, currentState, startPrice, opts.iterations, opts.daysAhead, opts.slPct, opts.tpPct);
+      }
       return nativeModule.runMonteCarlo(matrix, returnsByState, currentState, startPrice, opts || {});
     }
     return runMonteCarloJSFallback(matrix, returnsByState, currentState, startPrice, opts || {});

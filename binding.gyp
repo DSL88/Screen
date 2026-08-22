@@ -18,15 +18,16 @@
       "defines": ["NAPI_DISABLE_CPP_EXCEPTIONS"],
       "msvs_settings": {
         "VCCLCompilerTool": {
+          "ExceptionHandling": 1,
           "Optimization": 3,
-          "ExceptionHandling": 1
+          "FavorSizeOrSpeed": 1,
+          "EnableEnhancedInstructionSet": 2
         }
       },
       "xcode_settings": {
         "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
         "CLANG_CXX_LIBRARY": "libc++",
-        "MACOSX_DEPLOYMENT_TARGET": "10.15",
-        "OTHER_CFLAGS": ["-Wall"]
+        "MACOSX_DEPLOYMENT_TARGET": "10.15"
       }
     }
   ]

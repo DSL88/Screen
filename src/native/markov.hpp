@@ -16,3 +16,21 @@ struct MarkovModelResult {
 MarkovModelResult computeMarkovEngineNative(const std::vector<double>& bbPct,
                                             const std::vector<double>& adx,
                                             size_t window);
+
+// Spec Passo 4 – 6 estados (closes/adx/bbUpper/bbLower) – compatível com prompt
+#ifndef MARKOV_HPP_SPEC
+#define MARKOV_HPP_SPEC
+struct MarkovResult {
+    std::vector<std::vector<double>> transitionMatrix;
+    int currentState;
+    std::vector<std::vector<double>> stateReturns;
+    bool isValid;
+};
+MarkovResult computeMarkovEngineNative(
+    const double* closes,
+    const double* adx,
+    const double* bbUpper,
+    const double* bbLower,
+    size_t length,
+    size_t windowSize);
+#endif

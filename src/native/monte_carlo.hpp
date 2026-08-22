@@ -38,3 +38,16 @@ MonteCarloResult runMonteCarloSimulationNative(
     const char* side, // "LONG" | "SHORT"
     bool useSeed,
     uint32_t seed);
+
+// Spec Passo 4 – assinatura simplificada (8 args, LONG implícito)
+inline MonteCarloResult runMonteCarloSimulationNative(
+    const std::vector<std::vector<double>>& transitionMatrix,
+    const std::vector<std::vector<double>>& stateReturns,
+    int currentState,
+    double startPrice,
+    int iterations,
+    int horizonDays,
+    double stopLossPct,
+    double takeProfitPct) {
+  return runMonteCarloSimulationNative(transitionMatrix, stateReturns, currentState, startPrice, iterations, horizonDays, stopLossPct, takeProfitPct, "LONG", false, 0);
+}
