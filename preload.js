@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const ALLOWED_EVENTS = new Set([
+  'SCAN_PROGRESS',
   'scan:progress',
   'scan:row',
   'scan:done',
@@ -63,6 +64,12 @@ contextBridge.exposeInMainWorld('api', {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('SYNC_PROGRESS', handler);
     return () => ipcRenderer.removeListener('SYNC_PROGRESS', handler);
+  },
+  runMarketScan: (indexFilter) => ipcRenderer.invoke('RUN_MARKET_SCAN', { indexFilter }),
+  onScanProgress: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('SCAN_PROGRESS', handler);
+    return () => ipcRenderer.removeListener('SCAN_PROGRESS', handler);
   },
   deleteIndexWithStocks: (indexName) => ipcRenderer.invoke('delete-index-with-stocks', indexName),
   downloadIndexFullHistory: (indexId, operationId) => ipcRenderer.invoke('download-full-history-for-index', { indexId, operationId }),
