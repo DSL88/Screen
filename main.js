@@ -468,6 +468,8 @@ function resolveParams(uiParams) {
   const uiUseVolFilter = uiParams?.useVolFilter;
   const uiUseLatestClosed = uiParams?.useLatestClosed ?? uiParams?.use_latest_closed;
   const uiTimeframe = uiParams?.timeframe;
+  const uiUseRvolGate = uiParams?.useRvolGate ?? uiParams?.rvolGate;
+  const uiRvolMin = uiParams?.rvol_min ?? uiParams?.rvolMin;
 
   return {
     edge_threshold: uiEdge != null ? Number(uiEdge) : Number(dbParams.edge_threshold),
@@ -476,6 +478,8 @@ function resolveParams(uiParams) {
     horizon_days: uiHorizon != null ? Number(uiHorizon) : Number(dbParams.horizon_days),
     useVolFilter: uiUseVolFilter !== undefined ? Boolean(uiUseVolFilter) : true,
     useLatestClosed: uiUseLatestClosed === true,
+    useRvolGate: uiUseRvolGate !== undefined ? Boolean(uiUseRvolGate) : true,
+    rvol_min: uiRvolMin != null ? Number(uiRvolMin) : 1.0,
     timeframe: uiTimeframe || '1d'
   };
 }

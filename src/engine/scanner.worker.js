@@ -241,10 +241,13 @@ async function handleScan({ runId, tickers, params, timeframe }) {
         markovWindow: params.markov_window,
         volumeMult: params.volume_mult,
         horizonDays: params.horizon_days,
-        useVolFilter: params.useVolFilter
+        useVolFilter: params.useVolFilter,
+        rvolMin: params.rvol_min != null ? Number(params.rvol_min) : undefined
       });
 
-      const emit = shouldEmit(result, params.edge_threshold, params.useVolFilter);
+      const rvolGate = params.useRvolGate !== undefined ? !!params.useRvolGate : true;
+      const rvolMin = params.rvol_min != null ? Number(params.rvol_min) : 1.0;
+      const emit = shouldEmit(result, params.edge_threshold, params.useVolFilter, rvolGate, rvolMin);
 
       if (emit) {
         let mcResult = null;
@@ -315,6 +318,8 @@ async function handleScan({ runId, tickers, params, timeframe }) {
             adx: result.adx,
             bbPct: result.bbPct,
             volumeValid: result.volumeValid,
+            rvol: result.rvol,
+            rvolApproved: result.rvolApproved,
             date: result.date,
             close: precoEntrada,
             atr: atr14,
@@ -376,6 +381,8 @@ async function handleBacktest({ requestId, tickers, params, timeframe, startDate
   const volumeMult = params.volume_mult;
   const horizonDays = params.horizon_days;
   const useVolFilter = params.useVolFilter;
+  const useRvolGate = params.useRvolGate !== undefined ? !!params.useRvolGate : true;
+  const rvolMin = params.rvol_min != null ? Number(params.rvol_min) : 1.0;
 
   const list = Array.isArray(tickers) ? tickers : [];
   const simulatedTrades = [];
@@ -408,10 +415,11 @@ async function handleBacktest({ requestId, tickers, params, timeframe, startDate
         markovWindow,
         volumeMult,
         horizonDays,
-        useVolFilter
+        useVolFilter,
+        rvolMin
       });
 
-      if (shouldEmit(result, edgeThreshold, useVolFilter)) {
+      if (shouldEmit(result, edgeThreshold, useVolFilter, useRvolGate, rvolMin)) {
         const entryPrice = result.close;
         const stopLoss = result.stopLoss;
         const takeProfit = result.takeProfit;

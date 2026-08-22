@@ -1,7 +1,7 @@
 'use strict';
 
 const { rsiWilder, adxWilder, bollingerBands } = require('./indicators');
-const { buildStateSeries, NUM_STATES, SL_PCT, TP_PCT } = require('./markovEngine');
+const { buildStateSeries, buildStateReturnsMapForCandles, getNumStates, SL_PCT, TP_PCT } = require('./markovEngine');
 
 let quantEngine = null;
 try {
@@ -33,7 +33,11 @@ function sampleState(probabilities, rng = Math.random) {
   return probabilities.length - 1;
 }
 
-function buildStateReturnsMap(candles) {
+function buildStateReturnsMap(candles, stateSpace) {
+  if (stateSpace && stateSpace !== '9') {
+    return buildStateReturnsMapForCandles(candles, stateSpace);
+  }
+  const numStates = getNumStates(stateSpace || '9');
   const closes = new Array(candles.length);
   const highs = new Array(candles.length);
   const lows = new Array(candles.length);
@@ -48,13 +52,13 @@ function buildStateReturnsMap(candles) {
   const adx = adxWilder(highs, lows, closes, ADX_PERIOD);
   const bb = bollingerBands(closes, BB_PERIOD, BB_MULT);
 
-  const states = buildStateSeries(bb.pctB, rsi, adx);
+  const states = buildStateSeries(bb.pctB, rsi, adx, stateSpace || '9');
 
-  const returnsByState = Array.from({ length: NUM_STATES }, () => []);
+  const returnsByState = Array.from({ length: numStates }, () => []);
 
   for (let i = 1; i < candles.length; i++) {
     const prevState = states[i - 1];
-    if (prevState < 0) continue;
+    if (prevState < 0 || prevState >= numStates) continue;
     const prevClose = closes[i - 1];
     if (prevClose == null || prevClose <= 0) continue;
     const ret = (closes[i] - prevClose) / prevClose;
@@ -92,13 +96,89 @@ function _runLegacyLoop(transitionMatrix, returnsByState, currentState, currentP
     let exited = false;
 
     for (let d = 0; d < daysAhead; d++) {
-      state = sampleState(transitionMatrix[state], rng);
+      const row = transitionMatrix[state];
+      if (!row || row.length === 0) continue;
+      state = sampleState(row, rng);
 
       const returns = returnsByState[state];
       if (returns.length === 0) continue;
 
       const retIdx = Math.floor(rng() * returns.length);
       price = price * (1 + returns[retIdx]);
+
+      if (isShort) {
+        if (price <= tpPrice) {
+          tpHits++;
+          exited = true;
+          break;
+        }
+        if (price >= slPrice) {
+          slHits++;
+          exited = true;
+          break;
+        }
+      } else {
+        if (price >= tpPrice) {
+          tpHits++;
+          exited = true;
+          break;
+        }
+        if (price <= slPrice) {
+          slHits++;
+          exited = true;
+          break;
+        }
+      }
+    }
+
+    if (!exited) {
+      expired++;
+    }
+  }
+
+  return { tpHits, slHits, expired };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Loop de 2ª ordem – memória de 2 velas
+//
+//  Transition matrix 3D: transitions[prev2][prev1] = distribuição
+//  sobre o próximo estado. Cada par (prev2, prev1) já inclui o
+//  fallback de 1ª ordem (ver buildTransitionMatrixOrder2), pelo que
+//  não existe par sem distribuição válida.
+// ═══════════════════════════════════════════════════════════
+function _runOrder2Loop(transitionMatrix, returnsByState, prevState, currentState, currentPrice, rng, isShort, iterations, daysAhead, slPct, tpPct) {
+  const tpPrice = currentPrice * (1 + (isShort ? -tpPct : tpPct));
+  const slPrice = currentPrice * (1 + (isShort ? slPct : -slPct));
+
+  let tpHits = 0;
+  let slHits = 0;
+  let expired = 0;
+
+  for (let iter = 0; iter < iterations; iter++) {
+    let price = currentPrice;
+    let statePrev = prevState;
+    let stateCurr = currentState;
+    let exited = false;
+
+    for (let d = 0; d < daysAhead; d++) {
+      const pair = (transitionMatrix[statePrev] && transitionMatrix[statePrev][stateCurr]) || null;
+      if (!pair || pair.length === 0) {
+        // Defensivo: par sem histórico → mantém o estado (não avança)
+        if (returnsByState[stateCurr].length === 0) continue;
+        const retIdx = Math.floor(rng() * returnsByState[stateCurr].length);
+        price = price * (1 + returnsByState[stateCurr][retIdx]);
+      } else {
+        const nextState = sampleState(pair, rng);
+        statePrev = stateCurr;
+        stateCurr = nextState;
+
+        const returns = returnsByState[stateCurr];
+        if (returns.length === 0) continue;
+
+        const retIdx = Math.floor(rng() * returns.length);
+        price = price * (1 + returns[retIdx]);
+      }
 
       if (isShort) {
         if (price <= tpPrice) {
@@ -140,13 +220,26 @@ function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, 
   const slPct = opts.slPct != null ? opts.slPct : SL_PCT;
   const tpPct = opts.tpPct != null ? opts.tpPct : TP_PCT;
   const isShort = String(opts.side || 'LONG').toUpperCase() === 'SHORT';
+  const stateSpace = opts.stateSpace || '9';
+  const isOrder2 = opts.order === 2;
+  const prevState = opts.prevState != null ? Number(opts.prevState) : -1;
 
   if (!transitionMatrix || currentState < 0 || !candles || candles.length < 60 || !currentPrice || currentPrice <= 0) {
     return { winRate: 0, tpHits: 0, slHits: 0, expired: iterations, isApproved: false, mcTier: 'REJECTED', mcLabel: 'Rejeitado' };
   }
 
-  const returnsByState = buildStateReturnsMap(candles);
+  const returnsByState = buildStateReturnsMap(candles, stateSpace);
+  const rng = typeof opts.random === 'function' ? opts.random : Math.random;
 
+  // 2ª ordem usa sempre o loop JS (o módulo nativo só suporta matriz 2D).
+  if (isOrder2 && prevState >= 0) {
+    const counts = _runOrder2Loop(transitionMatrix, returnsByState, prevState, currentState, currentPrice, rng, isShort, iterations, daysAhead, slPct, tpPct);
+    const winRate = (counts.tpHits / iterations) * 100;
+    const tier = classifyMCTier(winRate);
+    return { winRate, tpHits: counts.tpHits, slHits: counts.slHits, expired: counts.expired, isApproved: tier.mcApproved, mcTier: tier.mcTier, mcLabel: tier.mcLabel };
+  }
+
+  // 1ª ordem: tenta o motor nativo (paridade) quando não há rng custom.
   if (typeof opts.random !== 'function' && quantEngine) {
     try {
       const engineOpts = { iterations, daysAhead, slPct, tpPct, side: isShort ? 'SHORT' : 'LONG' };
@@ -165,7 +258,6 @@ function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, 
     }
   }
 
-  const rng = typeof opts.random === 'function' ? opts.random : Math.random;
   const counts = _runLegacyLoop(transitionMatrix, returnsByState, currentState, currentPrice, rng, isShort, iterations, daysAhead, slPct, tpPct);
 
   const winRate = (counts.tpHits / iterations) * 100;

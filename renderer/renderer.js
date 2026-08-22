@@ -1858,7 +1858,7 @@
   }
 
   function clearTable() {
-    renderSkeletonRows('results-body', 12, 6);
+    renderSkeletonRows('results-body', 13, 6);
     scannerRows = []; // Limpar dados armazenados
     currentSort = { column: null, direction: 'asc' }; // Reset ordenação
     updateSortIndicator();
@@ -1894,6 +1894,13 @@
       <td class="col-num edge-val">${(r.edge * 100).toFixed(2)}%</td>
       <td class="col-num pStay-val">${(r.pStay * 100).toFixed(2)}%</td>
       <td class="col-vol ${r.volumeValid ? 'vol-yes' : 'vol-no'}">${r.volumeValid ? 'SIM' : 'NÃO'}</td>
+      <td class="col-rvol">${r.rvol != null ? (() => {
+        const rv = Math.round(r.rvol * 100) / 100;
+        const ok = !!r.rvolApproved;
+        const cls = ok ? 'rvol-pill rvol-ok' : 'rvol-pill rvol-weak';
+        const tip = ok ? 'RVOL(20): volume institucional confirmado (≥ 1.0)' : 'RVOL(20): sem suporte de volume (< 1.0)';
+        return '<span class="' + cls + '" title="' + escapeHtml(tip) + '" style="cursor:default">' + rv.toFixed(2) + 'x</span>';
+      })() : '—'}</td>
       <td class="col-num price-val">${r.close != null ? r.close.toFixed(2) : '—'}</td>
       <td class="col-num sl-val">${r.stopLoss != null ? r.stopLoss.toFixed(2) : '—'}</td>
       <td class="col-num tp-val">${r.takeProfit != null ? r.takeProfit.toFixed(2) : '—'}</td>

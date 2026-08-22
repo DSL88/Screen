@@ -23,12 +23,15 @@
     assetField: $('sim-asset-field'),
     direction: $('sim-direction'),
     exitMode: $('sim-exit-mode'),
+    markovOrder: $('sim-markov-order'),
+    stateSpace: $('sim-state-space'),
     stopType: $('sim-stop-type'),
     stopLoss: $('sim-stop-loss'),
     takeProfit: $('sim-take-profit'),
     trailing: $('sim-trailing'),
     trailingOffset: $('sim-trailing-offset'),
     vwapGate: $('sim-vwap-gate'),
+    rvolGate: $('sim-rvol-gate'),
     mcMin: $('sim-mc-min'),
     markovMin: $('sim-markov-min'),
     startDate: $('sim-start-date'),
@@ -320,12 +323,16 @@
     const params = {
       direction: els.direction ? els.direction.value : 'both',
       exitMode: els.exitMode ? els.exitMode.value : 'full',
+      markovOrder: Number(els.markovOrder && els.markovOrder.value) === 2 ? 2 : 1,
+      stateSpace: (els.stateSpace && els.stateSpace.value) || '9',
       stopType: els.stopType ? els.stopType.value : 'pct',
       stopLoss: toNum(els.stopLoss, 1.4),
       takeProfit: toNum(els.takeProfit, 2.8),
       trailing: !!(els.trailing && els.trailing.checked),
       trailingOffset: toNum(els.trailingOffset, 1.0),
       vwapGate: !!(els.vwapGate && els.vwapGate.checked),
+      rvolGate: !!(els.rvolGate && els.rvolGate.checked),
+      minRVOL: 1.0,
       mcMin: toNum(els.mcMin, 50),
       markovMin: toNum(els.markovMin, 55),
       startDate: els.startDate && els.startDate.value ? String(els.startDate.value).slice(0, 10) : null,
@@ -380,6 +387,17 @@
   function renderResult(result) {
     const msgs = (result.messages || []).filter(Boolean);
     if (result.cancelled) msgs.unshift('Simulação cancelada.');
+
+    // Config do motor de Markov (Passo 2): ordem + espaço de estados.
+    const meta = result.meta || {};
+    const orderLabel = Number(meta.markovOrder) === 2 ? '2ª Ordem (2 Velas)' : '1ª Ordem (1 Vela)';
+    const spaceLabel = meta.stateSpace === '3' ? '3 Estados (Bear/Neutro/Bull)'
+      : meta.stateSpace === '6' ? '6 Estados (ADX + Bollinger)'
+      : '9 Estados (ADX×Bollinger)';
+    if (meta.markovOrder != null || meta.stateSpace != null) {
+      msgs.unshift('Motor Markov: ' + orderLabel + ' · ' + spaceLabel);
+    }
+
     setStatus(msgs.join(' · '));
 
     renderKpis(result.kpis || {});

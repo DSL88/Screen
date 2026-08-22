@@ -347,6 +347,41 @@ function calculateRollingVWAP(candles, period = 20) {
   return out;
 }
 
+// ═══════════════════════════════════════════════════════════
+//  RVOL – Relative Volume (Volume Relativo)
+//
+//  RVOL_t = Volume_t / SMA_{period}(Volume)
+//
+//  A SMA do volume é calculada sobre as `period` velas ANTERIORES
+//  à vela atual (janela exclusiva), garantindo que o rácio mede a
+//  expansão de volume face à média recente, sem fugas de dados.
+//  Guarda numérica: volume vazio/nulo → 0; média zero → rvol 0 e
+//  isVolumeConfirmed false (zero erros de divisão por zero).
+// ═══════════════════════════════════════════════════════════
+function calculateRVOL(candles, period = 20) {
+  const n = candles ? candles.length : 0;
+  const fallback = { rvol: 0, isVolumeConfirmed: false, avgVolume: 0 };
+  if (!candles || n < period + 1 || period <= 0) return fallback;
+
+  const lastIdx = n - 1;
+
+  // SMA do volume nas `period` velas anteriores à vela atual
+  let sum = 0;
+  for (let i = lastIdx - period; i < lastIdx; i++) {
+    const v = Number(candles[i] && candles[i].volume);
+    sum += Number.isFinite(v) ? v : 0;
+  }
+  const avgVolume = period > 0 ? sum / period : 0;
+
+  const curVolNum = Number(candles[lastIdx] && candles[lastIdx].volume);
+  const currentVolume = Number.isFinite(curVolNum) ? curVolNum : 0;
+
+  const rvol = avgVolume > 0 ? currentVolume / avgVolume : 0;
+  const isVolumeConfirmed = avgVolume > 0 && rvol >= 1.0;
+
+  return { rvol, isVolumeConfirmed, avgVolume };
+}
+
 module.exports = {
   sma,
   ema,
@@ -357,5 +392,6 @@ module.exports = {
   adxWilder,
   bollingerBands,
   trueRange,
-  calculateRollingVWAP
+  calculateRollingVWAP,
+  calculateRVOL
 };

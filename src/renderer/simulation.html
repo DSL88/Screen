@@ -145,6 +145,7 @@
               <th class="col-num">Edge</th>
               <th class="col-num">P(Stay)</th>
               <th class="col-vol">Volume Válido</th>
+              <th class="col-rvol">RVOL</th>
               <th class="col-num">Preço</th>
               <th class="col-num">Stop (1.5×ATR)</th>
               <th class="col-num">TP (+2.5%)</th>
@@ -154,7 +155,7 @@
           </thead>
           <tbody id="results-body">
             <tr class="empty">
-              <td colspan="12">
+              <td colspan="13">
                 <div class="empty-state">
                   <div class="empty-state-icon"><svg class="icon icon-lg"><use href="#i-search"></use></svg></div>
                   <div class="empty-state-title">Sem resultados</div>
@@ -470,6 +471,25 @@
             </div>
 
             <div class="sim-group">
+              <div class="sim-group-title">Motor de Markov</div>
+              <div class="sim-field">
+                <label class="sim-label" for="sim-markov-order">Ordem de Markov</label>
+                <select id="sim-markov-order" class="sim-select">
+                  <option value="1" selected>1ª Ordem (Memória de 1 Vela)</option>
+                  <option value="2">2ª Ordem (Memória de 2 Velas)</option>
+                </select>
+              </div>
+              <div class="sim-field">
+                <label class="sim-label" for="sim-state-space">Espaço de Estados</label>
+                <select id="sim-state-space" class="sim-select">
+                  <option value="6">6 Estados (ADX + Bollinger)</option>
+                  <option value="3">3 Estados Simplificados (Bear/Neutro/Bull)</option>
+                  <option value="9" selected>9 Estados (ADX×Bollinger)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="sim-group">
               <div class="sim-group-title">Gestão de Risco</div>
               <div class="sim-field">
                 <label class="sim-label" for="sim-stop-type">Tipo de Stop</label>
@@ -505,6 +525,11 @@
                 <input type="checkbox" id="sim-vwap-gate" checked />
                 <span class="sim-checkbox"></span>
                 <span class="sim-check-label">Exigir VWAP Alinhado</span>
+              </label>
+              <label class="sim-check">
+                <input type="checkbox" id="sim-rvol-gate" checked />
+                <span class="sim-checkbox"></span>
+                <span class="sim-check-label">Filtrar por RVOL &gt;= 1.0</span>
               </label>
               <div class="sim-field">
                 <label class="sim-label" for="sim-mc-min">Monte Carlo mín. (%)</label>

@@ -4,6 +4,8 @@
 // Pipeline: 200 velas min -> VWAP20 -> Markov -> Monte Carlo 1000x 1.4%/2.8%
 // SQL offline (spec Passo 2): SELECT date, open, high, low, close, volume FROM historical_prices WHERE UPPER(TRIM(ticker)) = ? ORDER BY date DESC LIMIT 300; + .reverse() ASC
 
+const { calculateRVOL } = require('./quant/indicators');
+
 function getHistoricalPricesForScan(db, ticker) {
   if (typeof db.getHistoricalPricesForScan === 'function') {
     return db.getHistoricalPricesForScan(ticker);
@@ -33,7 +35,7 @@ async function scanStock(ticker, db, quantEngine, opts = {}) {
   const lastCandle = candles[candles.length - 1];
   const lastClose = Number(lastCandle.close);
 
-  // Gatekeeper 1: Rolling VWAP 20
+  // Gatekeeper 1A: Rolling VWAP 20
   const vwapSlice = candles.slice(-20);
   let cumVolPrice = 0;
   let cumVol = 0;
@@ -45,6 +47,18 @@ async function scanStock(ticker, db, quantEngine, opts = {}) {
   const rollingVWAP = cumVol > 0 ? (cumVolPrice / cumVol) : lastClose;
   if (lastClose <= rollingVWAP) {
     return { ticker, approved: false, reason: 'REJEITADO_VWAP', lastClose, rollingVWAP };
+  }
+
+  // Gatekeeper 1B: RVOL(20) — confirmação de volume institucional.
+  // Filtro externo configurável (desativável) que não toca na Matriz
+  // de Markov. Zero erros de divisão por zero.
+  const rvolGate = opts.rvolGate !== undefined ? !!opts.rvolGate : true;
+  const minRVOL = opts.minRVOL != null ? Number(opts.minRVOL) : 1.0;
+  const rvolRes = calculateRVOL(candles, 20);
+  const rvol = rvolRes.rvol;
+  const rvolApproved = rvolRes.avgVolume > 0 && rvol >= minRVOL;
+  if (rvolGate && !rvolApproved) {
+    return { ticker, approved: false, reason: 'REJEITADO_RVOL', rvol, rvolApproved: false, avgVolume: rvolRes.avgVolume, lastClose, rollingVWAP };
   }
 
   // Markov – tenta usar db/quantEngine, fallback para stub válido
@@ -119,6 +133,8 @@ async function scanStock(ticker, db, quantEngine, opts = {}) {
     expired: mc.expired,
     lastClose,
     rollingVWAP,
+    rvol,
+    rvolApproved,
     lastDate: lastCandle.date
   };
 }

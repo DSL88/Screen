@@ -1,11 +1,22 @@
 'use strict';
 
 const { analyzeSeries } = require('../quant/markovEngine');
+const { calculateRVOL } = require('../quant/indicators');
 const { runMarkovMonteCarloSimulation } = require('../quant/monteCarloEngine');
 
 const DEFAULT_WARMUP = 200;
 const DEFAULT_MARKOV_WINDOW = 150;
 const DEFAULT_HORIZON = 5;
+
+const SUPPORTED_STATE_SPACES = ['9', '6', '3'];
+const STATE_SPACES_SET = new Set(SUPPORTED_STATE_SPACES);
+
+// Nº de estados por espaço (mapa local para não depender de getNumStates
+// quando markovEngine é substituído por um stub nos testes).
+const STATE_SPACE_SIZES = { '9': 9, '6': 6, '3': 3 };
+function numStatesFor(stateSpace) {
+  return STATE_SPACE_SIZES[String(stateSpace)] || 9;
+}
 
 function round1(v) {
   return Math.round(v * 10) / 10;
@@ -32,7 +43,10 @@ function evaluateSignal(candles, i, cfg) {
   const result = analyzeSeries(slice, {
     markovWindow: cfg.markovWindow,
     useVolFilter: false,
-    horizonDays: cfg.horizonDays
+    horizonDays: cfg.horizonDays,
+    rvolMin: cfg.minRVOL,
+    markovOrder: cfg.markovOrder,
+    stateSpace: cfg.stateSpace
   });
 
   if (!result || result.close == null) return null;
@@ -52,6 +66,14 @@ function evaluateSignal(candles, i, cfg) {
     if (dir === 'VENDA' && result.close >= result.rollingVwap20) return null;
   }
 
+  // Gatekeeper RVOL(20) — confirmação de volume institucional.
+  // Aplicado a sinais de COMPRA, configurabil e desativável.
+  if (cfg.rvolGate && dir === 'COMPRA') {
+    const rvolApproved = result.rvolApproved != null ? result.rvolApproved
+      : (() => { const r = calculateRVOL(slice, 20); return r.avgVolume > 0 && r.rvol >= (cfg.minRVOL ?? 1.0); })();
+    if (!rvolApproved) return null;
+  }
+
   // Probabilidade mínima de Monte Carlo (%)
   if (!result.transitionMatrix || result.currentState < 0) return null;
   const slFrac = cfg.stopType === 'atr' && result.atr
@@ -65,7 +87,14 @@ function evaluateSignal(candles, i, cfg) {
     result.currentState,
     slice,
     result.close,
-    { slPct: slFrac, tpPct: tpFrac, side: dir === 'COMPRA' ? 'LONG' : 'SHORT' }
+    {
+      slPct: slFrac,
+      tpPct: tpFrac,
+      side: dir === 'COMPRA' ? 'LONG' : 'SHORT',
+      order: cfg.markovOrder,
+      prevState: result.prevState,
+      stateSpace: cfg.stateSpace
+    }
   );
   if (!mc || mc.winRate < cfg.mcMinPct) return null;
 
@@ -98,6 +127,8 @@ async function runSimulation(options) {
     trailingStop: !!(params.trailingStop ?? params.trailing),
     trailingOffsetPct: Number(params.trailingOffsetPct ?? params.trailingOffset) || 0,
     vwapGate: params.vwapGate !== undefined ? !!params.vwapGate : true,
+    rvolGate: params.rvolGate !== undefined ? !!params.rvolGate : true,
+    minRVOL: (params.minRVOL ?? params.rvolMin) != null ? Number(params.minRVOL ?? params.rvolMin) : 1.0,
     mcMinPct: (params.mcMinPct ?? params.mcMin) != null ? Number(params.mcMinPct ?? params.mcMin) : 50,
     markovMinPct: (params.markovMinPct ?? params.markovMin) != null ? Number(params.markovMinPct ?? params.markovMin) : 55,
     startDate: String(params.startDate || '').slice(0, 10),
@@ -108,7 +139,9 @@ async function runSimulation(options) {
     slippagePct: Number(params.slippagePct ?? params.slippage) || 0,
     warmup: Number(params.warmup) || DEFAULT_WARMUP,
     markovWindow: Number(params.markovWindow) || DEFAULT_MARKOV_WINDOW,
-    horizonDays: Number(params.horizonDays) || DEFAULT_HORIZON
+    horizonDays: Number(params.horizonDays) || DEFAULT_HORIZON,
+    markovOrder: Number(params.markovOrder) === 2 ? 2 : 1,
+    stateSpace: (STATE_SPACES_SET.has(String(params.stateSpace)) ? String(params.stateSpace) : '9')
   };
 
   const messages = [];
@@ -182,7 +215,12 @@ async function runSimulation(options) {
       benchmark: [],
       drawdownSeries: [{ date: cfg.startDate, value: 0 }],
       trades: [],
-      messages
+      messages,
+      meta: {
+        markovOrder: cfg.markovOrder,
+        stateSpace: cfg.stateSpace,
+        numStates: numStatesFor(cfg.stateSpace)
+      }
     };
   }
 
@@ -428,7 +466,12 @@ async function runSimulation(options) {
     benchmark: buildBenchmark(assets, allDates, initialCapital),
     drawdownSeries,
     trades,
-    messages
+    messages,
+    meta: {
+      markovOrder: cfg.markovOrder,
+      stateSpace: cfg.stateSpace,
+      numStates: numStatesFor(cfg.stateSpace)
+    }
   };
 }
 
@@ -526,24 +569,29 @@ function calculateKPIs(trades, equityCurve, initialCapital) {
 let __nativeForBacktester = null;
 try { __nativeForBacktester = require('../native'); } catch (_) {}
 
-function calculateMarkovMatrix(candles) {
+function calculateMarkovMatrix(candles, options = {}) {
   try {
     const me = require('../quant/markovEngine');
     const ind = require('../quant/indicators');
+    const stateSpace = STATE_SPACES_SET.has(String(options.stateSpace)) ? String(options.stateSpace) : '9';
+    const markovOrder = Number(options.markovOrder) === 2 ? 2 : 1;
     const closes = candles.map(c=>c.close);
     const highs = candles.map(c=>c.high);
     const lows = candles.map(c=>c.low);
     const rsi = ind.rsiWilder(closes, 21);
     const adx = ind.adxWilder(highs, lows, closes, 14);
     const bb = ind.bollingerBands(closes, 30, 2);
-    const { buildStateSeries, buildTransitionMatrix } = me;
-    const states = buildStateSeries(bb.pctB, rsi, adx);
-    const matrix = buildTransitionMatrix(states, 150);
+    const { buildStateSeries, buildTransitionMatrix, buildTransitionMatrixOrder2, getNumStates } = me;
+    const states = buildStateSeries(bb.pctB, rsi, adx, stateSpace);
+    const matrix = markovOrder === 2
+      ? buildTransitionMatrixOrder2(states, 150, stateSpace)
+      : buildTransitionMatrix(states, 150, stateSpace);
     const currentState = states[states.length-1];
+    const prevState = states[states.length-2];
     const { buildStateReturnsMap } = require('../quant/monteCarloEngine');
-    const stateReturns = buildStateReturnsMap(candles);
-    if (currentState <0) return { isValid: false };
-    return { isValid: true, transitionMatrix: matrix, stateReturns, currentState };
+    const stateReturns = buildStateReturnsMap(candles, stateSpace);
+    if (currentState < 0) return { isValid: false };
+    return { isValid: true, transitionMatrix: matrix, stateReturns, currentState, prevState, order: markovOrder, stateSpace, numStates: getNumStates(stateSpace) };
   } catch (_) {
     return { isValid: false };
   }
@@ -558,6 +606,10 @@ class BacktesterEngine {
     this.takeProfitPct = Number(config.takeProfit || 2.8) / 100;
     this.direction = config.direction || 'BOTH';
     this.minMCWinRate = Number(config.minMCWinRate || 50);
+    this.minRVOL = (config.minRVOL ?? config.rvolMin) != null ? Number(config.minRVOL ?? config.rvolMin) : 1.0;
+    this.rvolGate = config.rvolGate !== undefined ? !!config.rvolGate : true;
+    this.markovOrder = Number(config.markovOrder) === 2 ? 2 : 1;
+    this.stateSpace = STATE_SPACES_SET.has(String(config.stateSpace)) ? String(config.stateSpace) : '9';
     this.trades = [];
     this.equityCurve = [];
   }
@@ -644,22 +696,41 @@ class BacktesterEngine {
     if ((this.direction === 'LONG' || this.direction === 'BOTH') && lastClose > rollingVWAP) targetDirection = 'LONG';
     else if ((this.direction === 'SHORT' || this.direction === 'BOTH') && lastClose < rollingVWAP) targetDirection = 'SHORT';
     if (!targetDirection) return null;
-    const markov = calculateMarkovMatrix(slice);
+
+    // Gatekeeper RVOL(20) — confirmação de volume institucional (LONG).
+    if (this.rvolGate && targetDirection === 'LONG') {
+      const r = calculateRVOL(slice, 20);
+      if (r.avgVolume <= 0 || r.rvol < this.minRVOL) return null;
+    }
+
+    const markov = calculateMarkovMatrix(slice, { markovOrder: this.markovOrder, stateSpace: this.stateSpace });
     if (!markov || !markov.isValid) return null;
-    const qe = quantEngine || __nativeForBacktester;
-    if (!qe || typeof qe.runMonteCarlo !== 'function') return null;
-    // Spec signature: runMonteCarlo(matrix, stateReturns, currentState, lastClose, 1000, 20, sl, tp)
-    // Native signature: runMonteCarlo(matrix, returns, state, price, opts)
     let mc = null;
-    try {
-      if (qe.runMonteCarlo.length >= 8) {
-        mc = qe.runMonteCarlo(markov.transitionMatrix, markov.stateReturns, markov.currentState, lastClose, 1000, 20, this.stopLossPct, this.takeProfitPct);
-      } else {
-        mc = qe.runMonteCarlo(markov.transitionMatrix, markov.stateReturns, markov.currentState, lastClose, { iterations: 1000, daysAhead: 20, slPct: this.stopLossPct, tpPct: this.takeProfitPct });
-        // normaliza winRateMC
+    // 2ª ordem: o motor nativo/spec só suporta matriz 2D, por isso delega
+    // no motor JS de Monte Carlo (com suporte a memória de 2 velas).
+    if (markov.order === 2) {
+      try {
+        mc = runMarkovMonteCarloSimulation(markov.transitionMatrix, markov.currentState, slice, lastClose, {
+          slPct: this.stopLossPct, tpPct: this.takeProfitPct, side: targetDirection,
+          order: 2, prevState: markov.prevState, stateSpace: markov.stateSpace
+        });
         if (mc && mc.winRate != null && mc.winRateMC == null) mc.winRateMC = mc.winRate;
-      }
-    } catch (_) { mc = null; }
+      } catch (_) { mc = null; }
+    } else {
+      const qe = quantEngine || __nativeForBacktester;
+      if (!qe || typeof qe.runMonteCarlo !== 'function') return null;
+      // Spec signature: runMonteCarlo(matrix, stateReturns, currentState, lastClose, 1000, 20, sl, tp)
+      // Native signature: runMonteCarlo(matrix, returns, state, price, opts)
+      try {
+        if (qe.runMonteCarlo.length >= 8) {
+          mc = qe.runMonteCarlo(markov.transitionMatrix, markov.stateReturns, markov.currentState, lastClose, 1000, 20, this.stopLossPct, this.takeProfitPct);
+        } else {
+          mc = qe.runMonteCarlo(markov.transitionMatrix, markov.stateReturns, markov.currentState, lastClose, { iterations: 1000, daysAhead: 20, slPct: this.stopLossPct, tpPct: this.takeProfitPct });
+          // normaliza winRateMC
+          if (mc && mc.winRate != null && mc.winRateMC == null) mc.winRateMC = mc.winRate;
+        }
+      } catch (_) { mc = null; }
+    }
     if (!mc) return null;
     const winRateMC = mc.winRateMC != null ? mc.winRateMC : (mc.winRate != null ? mc.winRate : 0);
     if (winRateMC >= this.minMCWinRate) {
