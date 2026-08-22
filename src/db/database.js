@@ -118,6 +118,7 @@ class DB {
           volume        INTEGER NOT NULL,
           PRIMARY KEY (ticker, date)
         );
+        CREATE INDEX IF NOT EXISTS idx_ticker_date ON historical_prices (ticker, date);
         CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date);
         CREATE INDEX IF NOT EXISTS idx_historical_prices_ticker_date_asc ON historical_prices (ticker, date ASC);
         CREATE INDEX IF NOT EXISTS idx_hist_ticker_date_desc ON historical_prices (ticker, date DESC);

@@ -59,6 +59,8 @@ function isRateLimitError(err) {
 
 // Retry genérico com backoff exponencial + jitter; delay duplicado em 429.
 // opts.sleepFn injetável para testes determinísticos.
+// Spec 1.2 (PASSO 1) exige assinatura fetchWithRetry(fn, retries=3, baseDelay=500) com jitter 250 e log "[Yahoo Sync]"
+// Mantida compatibilidade: fetchWithBackoff(fn, opts) continua disponível para código existente.
 async function fetchWithBackoff(fn, opts = {}) {
   const retries = opts.retries ?? 3;
   const baseDelay = opts.baseDelay ?? 500;
@@ -75,6 +77,22 @@ async function fetchWithBackoff(fn, opts = {}) {
       const delay = (isRateLimit ? baseDelay * 2 : baseDelay) * Math.pow(2, attempt - 1) + jitter;
       console.warn(`[yahooClient] Tentativa ${attempt}/${retries} falhou${isRateLimit ? ' (RATE LIMIT)' : ''}. A aguardar ${delay}ms... Motivo: ${msg}`);
       await sleepFn(delay);
+    }
+  }
+}
+
+// Spec 1.2 – assinatura exata do prompt (compatível com fetchWithBackoff)
+async function fetchWithRetrySpec(fn, retries = 3, baseDelay = 500) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const isRateLimit = error.message && (error.message.includes('429') || error.message.includes('Too Many Requests'));
+      if (attempt === retries) throw error;
+      const jitter = Math.floor(Math.random() * 250);
+      const delay = (baseDelay * Math.pow(2, attempt - 1)) + jitter;
+      console.warn(`[Yahoo Sync] Tentativa ${attempt} falhou para o pedido. A aguardar ${delay}ms... Motivo: ${error.message}`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
 }
@@ -225,7 +243,15 @@ function validateStockActivity(candles, ticker) {
   return true;
 }
 
-async function fetchWithRetry(ticker, timeframe = '1d', attempts = 3, customPeriod1 = null) {
+async function fetchWithRetry(tickerOrFn, timeframe = '1d', attempts = 3, customPeriod1 = null) {
+  // Spec 1.2 compat: fetchWithRetry(fn, retries=3, baseDelay=500)
+  if (typeof tickerOrFn === 'function') {
+    const fn = tickerOrFn;
+    const retries = typeof timeframe === 'number' ? timeframe : 3;
+    const baseDelay = typeof attempts === 'number' ? attempts : 500;
+    return fetchWithRetrySpec(fn, retries, baseDelay);
+  }
+  const ticker = tickerOrFn;
   const period1 = customPeriod1 || new Date();
 
   if (!customPeriod1) {
@@ -786,10 +812,35 @@ async function syncTickersBatch(tickers, options = {}) {
     if (lastDate) return fetchIncrementalYahooHistory(ticker, lastDate, { throwOnError: true });
     return fetchFullHistoryFromIPO(ticker);
   };
-  const fetchOne = typeof options.fetchOne === 'function' ? options.fetchOne : defaultFetchOne;
+  // Compat: spec usa options.fetchMethod(ticker, lastDate) + networkLimit
+  const hasFetchMethod = typeof options.fetchMethod === 'function';
+  const fetchOne = hasFetchMethod ? options.fetchMethod : (typeof options.fetchOne === 'function' ? options.fetchOne : defaultFetchOne);
 
   // Comparação lexicográfica segura para datas 'YYYY-MM-DD'
   const normDay = d => (d ? String(d).slice(0, 10) : null);
+
+  // Spec 1.3: quando fetchMethod é fornecido, orquestração via networkLimit (5 simultâneos)
+  if (hasFetchMethod) {
+    const tasks = list.map(ticker => networkLimit(async () => {
+      try {
+        const lastDateRaw = await getLastDate(ticker);
+        const lastDate = normDay(lastDateRaw);
+        if (!lastDate && !forceFull) {
+          return { ticker, status: 'SKIPPED_NO_DATE' };
+        }
+        const expectedDate = expectedTradingDay;
+        if (lastDate && expectedDate && lastDate >= expectedDate) {
+          return { ticker, status: 'ALREADY_UP_TO_DATE' };
+        }
+        const candles = await fetchWithRetrySpec(() => fetchOne(ticker, lastDate));
+        return { ticker, candles, status: 'SUCCESS' };
+      } catch (err) {
+        console.error(`[Yahoo Error] ${ticker}:`, err.message);
+        return { ticker, status: 'ERROR', error: err.message };
+      }
+    }));
+    return await Promise.all(tasks);
+  }
 
   const tasks = list.map(rawTicker => async () => {
     const ticker = typeof rawTicker === 'string' ? rawTicker.trim() : rawTicker;
@@ -831,4 +882,4 @@ async function syncTickersBatch(tickers, options = {}) {
   return Promise.all(tasks.map(run => run()));
 }
 
-module.exports = { fetchWithRetry, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory, buildIncrementalPeriod1, fetchFirstTradeDate, fetchHistorySince, fetchFirstAvailableDate, fetchFullHistoryFromIPO, networkLimit, fetchWithBackoff, syncTickersBatch };
+module.exports = { fetchWithRetry, fetchWithRetrySpec, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory, fetchIncrementalCandles: fetchIncrementalYahooHistory, buildIncrementalPeriod1, fetchFirstTradeDate, fetchHistorySince, fetchFirstAvailableDate, fetchFullHistoryFromIPO, networkLimit, fetchWithBackoff, syncTickersBatch };

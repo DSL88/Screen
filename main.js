@@ -84,6 +84,23 @@ function operationStatus(total, errors, cancelled, processed = total, successful
   return processed > 0 ? 'partial' : 'failed';
 }
 
+// Spec 3.1 – Throttling IPC 100ms (PASSO 1)
+let processedCount = 0;
+let lastEmitTime = Date.now();
+function emitThrottledProgress(sender, channel, data) {
+  processedCount++;
+  const now = Date.now();
+  if (now - lastEmitTime > 100 || processedCount === data.total) {
+    sender.send(channel, {
+      current: processedCount,
+      total: data.total,
+      ticker: data.ticker,
+      status: data.status
+    });
+    lastEmitTime = now;
+  }
+}
+
 function indexInput(value) {
   if (value && typeof value === 'object') {
     return {
@@ -1343,6 +1360,40 @@ app.whenReady().then(async () => {
       } catch (err) {
         return { ok: false, error: err.message || String(err) };
       }
+    });
+
+    // Spec 3.2 – Handler consolidado sync-incremental-batch (PASSO 1)
+    ipcMain.handle('sync-incremental-batch', async (event, { tickers, expectedTradingDay }) => {
+      processedCount = 0;
+      lastEmitTime = Date.now();
+      const total = Array.isArray(tickers) ? tickers.length : 0;
+      const allCandlesToInsert = [];
+      const updatedTickers = [];
+
+      const results = await yahooClient.syncTickersBatch(tickers, {
+        expectedTradingDay,
+        getLastDate: (t) => db.getLastStoredDate(t),
+        fetchMethod: (t, lastDate) => yahooClient.fetchIncrementalYahooHistory(t, lastDate, { throwOnError: true })
+      });
+
+      for (const res of results) {
+        if (res.status === 'SUCCESS' && res.candles && res.candles.length > 0) {
+          allCandlesToInsert.push(...res.candles.map(c => ({ ...c, ticker: res.ticker })));
+          updatedTickers.push(res.ticker);
+        }
+        emitThrottledProgress(event.sender, 'SYNC_PROGRESS', { total, ticker: res.ticker, status: res.status });
+      }
+
+      if (allCandlesToInsert.length > 0) {
+        db.saveBulkHistoricalCandles(allCandlesToInsert);
+      }
+
+      return {
+        success: true,
+        totalProcessed: total,
+        updatedCount: updatedTickers.length,
+        updatedTickers
+      };
     });
 
     ipcMain.handle('download-full-yahoo-history', async (_event, payload) => {
