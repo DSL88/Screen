@@ -26,7 +26,7 @@ const ALLOWED_EVENTS = new Set([
   'simulation:error'
 ]);
 
-contextBridge.exposeInMainWorld('api', {
+const apiBridge = {
   startScan: (tickers, params) => ipcRenderer.invoke('scan:start', { tickers, params }),
   cancelScan: (runId) => ipcRenderer.invoke('scan:cancel', { runId }),
   cancelIndexOperation: (operationId) => ipcRenderer.invoke('index:cancel', { operationId }),
@@ -151,6 +151,11 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('simulation:result', handler);
     return () => ipcRenderer.removeListener('simulation:result', handler);
   },
+  onSimulationComplete: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('simulation:result', handler);
+    return () => ipcRenderer.removeListener('simulation:result', handler);
+  },
   onSimulationError: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('simulation:error', handler);
@@ -164,4 +169,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on(channel, handler);
     return () => ipcRenderer.removeListener(channel, handler);
   }
-});
+};
+
+contextBridge.exposeInMainWorld('api', apiBridge);
+contextBridge.exposeInMainWorld('electronAPI', apiBridge);
+
