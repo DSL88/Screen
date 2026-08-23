@@ -49,10 +49,12 @@ function expectedValuePct(winRate, tpPct, slPct) {
 function zeroedResult(iterations, tpPct, slPct) {
   return {
     winRate: 0,
+    winRateMC: 0,
     tpHits: 0,
     slHits: 0,
     expired: iterations,
     isApproved: false,
+    mcApproved: false,
     mcTier: 'REJECTED',
     mcLabel: 'Rejeitado',
     expectedValue: expectedValuePct(0, tpPct, slPct)
@@ -71,8 +73,6 @@ function runMonteCarloJSFallback(matrix, returnsByState, currentState, startPric
     return zeroedResult(iterations, tpPct, slPct);
   }
 
-  // LONG:  TP acima (1+tpPct) / SL abaixo (1-slPct)
-  // SHORT: TP abaixo (1-tpPct) / SL acima (1+slPct)
   const tpPrice = startPrice * (1 + (isShort ? -tpPct : tpPct));
   const slPrice = startPrice * (1 + (isShort ? slPct : -slPct));
 
@@ -142,15 +142,13 @@ function runMonteCarloJSFallback(matrix, returnsByState, currentState, startPric
 }
 
 module.exports = {
+  isNative: () => nativeModule !== null,
   isNativeAvailable: () => nativeModule !== null,
-  // Compat Passo 4: suporta spec (matrix, returns, state, price, iterations, horizon, sl, tp)
-  // e legacy opts object. Detecta pelo tipo do 5º argumento.
   runMonteCarlo(matrix, returnsByState, currentState, startPrice, a, b, c, d) {
     let opts = {};
     if (typeof a === 'object' && a !== null) {
       opts = a;
     } else if (typeof a === 'number' || typeof b === 'number') {
-      // spec 8-args
       opts = {
         iterations: typeof a === 'number' ? a : MC_ITERATIONS,
         daysAhead: typeof b === 'number' ? b : MC_DAYS_AHEAD,
@@ -159,7 +157,6 @@ module.exports = {
       };
     }
     if (nativeModule) {
-      // Se spec 8-args, encaminha direto com 8 args para evitar conversão opts->nativo
       if (typeof a === 'number') {
         return nativeModule.runMonteCarlo(matrix, returnsByState, currentState, startPrice, opts.iterations, opts.daysAhead, opts.slPct, opts.tpPct);
       }

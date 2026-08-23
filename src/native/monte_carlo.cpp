@@ -2,7 +2,7 @@
 //  monte_carlo.cpp – Motor de Monte Carlo nativo
 //
 //  RNG determinístico: mulberry32 canónico (bit-a-bit idêntico ao JS)
-//  RNG rápido (sem seed): mt19937_64 semeado por random_device
+//  RNG rápido (sem seed): FastRng (SplitMix64 / mt19937_64)
 //
 //  Ordem de draws por dia (paridade com src/quant/monteCarloEngine.js):
 //    1º draw → transição de estado (sampleState, SEMPRE)
@@ -20,11 +20,6 @@ inline uint32_t imul(uint32_t x, uint32_t y) {
 }
 
 // mulberry32 — implementação fiel do canónico JS:
-//   function mulberry32(a){return function(){
-//     a|=0; a=a+0x6D2B79F5|0;
-//     var t=Math.imul(a^a>>>15,1|a);
-//     t=t+Math.imul(t^(t>>>7),61|t)^t;
-//     return((t^(t>>>14))>>>0)/4294967296}}
 struct Mulberry32 {
   uint32_t a_;
   explicit Mulberry32(uint32_t seed) : a_(seed) {}
@@ -40,9 +35,7 @@ struct Mulberry32 {
   inline double next() { return static_cast<double>(nextU32()) / 4294967296.0; }
 };
 
-// Caminho rápido sem seed: SplitMix64 (muito mais leve que mt19937_64)
-// → double em [0, 1) com 53 bits. Estatisticamente equivalente; o caminho
-// determinístico (com seed) continua a usar Mulberry32 para paridade JS.
+// Caminho rápido sem seed: SplitMix64
 inline uint64_t splitmix64(uint64_t& s) {
   s += 0x9E3779B97F4A7C15ull;
   uint64_t z = s;
@@ -64,10 +57,6 @@ struct FastRng {
   }
 };
 
-// Paridade com sampleState() do JS: primeiro índice com r <= acumulado,
-// fallback último índice. As acumuladas são pré-calculadas UMA vez por
-// chamada com exatamente a mesma ordem de somas sequenciais → decisões
-// bit-idênticas às do cálculo on-the-fly.
 inline void buildCumulativeRows(const std::vector<std::vector<double>>& matrix,
                                 std::vector<std::vector<double>>& out) {
   out.assign(matrix.size(), {});
@@ -90,7 +79,7 @@ inline size_t sampleState(const std::vector<double>& cum, double r) {
 }
 
 template <typename Rng>
-void simulate(MonteCarloResult& result,
+void simulate(MonteCarloNativeResult& result,
               const std::vector<std::vector<double>>& cumRows,
               const std::vector<std::vector<double>>& matrix,
               const std::vector<std::vector<double>>& returnsByState,
@@ -102,7 +91,6 @@ void simulate(MonteCarloResult& result,
               double tpPct,
               bool isShort,
               Rng& rng) {
-  // TP/SL fixos sobre o preço de entrada, calculados uma vez (paridade JS)
   const double tpPrice = startPrice * (1.0 + (isShort ? -tpPct : tpPct));
   const double slPrice = startPrice * (1.0 + (isShort ? slPct : -slPct));
 
@@ -119,18 +107,17 @@ void simulate(MonteCarloResult& result,
     bool exited = false;
 
     for (int d = 0; d < daysAhead; ++d) {
-      // Defensivo: linha de transição vazia/malformada (input ragged)
       if (state >= cumRows.size() || cumRows[state].empty()) continue;
       state = sampleState(cumRows[state], rng.next());
       if (state >= numMatrixRows) state = numMatrixRows - 1;
 
-      if (state >= numReturnRows) continue; // defensivo: sem linha de retornos
+      if (state >= numReturnRows) continue;
       const std::vector<double>& returns = returnsByState[state];
-      if (returns.empty()) continue; // linha vazia → NÃO consome draw de retorno
+      if (returns.empty()) continue;
 
       size_t idx = static_cast<size_t>(
           rng.next() * static_cast<double>(returns.size()));
-      if (idx >= returns.size()) idx = returns.size() - 1; // clamp defensivo
+      if (idx >= returns.size()) idx = returns.size() - 1;
       price *= (1.0 + returns[idx]);
 
       if (isShort) {
@@ -148,7 +135,7 @@ void simulate(MonteCarloResult& result,
 
 } // namespace
 
-MonteCarloResult runMonteCarloSimulationNative(
+MonteCarloNativeResult runMonteCarloSimulationNative(
     const std::vector<std::vector<double>>& matrix,
     const std::vector<std::vector<double>>& returnsByState,
     int currentState,
@@ -160,7 +147,7 @@ MonteCarloResult runMonteCarloSimulationNative(
     const char* side,
     bool useSeed,
     uint32_t seed) {
-  MonteCarloResult result;
+  MonteCarloNativeResult result;
   result.mcTier = "REJECTED";
   result.mcLabel = "Rejeitado";
 
@@ -174,7 +161,6 @@ MonteCarloResult runMonteCarloSimulationNative(
     return result;
   }
 
-  // Side case-insensitive (paridade com String(side).toUpperCase())
   bool isShort = false;
   if (side != nullptr) {
     char c0 = side[0];
@@ -184,8 +170,6 @@ MonteCarloResult runMonteCarloSimulationNative(
   size_t startState = static_cast<size_t>(currentState);
   if (startState >= matrix.size()) startState = matrix.size() - 1;
 
-  // Acumuladas pré-calculadas 1× por chamada (paridade bit-exata: mesma
-  // ordem de somas do sampleState on-the-fly que o fallback JS replica)
   std::vector<std::vector<double>> cumRows;
   buildCumulativeRows(matrix, cumRows);
 
@@ -201,17 +185,21 @@ MonteCarloResult runMonteCarloSimulationNative(
 
   result.winRate = (static_cast<double>(result.tpHits) /
                     static_cast<double>(iterations)) * 100.0;
+  result.winRateMC = result.winRate;
 
   if (result.winRate >= 65.0) {
     result.mcApproved = true;
+    result.isApproved = true;
     result.mcTier = "ELITE";
     result.mcLabel = "Alta Probabilidade";
   } else if (result.winRate >= 50.0) {
     result.mcApproved = true;
+    result.isApproved = true;
     result.mcTier = "MODERATE";
     result.mcLabel = "Probabilidade Moderada";
   } else {
     result.mcApproved = false;
+    result.isApproved = false;
     result.mcTier = "REJECTED";
     result.mcLabel = "Rejeitado";
   }
@@ -220,4 +208,27 @@ MonteCarloResult runMonteCarloSimulationNative(
   result.expectedValue = ((wr * tpPct) - ((1.0 - wr) * slPct)) * 100.0;
 
   return result;
+}
+
+MonteCarloNativeResult runMonteCarloFast(
+    const std::vector<std::vector<double>>& transitionMatrix,
+    const std::vector<std::vector<double>>& stateReturns,
+    int currentState,
+    double startPrice,
+    int iterations,
+    int horizonDays,
+    double stopLossPct,
+    double takeProfitPct) {
+  return runMonteCarloSimulationNative(
+      transitionMatrix,
+      stateReturns,
+      currentState,
+      startPrice,
+      iterations,
+      horizonDays,
+      stopLossPct,
+      takeProfitPct,
+      "LONG",
+      false,
+      0);
 }

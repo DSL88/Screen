@@ -15,18 +15,22 @@
 #include <string>
 #include <vector>
 
-struct MonteCarloResult {
+struct MonteCarloNativeResult {
   double winRate = 0.0;
+  double winRateMC = 0.0;
+  bool mcApproved = false;
+  bool isApproved = false;
+  std::string mcTier;
+  std::string mcLabel;
   int tpHits = 0;
   int slHits = 0;
   int expired = 0;
-  bool mcApproved = false;
-  std::string mcTier;
-  std::string mcLabel;
   double expectedValue = 0.0;
 };
 
-MonteCarloResult runMonteCarloSimulationNative(
+using MonteCarloResult = MonteCarloNativeResult;
+
+MonteCarloNativeResult runMonteCarloSimulationNative(
     const std::vector<std::vector<double>>& matrix,        // 9×9
     const std::vector<std::vector<double>>& returnsByState, // ragged, 9 linhas
     int currentState,
@@ -39,8 +43,17 @@ MonteCarloResult runMonteCarloSimulationNative(
     bool useSeed,
     uint32_t seed);
 
-// Spec Passo 4 – assinatura simplificada (8 args, LONG implícito)
-inline MonteCarloResult runMonteCarloSimulationNative(
+MonteCarloNativeResult runMonteCarloFast(
+    const std::vector<std::vector<double>>& transitionMatrix,
+    const std::vector<std::vector<double>>& stateReturns,
+    int currentState,
+    double startPrice,
+    int iterations = 1000,
+    int horizonDays = 20,
+    double stopLossPct = 0.014,
+    double takeProfitPct = 0.028);
+
+inline MonteCarloNativeResult runMonteCarloSimulationNative(
     const std::vector<std::vector<double>>& transitionMatrix,
     const std::vector<std::vector<double>>& stateReturns,
     int currentState,

@@ -4,6 +4,9 @@ const { analyzeSeries } = require('../quant/markovEngine');
 const { calculateRVOL } = require('../quant/indicators');
 const { runMarkovMonteCarloSimulation } = require('../quant/monteCarloEngine');
 
+let __nativeForBacktester = null;
+try { __nativeForBacktester = require('../native'); } catch (_) {}
+
 const DEFAULT_WARMUP = 200;
 const DEFAULT_MARKOV_WINDOW = 150;
 const DEFAULT_HORIZON = 5;
@@ -28,6 +31,74 @@ function round2(v) {
 
 function toTime(iso) {
   return new Date(String(iso).slice(0, 10) + 'T00:00:00Z').getTime();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Pré-cálculo rápido de Rolling VWAP(20) com janela deslizante O(N)
+// ═══════════════════════════════════════════════════════════
+function precalculateRollingVWAP(candles, windowSize = 20) {
+  const len = candles.length;
+  const vwapArray = new Float64Array(len);
+  let sumVolPrice = 0;
+  let sumVol = 0;
+
+  for (let i = 0; i < len; i++) {
+    const c = candles[i];
+    const tp = (Number(c.high) + Number(c.low) + Number(c.close)) / 3.0;
+    const vol = Number(c.volume) || 0;
+    sumVolPrice += tp * vol;
+    sumVol += vol;
+
+    if (i >= windowSize) {
+      const old = candles[i - windowSize];
+      const oldTp = (Number(old.high) + Number(old.low) + Number(old.close)) / 3.0;
+      const oldVol = Number(old.volume) || 0;
+      sumVolPrice -= oldTp * oldVol;
+      sumVol -= oldVol;
+    }
+
+    vwapArray[i] = sumVol > 0 ? (sumVolPrice / sumVol) : Number(c.close);
+  }
+  return vwapArray;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Pré-cálculo rápido de vetores de indicadores por ativo
+// ═══════════════════════════════════════════════════════════
+function precomputeAssetIndicators(candles, cfg) {
+  const n = candles.length;
+  const closes = new Float64Array(n);
+  const highs = new Float64Array(n);
+  const lows = new Float64Array(n);
+  const volumes = new Float64Array(n);
+  const vwap = precalculateRollingVWAP(candles, 20);
+  const rvolApproved = new Uint8Array(n);
+
+  for (let i = 0; i < n; i++) {
+    const c = candles[i];
+    closes[i] = Number(c.close);
+    highs[i] = Number(c.high);
+    lows[i] = Number(c.low);
+    volumes[i] = Number(c.volume) || 0;
+  }
+
+  // RVOL(20)
+  const minRvol = cfg && (cfg.minRVOL ?? cfg.rvolMin) != null ? Number(cfg.minRVOL ?? cfg.rvolMin) : 1.0;
+  for (let i = 0; i < n; i++) {
+    if (i < 20) {
+      rvolApproved[i] = 1;
+    } else {
+      let sumVol = 0;
+      for (let k = i - 20; k < i; k++) {
+        sumVol += volumes[k];
+      }
+      const avgVol = sumVol / 20;
+      const rvolVal = avgVol > 0 ? volumes[i] / avgVol : 1.0;
+      rvolApproved[i] = (avgVol > 0 && rvolVal >= minRvol) ? 1 : 0;
+    }
+  }
+
+  return { closes, highs, lows, volumes, vwap, rvolApproved };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -60,14 +131,13 @@ function evaluateSignal(candles, i, cfg) {
   if (dir === 'COMPRA' && result.pBull * 100 < cfg.markovMinPct) return null;
   if (dir === 'VENDA' && result.pBear * 100 < cfg.markovMinPct) return null;
 
-  // Gatekeeper Rolling VWAP(20)
+  // Gatekeeper 1: Rolling VWAP(20) — verificação antecipada pré-Monte Carlo
   if (cfg.vwapGate && result.rollingVwap20 != null && result.close != null) {
     if (dir === 'COMPRA' && result.close <= result.rollingVwap20) return null;
     if (dir === 'VENDA' && result.close >= result.rollingVwap20) return null;
   }
 
-  // Gatekeeper RVOL(20) — confirmação de volume institucional.
-  // Aplicado a sinais de COMPRA, configurabil e desativável.
+  // Gatekeeper 2: RVOL(20) — confirmação de volume institucional antes do Monte Carlo
   if (cfg.rvolGate && dir === 'COMPRA') {
     const rvolApproved = result.rvolApproved != null ? result.rvolApproved
       : (() => { const r = calculateRVOL(slice, 20); return r.avgVolume > 0 && r.rvol >= (cfg.minRVOL ?? 1.0); })();
@@ -82,6 +152,7 @@ function evaluateSignal(candles, i, cfg) {
   const tpFrac = cfg.stopType === 'atr' && result.atr
     ? (result.atr * cfg.takeProfit) / result.close
     : cfg.takeProfit / 100;
+
   const mc = runMarkovMonteCarloSimulation(
     result.transitionMatrix,
     result.currentState,
@@ -193,7 +264,18 @@ async function runSimulation(options) {
     }
     if (endIdx < effectiveStartIdx) continue;
 
-    assets.push({ ticker: u.ticker, name: u.name || u.ticker, candles, startIdx: effectiveStartIdx, endIdx, ptr: effectiveStartIdx });
+    // Pré-computação vectorial de indicadores para este ativo
+    const precomputed = precomputeAssetIndicators(candles, cfg);
+
+    assets.push({
+      ticker: u.ticker,
+      name: u.name || u.ticker,
+      candles,
+      startIdx: effectiveStartIdx,
+      endIdx,
+      ptr: effectiveStartIdx,
+      precomputed
+    });
   }
 
   // Datas únicas ordenadas (eixo da curva de capital)
@@ -364,10 +446,9 @@ async function runSimulation(options) {
       return { ok: false, cancelled: true, messages };
     }
 
-    // Cede o event loop periodicamente para o worker processar
-    // mensagens (cancelamento) enquanto o loop corre.
+    // Cede o event loop periodicamente para o worker processar mensagens
     dateIdx++;
-    if (dateIdx % 5 === 0) await yieldToEventLoop();
+    if (dateIdx % 25 === 0) await yieldToEventLoop();
 
     for (const a of assets) {
       while (a.ptr <= a.endIdx && String(a.candles[a.ptr].date) <= date) {
@@ -394,7 +475,6 @@ async function runSimulation(options) {
           if (exit) closePosition(a, pos, exit.price, exit.reason, String(c.date));
         }
 
-        // 3) Avaliar sinal na barra t → entrada no open de t+1
         const sig = evaluateSignal(a.candles, a.ptr, cfg);
         if (sig && a.ptr + 1 <= a.endIdx && String(a.candles[a.ptr + 1].date) <= cfg.endDate) {
           const after = positions.get(a.ticker);
@@ -411,7 +491,7 @@ async function runSimulation(options) {
 
         a.ptr++;
         processedBars++;
-        if (totalBars > 0 && processedBars % 500 === 0) {
+        if (totalBars > 0 && processedBars % 250 === 0) {
           onProgress(Math.min(100, (processedBars / totalBars) * 100));
         }
       }
@@ -498,10 +578,11 @@ function buildBenchmark(assets, allDates, initialCapital) {
     for (const v of valid) {
       const a = v.a;
       let p = ptrs.get(a.ticker);
-      while (p <= a.endIdx && String(a.candles[p].date) <= date) p++;
+      while (p + 1 <= a.endIdx && String(a.candles[p + 1].date) <= date) p++;
       ptrs.set(a.ticker, p);
-      const close = p > a.startIdx ? Number(a.candles[p - 1].close) : v.firstClose;
-      value += (close / v.firstClose) * per;
+      const c = Number(a.candles[p].close);
+      const mult = Number.isFinite(c) && v.firstClose > 0 ? c / v.firstClose : 1;
+      value += per * mult;
     }
     out.push({ date, value: round2(value) });
   }
@@ -509,54 +590,72 @@ function buildBenchmark(assets, allDates, initialCapital) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  KPIs
+//  Cálculo de KPIs
 // ═══════════════════════════════════════════════════════════
 function calculateKPIs(trades, equityCurve, initialCapital) {
-  const total = trades.length;
-  const wins = trades.filter(t => t.profit > 0);
-  const losses = trades.filter(t => t.profit <= 0);
-  const winRate = total > 0 ? (wins.length / total) * 100 : 0;
+  const list = Array.isArray(trades) ? trades : [];
+  const totalTrades = list.length;
+  const longTrades = list.filter(t => String(t.side).toUpperCase() === 'LONG').length;
+  const shortTrades = list.filter(t => String(t.side).toUpperCase() === 'SHORT').length;
 
-  const grossProfit = wins.reduce((s, t) => s + t.profit, 0);
-  const grossLoss = Math.abs(losses.reduce((s, t) => s + t.profit, 0));
-  const profitFactor = grossLoss === 0 ? null : grossProfit / grossLoss;
+  const wins = list.filter(t => Number(t.profit) > 0);
+  const losses = list.filter(t => Number(t.profit) < 0);
+  const winRate = totalTrades > 0 ? (wins.length / totalTrades) * 100 : 0;
 
-  const avgWin = wins.length > 0 ? grossProfit / wins.length : 0;
-  const avgLoss = losses.length > 0 ? losses.reduce((s, t) => s + t.profit, 0) / losses.length : 0;
-  const payoffRatio = avgLoss === 0 ? null : Math.abs(avgWin / avgLoss);
-  const expectancy = total > 0 ? (winRate / 100) * avgWin - (1 - winRate / 100) * Math.abs(avgLoss) : 0;
-
-  const finalEquity = equityCurve.length > 0 ? equityCurve[equityCurve.length - 1].value : initialCapital;
-  const netProfit = finalEquity - initialCapital;
+  const grossProfit = wins.reduce((sum, t) => sum + Number(t.profit), 0);
+  const grossLoss = Math.abs(losses.reduce((sum, t) => sum + Number(t.profit), 0));
+  const netProfit = grossProfit - grossLoss;
   const netProfitPct = initialCapital > 0 ? (netProfit / initialCapital) * 100 : 0;
 
-  let peak = initialCapital;
+  const profitFactor = grossLoss > 0
+    ? grossProfit / grossLoss
+    : (grossProfit > 0 ? 99.9 : 0);
+
+  const avgWin = wins.length > 0 ? grossProfit / wins.length : 0;
+  const avgLoss = losses.length > 0 ? grossLoss / losses.length : 0;
+  const payoffRatio = avgLoss > 0 ? avgWin / avgLoss : (avgWin > 0 ? 99.9 : 0);
+
+  // Max Drawdown na curva de capital diária
   let maxDrawdown = 0;
   let maxDrawdownPct = 0;
-  for (const p of equityCurve) {
-    peak = Math.max(peak, p.value);
-    const dd = peak - p.value;
+  let peak = initialCapital;
+  for (const p of equityCurve || []) {
+    const v = Number(p.value);
+    if (!Number.isFinite(v)) continue;
+    if (v > peak) peak = v;
+    const dd = peak - v;
     if (dd > maxDrawdown) maxDrawdown = dd;
-    const ddPct = peak > 0 ? (dd / peak) * 100 : 0;
-    if (ddPct > maxDrawdownPct) maxDrawdownPct = ddPct;
+    if (peak > 0) {
+      const ddPct = (dd / peak) * 100;
+      if (ddPct > maxDrawdownPct) maxDrawdownPct = ddPct;
+    }
   }
 
-  const avgDuration = total > 0 ? trades.reduce((s, t) => s + (t.durationDays || 0), 0) / total : 0;
+  // Duração média (dias)
+  const durations = list.map(t => Number(t.durationDays)).filter(d => Number.isFinite(d));
+  const avgDurationDays = durations.length > 0
+    ? durations.reduce((a, b) => a + b, 0) / durations.length
+    : null;
+
+  // Expectancy (€ por trade)
+  const pW = totalTrades > 0 ? wins.length / totalTrades : 0;
+  const pL = totalTrades > 0 ? losses.length / totalTrades : 0;
+  const expectancy = (pW * avgWin) - (pL * avgLoss);
 
   return {
     netProfit: round2(netProfit),
-    netProfitPct: round2(netProfitPct),
+    netProfitPct: round1(netProfitPct),
     winRate: round1(winRate),
-    profitFactor: profitFactor == null ? null : round2(profitFactor),
+    profitFactor: round2(profitFactor),
     maxDrawdown: round2(maxDrawdown),
     maxDrawdownPct: round1(maxDrawdownPct),
-    payoffRatio: payoffRatio == null ? null : round2(payoffRatio),
-    totalTrades: total,
-    longTrades: trades.filter(t => t.side === 'LONG').length,
-    shortTrades: trades.filter(t => t.side === 'SHORT').length,
-    avgDurationDays: round1(avgDuration),
+    payoffRatio: round2(payoffRatio),
+    totalTrades,
+    longTrades,
+    shortTrades,
     grossProfit: round2(grossProfit),
     grossLoss: round2(grossLoss),
+    avgDurationDays: avgDurationDays != null ? round1(avgDurationDays) : null,
     expectancy: round2(expectancy)
   };
 }
@@ -566,8 +665,6 @@ function calculateKPIs(trades, equityCurve, initialCapital) {
 // com runSimulation (usada por testes existentes) para compatibilidade
 // com o prompt e com o worker spec (workerData).
 // ─────────────────────────────────────────────────────────────
-let __nativeForBacktester = null;
-try { __nativeForBacktester = require('../native'); } catch (_) {}
 
 function calculateMarkovMatrix(candles, options = {}) {
   try {
@@ -575,9 +672,15 @@ function calculateMarkovMatrix(candles, options = {}) {
     const ind = require('../quant/indicators');
     const stateSpace = STATE_SPACES_SET.has(String(options.stateSpace)) ? String(options.stateSpace) : '9';
     const markovOrder = Number(options.markovOrder) === 2 ? 2 : 1;
-    const closes = candles.map(c=>c.close);
-    const highs = candles.map(c=>c.high);
-    const lows = candles.map(c=>c.low);
+    const n = candles.length;
+    const closes = new Float64Array(n);
+    const highs = new Float64Array(n);
+    const lows = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      closes[i] = Number(candles[i].close);
+      highs[i] = Number(candles[i].high);
+      lows[i] = Number(candles[i].low);
+    }
     const rsi = ind.rsiWilder(closes, 21);
     const adx = ind.adxWilder(highs, lows, closes, 14);
     const bb = ind.bollingerBands(closes, 30, 2);
@@ -586,8 +689,8 @@ function calculateMarkovMatrix(candles, options = {}) {
     const matrix = markovOrder === 2
       ? buildTransitionMatrixOrder2(states, 150, stateSpace)
       : buildTransitionMatrix(states, 150, stateSpace);
-    const currentState = states[states.length-1];
-    const prevState = states[states.length-2];
+    const currentState = states[states.length - 1];
+    const prevState = states[states.length - 2];
     const { buildStateReturnsMap } = require('../quant/monteCarloEngine');
     const stateReturns = buildStateReturnsMap(candles, stateSpace);
     if (currentState < 0) return { isValid: false };
@@ -617,16 +720,19 @@ class BacktesterEngine {
   run(candles, quantEngine) {
     if (!candles || candles.length < 220) return null;
     const qe = quantEngine || __nativeForBacktester;
+    const n = candles.length;
+    const precomputed = precomputeAssetIndicators(candles, { minRVOL: this.minRVOL });
     let inPosition = false;
     let currentTrade = null;
     let peakCapital = this.capital;
     let maxDrawdown = 0;
-    for (let i = 200; i < candles.length; i++) {
-      const slice = candles.slice(0, i + 1);
-      const currentCandle = slice[slice.length - 1];
+
+    for (let i = 200; i < n; i++) {
+      const currentCandle = candles[i];
       if (this.capital > peakCapital) peakCapital = this.capital;
       const currentDrawdown = ((peakCapital - this.capital) / peakCapital) * 100;
       if (currentDrawdown > maxDrawdown) maxDrawdown = currentDrawdown;
+
       if (inPosition && currentTrade) {
         let closed = false; let exitPrice = 0; let exitReason = '';
         if (currentTrade.type === 'LONG') {
@@ -645,13 +751,30 @@ class BacktesterEngine {
           inPosition = false; currentTrade = null; continue;
         }
       }
-      if (!inPosition && i < candles.length - 1) {
-        const signal = this.evaluateSignal(slice, qe);
+
+      if (!inPosition && i < n - 1) {
+        const lastClose = precomputed.closes[i];
+        const rollingVWAP = precomputed.vwap[i];
+
+        // Gatekeeper 1: Rolling VWAP 20
+        let targetDirection = null;
+        if ((this.direction === 'LONG' || this.direction === 'BOTH') && lastClose > rollingVWAP) targetDirection = 'LONG';
+        else if ((this.direction === 'SHORT' || this.direction === 'BOTH') && lastClose < rollingVWAP) targetDirection = 'SHORT';
+
+        if (!targetDirection) continue;
+
+        // Gatekeeper RVOL(20)
+        if (this.rvolGate && targetDirection === 'LONG') {
+          if (!precomputed.rvolApproved[i]) continue;
+        }
+
+        const slice = candles.slice(0, i + 1);
+        const signal = this.evaluateSignal(slice, qe, targetDirection);
         if (signal && signal.approved) {
           const entryPrice = currentCandle.close;
           const positionSize = (this.capital * this.riskPerTrade) / this.stopLossPct;
           currentTrade = {
-            ticker: signal.ticker,
+            ticker: signal.ticker || candles[0].ticker,
             type: signal.type,
             entryDate: currentCandle.date,
             entryPrice,
@@ -685,29 +808,30 @@ class BacktesterEngine {
     };
   }
 
-  evaluateSignal(slice, quantEngine) {
+  evaluateSignal(slice, quantEngine, hintDirection) {
     const lastCandle = slice[slice.length - 1];
     const lastClose = Number(lastCandle.close);
-    let cumVol = 0; let cumVolPrice = 0;
-    const vwapSlice = slice.slice(-20);
-    for (const c of vwapSlice) { const tp = (Number(c.high) + Number(c.low) + Number(c.close)) / 3; cumVolPrice += tp * Number(c.volume||0); cumVol += Number(c.volume||0); }
-    const rollingVWAP = cumVol > 0 ? (cumVolPrice / cumVol) : lastClose;
-    let targetDirection = null;
-    if ((this.direction === 'LONG' || this.direction === 'BOTH') && lastClose > rollingVWAP) targetDirection = 'LONG';
-    else if ((this.direction === 'SHORT' || this.direction === 'BOTH') && lastClose < rollingVWAP) targetDirection = 'SHORT';
-    if (!targetDirection) return null;
+    let targetDirection = hintDirection;
 
-    // Gatekeeper RVOL(20) — confirmação de volume institucional (LONG).
-    if (this.rvolGate && targetDirection === 'LONG') {
-      const r = calculateRVOL(slice, 20);
-      if (r.avgVolume <= 0 || r.rvol < this.minRVOL) return null;
+    if (!targetDirection) {
+      let cumVol = 0; let cumVolPrice = 0;
+      const vwapSlice = slice.slice(-20);
+      for (const c of vwapSlice) { const tp = (Number(c.high) + Number(c.low) + Number(c.close)) / 3; cumVolPrice += tp * Number(c.volume || 0); cumVol += Number(c.volume || 0); }
+      const rollingVWAP = cumVol > 0 ? (cumVolPrice / cumVol) : lastClose;
+      if ((this.direction === 'LONG' || this.direction === 'BOTH') && lastClose > rollingVWAP) targetDirection = 'LONG';
+      else if ((this.direction === 'SHORT' || this.direction === 'BOTH') && lastClose < rollingVWAP) targetDirection = 'SHORT';
+      if (!targetDirection) return null;
+
+      // Gatekeeper RVOL(20)
+      if (this.rvolGate && targetDirection === 'LONG') {
+        const r = calculateRVOL(slice, 20);
+        if (r.avgVolume <= 0 || r.rvol < this.minRVOL) return null;
+      }
     }
 
     const markov = calculateMarkovMatrix(slice, { markovOrder: this.markovOrder, stateSpace: this.stateSpace });
     if (!markov || !markov.isValid) return null;
     let mc = null;
-    // 2ª ordem: o motor nativo/spec só suporta matriz 2D, por isso delega
-    // no motor JS de Monte Carlo (com suporte a memória de 2 velas).
     if (markov.order === 2) {
       try {
         mc = runMarkovMonteCarloSimulation(markov.transitionMatrix, markov.currentState, slice, lastClose, {
@@ -719,14 +843,11 @@ class BacktesterEngine {
     } else {
       const qe = quantEngine || __nativeForBacktester;
       if (!qe || typeof qe.runMonteCarlo !== 'function') return null;
-      // Spec signature: runMonteCarlo(matrix, stateReturns, currentState, lastClose, 1000, 20, sl, tp)
-      // Native signature: runMonteCarlo(matrix, returns, state, price, opts)
       try {
         if (qe.runMonteCarlo.length >= 8) {
           mc = qe.runMonteCarlo(markov.transitionMatrix, markov.stateReturns, markov.currentState, lastClose, 1000, 20, this.stopLossPct, this.takeProfitPct);
         } else {
           mc = qe.runMonteCarlo(markov.transitionMatrix, markov.stateReturns, markov.currentState, lastClose, { iterations: 1000, daysAhead: 20, slPct: this.stopLossPct, tpPct: this.takeProfitPct });
-          // normaliza winRateMC
           if (mc && mc.winRate != null && mc.winRateMC == null) mc.winRateMC = mc.winRate;
         }
       } catch (_) { mc = null; }
@@ -740,4 +861,4 @@ class BacktesterEngine {
   }
 }
 
-module.exports = { runSimulation, calculateKPIs, BacktesterEngine, calculateMarkovMatrix };
+module.exports = { runSimulation, calculateKPIs, BacktesterEngine, calculateMarkovMatrix, precalculateRollingVWAP };

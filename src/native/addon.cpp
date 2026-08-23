@@ -5,11 +5,11 @@
 //    computeMarkovModel(bbPctArr, adxArr, window)
 //        → { transitionMatrix: number[][], currentState: number }
 //    runMonteCarlo(matrixArr, returnsArr, currentState, startPrice, optsObj)
-//        → { winRate, tpHits, slHits, expired,
-//            isApproved, mcTier, mcLabel, expectedValue }
+//    runMonteCarlo(matrixArr, returnsArr, currentState, startPrice, iterations, horizon, sl, tp)
+//        → { winRate, winRateMC, tpHits, slHits, expired,
+//            isApproved, mcApproved, mcTier, mcLabel, expectedValue }
 //
-//  Compilado com NAPI_DISABLE_CPP_EXCEPTIONS (erros via
-//  ThrowAsJavaScriptException).
+//  Compilado com NAPI_DISABLE_CPP_EXCEPTIONS (erros via ThrowAsJavaScriptException).
 // ─────────────────────────────────────────────────────────────
 #include <napi.h>
 
@@ -30,9 +30,6 @@ constexpr int kDefaultDaysAhead = 20;
 constexpr double kDefaultSlPct = 0.014;
 constexpr double kDefaultTpPct = 0.028;
 
-// Conversão posicional para séries de indicadores:
-// mantém o alinhamento dos índices; não-numéricos → NaN
-// (o motor trata NaN como null/-1).
 std::vector<double> ArrayToStatesVector(const Napi::Array& arr) {
   std::vector<double> out;
   out.reserve(arr.Length());
@@ -47,8 +44,6 @@ std::vector<double> ArrayToStatesVector(const Napi::Array& arr) {
   return out;
 }
 
-// Conversão null-safe: salta valores não-numéricos/NaN.
-// Usada na matriz e nas linhas ragged de retornos.
 std::vector<double> ArrayToDoubleVector(const Napi::Array& arr) {
   std::vector<double> out;
   out.reserve(arr.Length());
@@ -68,7 +63,7 @@ std::vector<std::vector<double>> ToMatrix(const Napi::Array& arr) {
   for (uint32_t i = 0; i < arr.Length(); ++i) {
     const Napi::Value row = arr[i];
     if (!row.IsArray()) {
-      out.emplace_back(); // tolerância a linhas ragged/malformadas
+      out.emplace_back();
       continue;
     }
     out.push_back(ArrayToDoubleVector(row.As<Napi::Array>()));
@@ -93,14 +88,14 @@ Napi::Array MatrixToArray(Napi::Env env,
   return out;
 }
 
-Napi::Object BuildResultObject(Napi::Env env, const MonteCarloResult& r) {
+Napi::Object BuildResultObject(Napi::Env env, const MonteCarloNativeResult& r) {
   Napi::Object out = Napi::Object::New(env);
   out.Set("winRate", Napi::Number::New(env, r.winRate));
-  out.Set("winRateMC", Napi::Number::New(env, r.winRate));
+  out.Set("winRateMC", Napi::Number::New(env, r.winRateMC));
   out.Set("tpHits", Napi::Number::New(env, static_cast<double>(r.tpHits)));
   out.Set("slHits", Napi::Number::New(env, static_cast<double>(r.slHits)));
   out.Set("expired", Napi::Number::New(env, static_cast<double>(r.expired)));
-  out.Set("isApproved", Napi::Boolean::New(env, r.mcApproved));
+  out.Set("isApproved", Napi::Boolean::New(env, r.isApproved));
   out.Set("mcApproved", Napi::Boolean::New(env, r.mcApproved));
   out.Set("mcTier", Napi::String::New(env, r.mcTier));
   out.Set("mcLabel", Napi::String::New(env, r.mcLabel));
@@ -134,7 +129,7 @@ Napi::Value RunMonteCarlo(const Napi::CallbackInfo& info) {
   const int currentState = info[2].As<Napi::Number>().Int32Value();
   const double startPrice = info[3].As<Napi::Number>().DoubleValue();
 
-  // Spec compat: 8 args (matrix, returns, state, price, iterations, horizon, sl, tp)
+  // Compatibilidade com chamada de 8 argumentos posicionais
   bool isSpecCall = info.Length() >= 8 && info[4].IsNumber() && info[5].IsNumber() && info[6].IsNumber() && info[7].IsNumber();
   double iterationsD = kDefaultIterations;
   double daysAheadD = kDefaultDaysAhead;
@@ -156,8 +151,7 @@ Napi::Value RunMonteCarlo(const Napi::CallbackInfo& info) {
   } else {
     const Napi::Object opts =
         (info.Length() >= 5 && info[4].IsObject()) ? info[4].As<Napi::Object>()
-                                                   : Napi::Object::New(env);
-    // Defaults paridade JS: iterations/daysAhead com `||`, sl/tp com `!= null`
+                                                    : Napi::Object::New(env);
     {
       const Napi::Value v = opts.Get("iterations");
       if (v.IsNumber()) {
@@ -188,7 +182,7 @@ Napi::Value RunMonteCarlo(const Napi::CallbackInfo& info) {
     }
   }
 
-  const MonteCarloResult result = runMonteCarloSimulationNative(
+  const MonteCarloNativeResult result = runMonteCarloSimulationNative(
       matrix, returnsByState, currentState, startPrice,
       static_cast<int>(iterationsD), static_cast<int>(daysAheadD),
       slPct, tpPct, side.c_str(), useSeed, seed);

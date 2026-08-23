@@ -2747,6 +2747,9 @@
       btn.classList.add('active');
       const target = document.getElementById('tab-' + btn.dataset.tab);
       if (target) target.classList.add('active');
+      if (btn.dataset.tab === 'simulation' && typeof window.restoreSimulationViewState === 'function') {
+        window.restoreSimulationViewState();
+      }
     });
   });
 

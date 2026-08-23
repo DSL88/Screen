@@ -5,9 +5,10 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/*.test.js",
-    "test:coverage": "node --test --experimental-test-coverage test/*.test.js",
+    "test": "ELECTRON_RUN_AS_NODE=1 electron --test test/*.test.js",
+    "test:coverage": "ELECTRON_RUN_AS_NODE=1 electron --test --experimental-test-coverage test/*.test.js",
     "build:native": "node-gyp rebuild",
+    "clean:native": "node-gyp clean",
     "install:native": "node-gyp configure build",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "postinstall": "electron-builder install-app-deps && node scripts/fix-electron-path.js",
@@ -26,6 +27,7 @@
     "axios": "^1.19.0",
     "better-sqlite3": "^12.4.0",
     "cheerio": "^1.2.0",
+    "node-addon-api": "^8.9.2",
     "p-limit": "^3.1.0",
     "xlsx": "^0.18.5",
     "yahoo-finance2": "2.13.3"
@@ -34,7 +36,7 @@
     "@electron/rebuild": "^4.2.0",
     "electron": "^43.1.1",
     "electron-builder": "^26.15.3",
-    "node-addon-api": "^8.9.2"
+    "node-gyp": "^10.0.0"
   },
   "build": {
     "appId": "com.markov.scanner",

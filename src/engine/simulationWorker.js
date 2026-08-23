@@ -10,12 +10,12 @@ if (workerData && workerData.dbPath && Array.isArray(workerData.tickers)) {
     try {
       const Database = require('better-sqlite3');
       const BacktesterEngine = require('./backtesterEngine').BacktesterEngine || require('./backtesterEngine');
-      // normaliza quando BacktesterEngine é classe
       const BE = (BacktesterEngine && BacktesterEngine.BacktesterEngine) ? BacktesterEngine.BacktesterEngine : BacktesterEngine;
       const quantEngine = require('../native');
       const { dbPath, tickers, startDate, endDate, config } = workerData;
       const db = new Database(dbPath, { readonly: true, fileMustExist: true });
       db.pragma('journal_mode = WAL');
+
       function loadCandlesForWorker(ticker, start, end) {
         const cleanTicker = String(ticker).trim().toUpperCase();
         if (!start && !end) {
@@ -27,23 +27,51 @@ if (workerData && workerData.dbPath && Array.isArray(workerData.tickers)) {
         const main = db.prepare(`SELECT date, open, high, low, close, volume FROM historical_prices WHERE UPPER(TRIM(ticker)) = ? AND date >= ? AND date <= ? ORDER BY date ASC`).all(cleanTicker, cleanStart, cleanEnd);
         return [...warmup, ...main];
       }
-      const results = []; const total = tickers.length;
+
+      const results = [];
+      const total = tickers.length;
+      let lastProgressTime = 0;
+
       for (let i = 0; i < total; i++) {
         const ticker = tickers[i];
         const rawCandles = loadCandlesForWorker(ticker, startDate, endDate);
-        const candles = rawCandles.map(c => ({ ticker, date: String(c.date).slice(0, 10), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close), volume: Number(c.volume || 0) }));
+        const candles = rawCandles.map(c => ({
+          ticker,
+          date: String(c.date).slice(0, 10),
+          open: Number(c.open),
+          high: Number(c.high),
+          low: Number(c.low),
+          close: Number(c.close),
+          volume: Number(c.volume || 0)
+        }));
+
         if (candles.length >= 220) {
           const EngineCls = BE.BacktesterEngine || BE;
           const engine = new EngineCls(config);
           const simRes = engine.run(candles, quantEngine);
           if (simRes) results.push({ ticker, ...simRes });
         }
-        parentPort.postMessage({ type: 'PROGRESS', data: { current: i + 1, total, ticker, tradesCount: results.length } });
+
+        const now = Date.now();
+        if (i === total - 1 || now - lastProgressTime >= 100 || (i + 1) % 5 === 0) {
+          lastProgressTime = now;
+          parentPort.postMessage({
+            type: 'PROGRESS',
+            data: {
+              deltaProcessed: 1,
+              current: i + 1,
+              total,
+              ticker,
+              tradesCount: results.length,
+              percent: Math.round(((i + 1) / total) * 100)
+            }
+          });
+        }
       }
       db.close();
       parentPort.postMessage({ type: 'COMPLETE', results });
     } catch (e) {
-      try { parentPort.postMessage({ type: 'ERROR', error: e.message }); } catch (_) {}
+      try { parentPort.postMessage({ type: 'ERROR', error: e.message || String(e) }); } catch (_) {}
     }
   })();
 }
@@ -121,6 +149,7 @@ function loadLocalCandles(dbPath, ticker, startDate, endDate) {
   const Database = require('better-sqlite3');
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
+    db.pragma('journal_mode = WAL');
     const cleanTicker = String(ticker || '').trim().toUpperCase();
     const toRow = row => ({
       date: String(row.date).slice(0, 10),
@@ -131,7 +160,6 @@ function loadLocalCandles(dbPath, ticker, startDate, endDate) {
       volume: Number(row.volume || 0)
     });
 
-    // CENÁRIO A: Sem filtro de data — 100% dos dados guardados
     if (!startDate && !endDate) {
       const rows = db.prepare(`
         SELECT date, open, high, low, close, volume
@@ -142,7 +170,6 @@ function loadLocalCandles(dbPath, ticker, startDate, endDate) {
       return rows.map(toRow);
     }
 
-    // CENÁRIO B: Intervalo com warm-up prévio de 200 velas
     const cleanStart = String(startDate || '').slice(0, 10);
     const cleanEnd = endDate ? String(endDate).slice(0, 10) : '9999-12-31';
     const warmup = db.prepare(`
@@ -184,6 +211,7 @@ async function handleStart({ runId, universe, params, dbPath, startDate, endDate
   const built = [];
   let lastLoadAt = 0;
   let lastTicker = null;
+
   for (let i = 0; i < list.length; i++) {
     const u = list[i];
     if (cancelRequested.has(runId)) break;
@@ -191,8 +219,9 @@ async function handleStart({ runId, universe, params, dbPath, startDate, endDate
     const ticker = String(u.ticker || '').trim().toUpperCase();
     if (!ticker) continue;
     lastTicker = ticker;
+
     const now = Date.now();
-    if (now - lastLoadAt >= PROGRESS_THROTTLE_MS) {
+    if (now - lastLoadAt >= PROGRESS_THROTTLE_MS || i === list.length - 1) {
       lastLoadAt = now;
       const current = i + 1;
       send({
@@ -209,19 +238,22 @@ async function handleStart({ runId, universe, params, dbPath, startDate, endDate
 
     let candles = null;
     let candlesError = null;
-    try {
-      candles = await requestDB('getHistoricalPricesForSimulation', { ticker, startDate: start, endDate: end });
-    } catch (err) {
-      candlesError = err;
+
+    // Carregamento direto e rápido via SQLite local no worker quando dbPath disponível
+    if (dbPath) {
+      try {
+        candles = loadLocalCandles(dbPath, ticker, start, end);
+      } catch (err) {
+        candlesError = err;
+      }
     }
 
+    // Fallback para IPC se necessário
     if (!candles || candles.length === 0) {
-      if (dbPath) {
-        try {
-          candles = loadLocalCandles(dbPath, ticker, start, end);
-        } catch (_) {
-          candlesError = candlesError || new Error('falha ao carregar dados locais');
-        }
+      try {
+        candles = await requestDB('getHistoricalPricesForSimulation', { ticker, startDate: start, endDate: end });
+      } catch (err) {
+        candlesError = candlesError || err;
       }
     }
 

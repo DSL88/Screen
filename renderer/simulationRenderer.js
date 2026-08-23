@@ -3,70 +3,26 @@
 
   // ═══════════════════════════════════════════════════════════
   //  SIMULAÇÃO DE ESTRATÉGIAS — Renderer da aba de Backtesting
-  //  Contrato window.api (implementado no processo main):
-  //    api.simulationOptions()            → { ok, indices, assets }
-  //    api.simulationStart(payload)       → { ok, runId } | { ok:false, error }
-  //    api.simulationCancel(runId)        → { ok }
-  //    api.onSimulationProgress(cb)       → unsubscribe
-  //    api.onSimulationResult(cb)         → unsubscribe
-  //    api.onSimulationError(cb)          → unsubscribe
+  //  Blindado contra crash em troca de abas e desacoplado de nós DOM.
   // ═══════════════════════════════════════════════════════════
 
   const $ = (id) => document.getElementById(id);
 
-  const els = {
-    subtitle: $('sim-subtitle'),
-    universe: $('sim-universe'),
-    index: $('sim-index'),
-    asset: $('sim-asset'),
-    indexField: $('sim-index-field'),
-    assetField: $('sim-asset-field'),
-    direction: $('sim-direction'),
-    exitMode: $('sim-exit-mode'),
-    markovOrder: $('sim-markov-order'),
-    stateSpace: $('sim-state-space'),
-    stopType: $('sim-stop-type'),
-    stopLoss: $('sim-stop-loss'),
-    takeProfit: $('sim-take-profit'),
-    trailing: $('sim-trailing'),
-    trailingOffset: $('sim-trailing-offset'),
-    vwapGate: $('sim-vwap-gate'),
-    rvolGate: $('sim-rvol-gate'),
-    mcMin: $('sim-mc-min'),
-    markovMin: $('sim-markov-min'),
-    startDate: $('sim-start-date'),
-    endDate: $('sim-end-date'),
-    capital: $('sim-capital'),
-    risk: $('sim-risk'),
-    commission: $('sim-commission'),
-    slippage: $('sim-slippage'),
-    btnStart: $('btn-sim-start'),
-    btnCancel: $('btn-sim-cancel'),
-    progressWrap: $('sim-progress-wrap'),
-    progressFill: $('sim-progress-fill'),
-    progressText: $('sim-progress-text'),
-    status: $('sim-status'),
-    results: $('sim-results'),
-    canvas: $('sim-equity-chart'),
-    tradesBody: $('sim-trades-body'),
-    tradesSearch: $('sim-trades-search'),
-    pagePrev: $('sim-page-prev'),
-    pageNext: $('sim-page-next'),
-    pageInfo: $('sim-page-info'),
-    kpis: {
-      net: $('sim-kpi-net'),
-      netPct: $('sim-kpi-net-pct'),
-      winrate: $('sim-kpi-winrate'),
-      profitFactor: $('sim-kpi-profit-factor'),
-      maxDd: $('sim-kpi-max-dd'),
-      maxDdPct: $('sim-kpi-max-dd-pct'),
-      payoff: $('sim-kpi-payoff'),
-      total: $('sim-kpi-total'),
-      longs: $('sim-kpi-longs'),
-      shorts: $('sim-kpi-shorts'),
-      duration: $('sim-kpi-duration')
-    }
+  // Estado global em memória para persistência entre navegação de abas
+  const currentSimulationState = {
+    isRunning: false,
+    progress: 0,
+    currentTicker: '',
+    totalTickers: 0,
+    completedTickers: 0,
+    message: '',
+    results: null,
+    error: null,
+    lastRunId: null
   };
+
+  // Exposição global para integração e testes
+  window.simulationState = currentSimulationState;
 
   const state = {
     currentRunId: null,
@@ -82,15 +38,78 @@
   };
 
   const REASON_LABELS = { TP: 'Take Profit', SL: 'Stop Loss', Trailing: 'Trailing', Sinal: 'Sinal' };
-
   const INSUFFICIENT_DATA_RE = /não foram encontrados dados|sem registos suficientes|sem candles disponíveis|dados insuficientes/i;
 
+  function getUIElements() {
+    return {
+      subtitle: $('sim-subtitle'),
+      universe: $('sim-universe'),
+      index: $('sim-index'),
+      asset: $('sim-asset'),
+      indexField: $('sim-index-field'),
+      assetField: $('sim-asset-field'),
+      direction: $('sim-direction'),
+      exitMode: $('sim-exit-mode'),
+      markovOrder: $('sim-markov-order'),
+      stateSpace: $('sim-state-space'),
+      stopType: $('sim-stop-type'),
+      stopLoss: $('sim-stop-loss'),
+      takeProfit: $('sim-take-profit'),
+      trailing: $('sim-trailing'),
+      trailingOffset: $('sim-trailing-offset'),
+      vwapGate: $('sim-vwap-gate'),
+      rvolGate: $('sim-rvol-gate'),
+      mcMin: $('sim-mc-min'),
+      markovMin: $('sim-markov-min'),
+      startDate: $('sim-start-date'),
+      endDate: $('sim-end-date'),
+      capital: $('sim-capital'),
+      risk: $('sim-risk'),
+      commission: $('sim-commission'),
+      slippage: $('sim-slippage'),
+      btnStart: $('btn-sim-start'),
+      btnCancel: $('btn-sim-cancel'),
+      progressWrap: $('sim-progress-wrap'),
+      progressBar: $('simulation-progress-bar') || $('sim-progress-fill'),
+      progressText: $('simulation-progress-text') || $('sim-progress-text'),
+      activeTickerEl: $('simulation-current-ticker') || $('sim-status'),
+      status: $('sim-status'),
+      results: $('sim-results'),
+      canvas: $('sim-equity-chart'),
+      tradesBody: $('sim-trades-body'),
+      tradesSearch: $('sim-trades-search'),
+      pagePrev: $('sim-page-prev'),
+      pageNext: $('sim-page-next'),
+      pageInfo: $('sim-page-info'),
+      kpis: {
+        net: $('sim-kpi-net'),
+        netPct: $('sim-kpi-net-pct'),
+        winrate: $('sim-kpi-winrate'),
+        profitFactor: $('sim-kpi-profit-factor'),
+        maxDd: $('sim-kpi-max-dd'),
+        maxDdPct: $('sim-kpi-max-dd-pct'),
+        payoff: $('sim-kpi-payoff'),
+        total: $('sim-kpi-total'),
+        longs: $('sim-kpi-longs'),
+        shorts: $('sim-kpi-shorts'),
+        duration: $('sim-kpi-duration')
+      }
+    };
+  }
+
+  function isSimulationTabVisible() {
+    const tab = $('tab-simulation');
+    return !!(tab && tab.classList.contains('active') && tab.offsetParent !== null);
+  }
+
   function init() {
-    if (!els.universe) return;
+    bindApiEvents();
+    bindTabNavigation();
+    const ui = getUIElements();
+    if (!ui.universe) return;
     setDefaultDates();
     loadOptions();
     bindListeners();
-    bindApiEvents();
   }
 
   // ── Datas por defeito ──
@@ -99,10 +118,11 @@
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   }
   function setDefaultDates() {
+    const ui = getUIElements();
     const today = new Date();
     const start = new Date(today.getFullYear() - 6, today.getMonth(), today.getDate());
-    if (els.startDate && !els.startDate.value) els.startDate.value = toInputDate(start);
-    if (els.endDate && !els.endDate.value) els.endDate.value = toInputDate(today);
+    if (ui.startDate && !ui.startDate.value) ui.startDate.value = toInputDate(start);
+    if (ui.endDate && !ui.endDate.value) ui.endDate.value = toInputDate(today);
   }
 
   // ── Opções (índices / ativos) ──
@@ -127,12 +147,14 @@
   }
 
   async function loadOptions() {
-    if (!window.api || typeof window.api.simulationOptions !== 'function') return;
+    const api = window.api || window.electronAPI;
+    if (!api || typeof api.simulationOptions !== 'function') return;
     try {
-      const res = await window.api.simulationOptions();
+      const res = await api.simulationOptions();
       if (!res || !res.ok) return;
-      fillSelect(els.index, res.indices, (i) => ({ value: i.id, label: i.name }));
-      fillSelect(els.asset, res.assets, (a) => ({
+      const ui = getUIElements();
+      fillSelect(ui.index, res.indices, (i) => ({ value: i.id, label: i.name }));
+      fillSelect(ui.asset, res.assets, (a) => ({
         value: a.ticker,
         label: a.ticker + (a.name ? ' — ' + a.name : '') + (a.indexName ? ' [' + a.indexName + ']' : '')
       }));
@@ -143,91 +165,202 @@
 
   // ── Visibilidade do universo ──
   function updateUniverseVisibility() {
-    const mode = els.universe ? els.universe.value : 'all';
-    if (els.indexField) els.indexField.hidden = mode !== 'index';
-    if (els.assetField) els.assetField.hidden = mode !== 'single';
+    const ui = getUIElements();
+    const mode = ui.universe ? ui.universe.value : 'all';
+    if (ui.indexField) ui.indexField.hidden = mode !== 'index';
+    if (ui.assetField) ui.assetField.hidden = mode !== 'single';
   }
 
   // ── Listeners de UI ──
   function bindListeners() {
-    if (els.universe) els.universe.addEventListener('change', updateUniverseVisibility);
-    if (els.btnStart) els.btnStart.addEventListener('click', startSimulation);
-    if (els.btnCancel) els.btnCancel.addEventListener('click', cancelSimulation);
+    const ui = getUIElements();
+    if (ui.universe) ui.universe.addEventListener('change', updateUniverseVisibility);
+    if (ui.btnStart) ui.btnStart.addEventListener('click', startSimulation);
+    if (ui.btnCancel) ui.btnCancel.addEventListener('click', cancelSimulation);
 
-    if (els.tradesSearch) {
-      els.tradesSearch.addEventListener('input', (e) => {
+    if (ui.tradesSearch) {
+      ui.tradesSearch.addEventListener('input', (e) => {
         state.searchQuery = String(e.target.value || '').trim().toLowerCase();
         state.page = 0;
         renderTrades();
       });
     }
-    if (els.pagePrev) {
-      els.pagePrev.addEventListener('click', () => {
+    if (ui.pagePrev) {
+      ui.pagePrev.addEventListener('click', () => {
         if (state.page > 0) { state.page--; renderTrades(); }
       });
     }
-    if (els.pageNext) {
-      els.pageNext.addEventListener('click', () => {
+    if (ui.pageNext) {
+      ui.pageNext.addEventListener('click', () => {
         state.page++;
         renderTrades();
       });
     }
 
     const sortableThs = document.querySelectorAll('#sim-trades-table thead th[data-sort]');
-    sortableThs.forEach((th) => th.addEventListener('click', () => onSortClick(th)));
+    sortableThs.forEach((th) => {
+      if (th) th.addEventListener('click', () => onSortClick(th));
+    });
+  }
+
+  function bindTabNavigation() {
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.tab === 'simulation') {
+          setTimeout(restoreSimulationViewState, 30);
+        }
+      });
+    });
   }
 
   // ── Eventos do main process (progress / result / error) ──
   function bindApiEvents() {
-    if (!window.api) return;
-    const api = window.api;
+    const api = window.api || window.electronAPI;
+    if (!api) return;
+
+    const onProg = (data) => onProgress(data);
+    const onRes = (data) => onResult(data);
+    const onErr = (data) => onError(data);
+
     if (typeof api.onSimulationProgress === 'function') {
-      const un = api.onSimulationProgress(onProgress);
+      const un = api.onSimulationProgress(onProg);
+      if (typeof un === 'function') state.unsubscribers.push(un);
+    }
+    if (typeof api.onSimulationProgressSpec === 'function') {
+      const un = api.onSimulationProgressSpec(onProg);
       if (typeof un === 'function') state.unsubscribers.push(un);
     }
     if (typeof api.onSimulationResult === 'function') {
-      const un = api.onSimulationResult(onResult);
+      const un = api.onSimulationResult(onRes);
       if (typeof un === 'function') state.unsubscribers.push(un);
     }
     if (typeof api.onSimulationError === 'function') {
-      const un = api.onSimulationError(onError);
+      const un = api.onSimulationError(onErr);
       if (typeof un === 'function') state.unsubscribers.push(un);
     }
   }
 
   function isCurrentRun(data) {
-    if (!state.currentRunId) return true;
-    return !data || !data.runId || data.runId === state.currentRunId;
+    if (!state.currentRunId && !currentSimulationState.lastRunId) return true;
+    const runId = state.currentRunId || currentSimulationState.lastRunId;
+    return !data || !data.runId || data.runId === runId;
+  }
+
+  // ── Throttled UI Progress Updates ──
+  let progressRafId = null;
+  let lastProgressUpdateTime = 0;
+
+  function scheduleProgressUpdate() {
+    const now = Date.now();
+    if (now - lastProgressUpdateTime > 80) {
+      lastProgressUpdateTime = now;
+      if (progressRafId) cancelAnimationFrame(progressRafId);
+      progressRafId = null;
+      updateSimulationUIProgress();
+    } else if (!progressRafId) {
+      progressRafId = requestAnimationFrame(() => {
+        progressRafId = null;
+        lastProgressUpdateTime = Date.now();
+        updateSimulationUIProgress();
+      });
+    }
   }
 
   function onProgress(data) {
     if (!data || !isCurrentRun(data)) return;
-    const pct = Math.min(100, Math.max(0, Number(data.percent) || 0));
-    if (els.progressFill) els.progressFill.style.width = pct + '%';
-    if (els.progressText) {
+
+    currentSimulationState.isRunning = true;
+    state.running = true;
+    if (data.runId) {
+      currentSimulationState.lastRunId = data.runId;
+      state.currentRunId = data.runId;
+    }
+
+    if (data.current != null && data.total != null && data.total > 0) {
+      currentSimulationState.completedTickers = Number(data.current) || 0;
+      currentSimulationState.totalTickers = Number(data.total) || 0;
+      currentSimulationState.progress = Math.min(100, Math.max(0, (currentSimulationState.completedTickers / currentSimulationState.totalTickers) * 100));
+    } else if (data.percent != null) {
+      currentSimulationState.progress = Math.min(100, Math.max(0, Number(data.percent) || 0));
+    }
+
+    if (data.ticker) currentSimulationState.currentTicker = String(data.ticker);
+    if (data.message) currentSimulationState.message = String(data.message);
+
+    scheduleProgressUpdate();
+  }
+
+  function updateSimulationUIProgress() {
+    const ui = getUIElements();
+    const isRunning = currentSimulationState.isRunning;
+    const pct = Math.min(100, Math.max(0, currentSimulationState.progress));
+
+    if (ui.progressWrap) {
+      ui.progressWrap.hidden = !isRunning;
+    }
+
+    if (ui.btnStart) {
+      ui.btnStart.disabled = isRunning;
+      const label = ui.btnStart.querySelector('.btn-label');
+      if (label) label.textContent = isRunning ? 'A simular...' : 'Iniciar Simulação';
+    }
+
+    if (ui.btnCancel) {
+      ui.btnCancel.hidden = !isRunning;
+      ui.btnCancel.disabled = !isRunning;
+    }
+
+    if (ui.progressBar) {
+      ui.progressBar.style.width = `${pct}%`;
+    }
+
+    if (ui.progressText) {
       const parts = [];
-      if (data.ticker) parts.push(data.ticker);
-      if (data.message) parts.push(data.message);
-      els.progressText.textContent = Math.round(pct) + '%' + (parts.length ? ' · ' + parts.join(' · ') : '');
+      if (currentSimulationState.currentTicker) parts.push(currentSimulationState.currentTicker);
+      if (currentSimulationState.message) parts.push(currentSimulationState.message);
+      else if (currentSimulationState.totalTickers > 0 && currentSimulationState.completedTickers > 0) {
+        parts.push(`(${currentSimulationState.completedTickers}/${currentSimulationState.totalTickers})`);
+      }
+      const suffix = parts.length ? ' · ' + parts.join(' · ') : '';
+      ui.progressText.textContent = `${Math.round(pct)}%${suffix}`;
+    }
+
+    if (ui.activeTickerEl && isRunning) {
+      if (currentSimulationState.currentTicker) {
+        const countInfo = currentSimulationState.totalTickers > 0
+          ? ` (${currentSimulationState.completedTickers}/${currentSimulationState.totalTickers})`
+          : '';
+        ui.activeTickerEl.textContent = `A simular: ${currentSimulationState.currentTicker}${countInfo}`;
+        ui.activeTickerEl.hidden = false;
+      }
     }
   }
 
   function onResult(data) {
     if (!data || !isCurrentRun(data)) return;
-    const result = data.result || null;
+    const result = data.result || data.results || (data.trades ? data : null);
+
     state.currentRunId = null;
-    resetControls();
-    if (els.progressFill) els.progressFill.style.width = '0%';
-    if (els.progressText) els.progressText.textContent = '0%';
+    currentSimulationState.lastRunId = null;
+    currentSimulationState.isRunning = false;
+    currentSimulationState.progress = 100;
+    currentSimulationState.results = result;
+    state.running = false;
+
+    updateSimulationUIComplete();
+
     if (!result) {
       setStatus('A simulação terminou sem dados de resultado.');
       return;
     }
+
     state.lastResult = result;
     state.page = 0;
     state.sortKey = 'exitDate';
     state.sortDir = 'desc';
-    state.searchQuery = els.tradesSearch ? String(els.tradesSearch.value || '').trim().toLowerCase() : '';
+    const ui = getUIElements();
+    state.searchQuery = ui.tradesSearch ? String(ui.tradesSearch.value || '').trim().toLowerCase() : '';
+
     renderResult(result);
 
     const trades = result.trades || [];
@@ -240,48 +373,74 @@
     }
   }
 
+  function updateSimulationUIComplete() {
+    const ui = getUIElements();
+    state.running = false;
+    currentSimulationState.isRunning = false;
+
+    if (ui.btnStart) {
+      ui.btnStart.disabled = false;
+      const label = ui.btnStart.querySelector('.btn-label');
+      if (label) label.textContent = 'Iniciar Simulação';
+    }
+
+    if (ui.btnCancel) {
+      ui.btnCancel.hidden = true;
+      ui.btnCancel.disabled = false;
+    }
+
+    if (ui.progressWrap) {
+      ui.progressWrap.hidden = true;
+    }
+
+    if (ui.progressBar) {
+      ui.progressBar.style.width = '0%';
+    }
+
+    if (ui.progressText) {
+      ui.progressText.textContent = '0%';
+    }
+  }
+
   function onError(data) {
     if (!data || !isCurrentRun(data)) return;
-    const msg = ((data && data.message) || 'erro desconhecido.');
+    const msg = (data && data.message) || (data && data.error) || 'erro desconhecido.';
+    currentSimulationState.error = msg;
+
     if (!(data && data.ticker)) {
       state.currentRunId = null;
-      resetControls();
+      currentSimulationState.lastRunId = null;
+      currentSimulationState.isRunning = false;
+      state.running = false;
+      updateSimulationUIComplete();
     }
+
     if (INSUFFICIENT_DATA_RE.test(msg)) {
       showDataToast(data.ticker || '');
     }
     setStatus('Erro na simulação: ' + msg);
   }
 
-  // ── Controlo de estado "a correr" ──
-  function setStartLabel(text) {
-    if (!els.btnStart) return;
-    const label = els.btnStart.querySelector('.btn-label');
-    if (label) label.textContent = text;
+  function restoreSimulationViewState() {
+    if (currentSimulationState.isRunning) {
+      updateSimulationUIProgress();
+    } else if (currentSimulationState.results) {
+      updateSimulationUIComplete();
+      renderResult(currentSimulationState.results);
+    } else if (currentSimulationState.error) {
+      updateSimulationUIComplete();
+      setStatus('Erro na simulação: ' + currentSimulationState.error);
+    }
   }
 
-  function resetControls() {
-    state.running = false;
-    if (els.btnStart) els.btnStart.disabled = false;
-    setStartLabel('Iniciar Simulação');
-    if (els.btnCancel) { els.btnCancel.hidden = true; els.btnCancel.disabled = false; }
-    if (els.progressWrap) els.progressWrap.hidden = true;
-  }
-
-  function setRunningUi() {
-    state.running = true;
-    if (els.btnStart) els.btnStart.disabled = true;
-    setStartLabel('A simular...');
-    if (els.btnCancel) { els.btnCancel.hidden = false; els.btnCancel.disabled = false; }
-    if (els.progressWrap) els.progressWrap.hidden = false;
-    if (els.progressFill) els.progressFill.style.width = '0%';
-    if (els.progressText) els.progressText.textContent = '0%';
-  }
+  // Expor para chamada no switch de abas
+  window.restoreSimulationViewState = restoreSimulationViewState;
 
   function setStatus(msg) {
-    if (!els.status) return;
-    els.status.textContent = msg || '';
-    els.status.hidden = !msg;
+    const ui = getUIElements();
+    if (!ui.status) return;
+    ui.status.textContent = msg || '';
+    ui.status.hidden = !msg;
   }
 
   function showToast(message, type) {
@@ -311,43 +470,45 @@
   }
 
   function buildPayload() {
-    const universeMode = els.universe ? els.universe.value : 'all';
+    const ui = getUIElements();
+    const universeMode = ui.universe ? ui.universe.value : 'all';
     const universe = { mode: universeMode };
-    if (universeMode === 'index') universe.index = els.index ? els.index.value : '';
-    if (universeMode === 'single') universe.ticker = String(els.asset ? els.asset.value : '').trim().toUpperCase();
+    if (universeMode === 'index') universe.index = ui.index ? ui.index.value : '';
+    if (universeMode === 'single') universe.ticker = String(ui.asset ? ui.asset.value : '').trim().toUpperCase();
     if (universeMode !== 'all' && !universe.index && !universe.ticker) {
       setStatus('Seleciona um índice ou ativo antes de iniciar a simulação.');
       return null;
     }
 
     const params = {
-      direction: els.direction ? els.direction.value : 'both',
-      exitMode: els.exitMode ? els.exitMode.value : 'full',
-      markovOrder: Number(els.markovOrder && els.markovOrder.value) === 2 ? 2 : 1,
-      stateSpace: (els.stateSpace && els.stateSpace.value) || '9',
-      stopType: els.stopType ? els.stopType.value : 'pct',
-      stopLoss: toNum(els.stopLoss, 1.4),
-      takeProfit: toNum(els.takeProfit, 2.8),
-      trailing: !!(els.trailing && els.trailing.checked),
-      trailingOffset: toNum(els.trailingOffset, 1.0),
-      vwapGate: !!(els.vwapGate && els.vwapGate.checked),
-      rvolGate: !!(els.rvolGate && els.rvolGate.checked),
+      direction: ui.direction ? ui.direction.value : 'both',
+      exitMode: ui.exitMode ? ui.exitMode.value : 'full',
+      markovOrder: Number(ui.markovOrder && ui.markovOrder.value) === 2 ? 2 : 1,
+      stateSpace: (ui.stateSpace && ui.stateSpace.value) || '9',
+      stopType: ui.stopType ? ui.stopType.value : 'pct',
+      stopLoss: toNum(ui.stopLoss, 1.4),
+      takeProfit: toNum(ui.takeProfit, 2.8),
+      trailing: !!(ui.trailing && ui.trailing.checked),
+      trailingOffset: toNum(ui.trailingOffset, 1.0),
+      vwapGate: !!(ui.vwapGate && ui.vwapGate.checked),
+      rvolGate: !!(ui.rvolGate && ui.rvolGate.checked),
       minRVOL: 1.0,
-      mcMin: toNum(els.mcMin, 50),
-      markovMin: toNum(els.markovMin, 55),
-      startDate: els.startDate && els.startDate.value ? String(els.startDate.value).slice(0, 10) : null,
-      endDate: els.endDate && els.endDate.value ? String(els.endDate.value).slice(0, 10) : null,
-      capital: toNum(els.capital, 10000),
-      risk: toNum(els.risk, 2),
-      commission: toNum(els.commission, 0.05),
-      slippage: toNum(els.slippage, 0.05)
+      mcMin: toNum(ui.mcMin, 50),
+      markovMin: toNum(ui.markovMin, 55),
+      startDate: ui.startDate && ui.startDate.value ? String(ui.startDate.value).slice(0, 10) : null,
+      endDate: ui.endDate && ui.endDate.value ? String(ui.endDate.value).slice(0, 10) : null,
+      capital: toNum(ui.capital, 10000),
+      risk: toNum(ui.risk, 2),
+      commission: toNum(ui.commission, 0.05),
+      slippage: toNum(ui.slippage, 0.05)
     };
     return { universe, params };
   }
 
   function startSimulation() {
-    if (state.running) return;
-    if (!window.api || typeof window.api.simulationStart !== 'function') {
+    if (state.running || currentSimulationState.isRunning) return;
+    const api = window.api || window.electronAPI;
+    if (!api || typeof api.simulationStart !== 'function') {
       setStatus('API de simulação indisponível neste contexto.');
       return;
     }
@@ -355,40 +516,53 @@
     if (!payload) return;
 
     state.dataToastShown = false;
-    setRunningUi();
-    setStatus('');
-    if (els.results) els.results.hidden = true;
+    currentSimulationState.isRunning = true;
+    currentSimulationState.progress = 0;
+    currentSimulationState.results = null;
+    currentSimulationState.error = null;
+    state.running = true;
+    state.lastResult = null;
 
-    window.api.simulationStart(payload)
+    updateSimulationUIProgress();
+    setStatus('');
+    const ui = getUIElements();
+    if (ui.results) ui.results.hidden = true;
+
+    api.simulationStart(payload)
       .then((res) => {
         if (res && res.ok && res.runId) {
           state.currentRunId = res.runId;
+          currentSimulationState.lastRunId = res.runId;
         } else {
           state.currentRunId = null;
-          resetControls();
+          currentSimulationState.lastRunId = null;
+          updateSimulationUIComplete();
           setStatus((res && res.error) || 'Falha ao iniciar a simulação.');
         }
       })
       .catch((err) => {
         state.currentRunId = null;
-        resetControls();
+        currentSimulationState.lastRunId = null;
+        updateSimulationUIComplete();
         setStatus('Erro ao iniciar a simulação: ' + (err && err.message ? err.message : String(err)));
       });
   }
 
   function cancelSimulation() {
-    if (!state.currentRunId) return;
-    if (window.api && typeof window.api.simulationCancel === 'function') {
-      try { window.api.simulationCancel(state.currentRunId); } catch (_) { /* ignora */ }
+    const runId = state.currentRunId || currentSimulationState.lastRunId;
+    const api = window.api || window.electronAPI;
+    if (api && typeof api.simulationCancel === 'function') {
+      try { api.simulationCancel(runId); } catch (_) { /* ignora */ }
     }
   }
 
   // ── Resultado ──
   function renderResult(result) {
+    if (!result) return;
+    const ui = getUIElements();
     const msgs = (result.messages || []).filter(Boolean);
     if (result.cancelled) msgs.unshift('Simulação cancelada.');
 
-    // Config do motor de Markov (Passo 2): ordem + espaço de estados.
     const meta = result.meta || {};
     const orderLabel = Number(meta.markovOrder) === 2 ? '2ª Ordem (2 Velas)' : '1ª Ordem (1 Vela)';
     const spaceLabel = meta.stateSpace === '3' ? '3 Estados (Bear/Neutro/Bull)'
@@ -399,11 +573,13 @@
     }
 
     setStatus(msgs.join(' · '));
-
     renderKpis(result.kpis || {});
+
+    // Renderiza chart apenas se a aba estiver visível (evita canvas width=0)
     drawChart(result.equityCurve || [], result.benchmark || [], result.drawdownSeries || []);
     renderTrades();
-    if (els.results) els.results.hidden = false;
+
+    if (ui.results) ui.results.hidden = false;
   }
 
   // ── Formatação ──
@@ -464,7 +640,9 @@
   }
 
   function renderKpis(k) {
-    const kpis = els.kpis;
+    const ui = getUIElements();
+    const kpis = ui.kpis;
+    if (!kpis) return;
     setKpi(kpis.net, fmtMoney(k.netProfit), moodOf(k.netProfit, true));
     setKpi(kpis.netPct, fmtPct(k.netProfitPct), moodOf(k.netProfitPct, true));
     setKpi(kpis.winrate, fmtPct(k.winRate, 1), Number(k.winRate) >= 50 ? 'is-good' : 'is-neutral');
@@ -494,14 +672,12 @@
     tooltipBorder: 'rgba(255,255,255,0.12)'
   };
 
-  // Ref partilhada entre o desenho e os handlers de hover.
-  // Listeners registados UMA vez (flag bound); handlers leem sempre
-  // data/geom/hoverIndex daqui, por isso redraws nunca duplicam binding.
   const chartRef = {
     bound: false,
     hoverIndex: null,
     mouseY: null,
-    geom: null
+    geom: null,
+    pendingDraw: null
   };
 
   function fmtAxisDate(d, spanDays) {
@@ -546,7 +722,7 @@
     for (let i = 0; i < pts.length; i++) {
       const d = Math.abs(pts[i].x - x);
       if (d < bestD) { bestD = d; bestI = i; }
-      else if (pts[i].x > x && bestD <= tol) break; // pts ordenados por x
+      else if (pts[i].x > x && bestD <= tol) break;
     }
     return bestI >= 0 && bestD <= tol ? bestI : -1;
   }
@@ -560,11 +736,12 @@
 
   function onChartMove(e) {
     const g = chartRef.geom;
-    if (!g || !g.hoverable || g.eqPts.length === 0) return;
-    const rect = els.canvas.getBoundingClientRect();
+    const ui = getUIElements();
+    if (!g || !g.hoverable || g.eqPts.length === 0 || !ui.canvas) return;
+    const rect = ui.canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     chartRef.mouseY = e.clientY - rect.top;
-    const cx = Math.min(g.plotX1, Math.max(g.plotX0, mx)); // hover fora do plot → clamp ao ponto mais próximo
+    const cx = Math.min(g.plotX1, Math.max(g.plotX0, mx));
     chartRef.hoverIndex = nearestPointByX(g.eqPts, cx, g.W);
     renderChart();
   }
@@ -625,6 +802,7 @@
     return {
       W, H, plotX0, plotX1, plotY0, plotY1, bandY0, bandY1,
       tMin, tMax, spanDays: spanT / 86400000,
+      paddedMin, paddedMax,
       eqPts: mapPts(eq),
       bmPts: mapPts(bm),
       ddPts: dd.map((p) => ({ x: xOf(p.t), v: p.v })),
@@ -655,7 +833,7 @@
     if (pts.length < 2) return;
     let curveTop = Infinity;
     for (const p of pts) if (p.y < curveTop) curveTop = p.y;
-    const top = Math.max(g.plotY0, curveTop); // topo da curva
+    const top = Math.max(g.plotY0, curveTop);
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
@@ -678,7 +856,6 @@
     const hBand = g.bandY1 - g.bandY0;
     const yBand = (v) => g.bandY0 + Math.min(1, Math.abs(v) / g.ddMaxAbs) * hBand;
 
-    // área subtil
     ctx.beginPath();
     ctx.moveTo(g.ddPts[0].x, g.bandY1);
     for (let i = 0; i < n; i++) ctx.lineTo(g.ddPts[i].x, yBand(g.ddPts[i].v));
@@ -687,7 +864,6 @@
     ctx.fillStyle = 'rgba(251,113,133,0.08)';
     ctx.fill();
 
-    // linha superior discreta
     ctx.beginPath();
     ctx.moveTo(g.ddPts[0].x, yBand(g.ddPts[0].v));
     for (let i = 1; i < n; i++) ctx.lineTo(g.ddPts[i].x, yBand(g.ddPts[i].v));
@@ -763,7 +939,6 @@
       }
     }
 
-    // dot equity com halo
     ctx.beginPath();
     ctx.arc(hp.x, hp.y, 7, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(129,140,248,0.22)';
@@ -786,7 +961,7 @@
     if (g.ddActive && g.ddPts.length > 0) {
       const k = nearestPointByX(g.ddPts, hits.equity.x, 20);
       if (k >= 0) {
-        const ddPct = drawdownValue(g.ddPts[k].v); // normaliza a negativo
+        const ddPct = drawdownValue(g.ddPts[k].v);
         rows.push({ label: 'Drawdown', value: ddPct == null ? '—' : fmtPct(ddPct, 2) });
       }
     }
@@ -804,7 +979,7 @@
     const boxH = Math.ceil(pad * 2 + rows.length * rowH);
 
     let bx = hits.equity.x + 14;
-    if (bx + boxW > g.W - 4) bx = hits.equity.x - 14 - boxW; // flip junto à borda direita
+    if (bx + boxW > g.W - 4) bx = hits.equity.x - 14 - boxW;
     bx = Math.min(Math.max(4, bx), g.W - boxW - 4);
     const my = chartRef.mouseY == null ? g.plotY0 : chartRef.mouseY;
     const by = Math.min(Math.max(4, my - boxH / 2), g.H - boxH - 4);
@@ -840,19 +1015,20 @@
   }
 
   function renderChart() {
-    const canvas = els.canvas;
+    const ui = getUIElements();
+    const canvas = ui.canvas;
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
     const g = chartRef.geom;
     const W = g ? g.W : (canvas.clientWidth || 900);
     const H = 300;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
     if (!g) { drawEmptyState(ctx, W, H); return; }
 
-    // ── Grid horizontal + labels Y ──
     ctx.strokeStyle = CHART_COLORS.grid;
     ctx.lineWidth = 1;
     ctx.font = '10px JetBrains Mono, monospace';
@@ -871,7 +1047,6 @@
       ctx.fillText(shortMoney(v), g.plotX0 - 8, y);
     }
 
-    // ── Ticks X (3–5 datas espaçadas) ──
     const xSteps = Math.max(2, Math.min(4, Math.floor((g.plotX1 - g.plotX0) / 170)));
     ctx.font = '10px JetBrains Mono, monospace';
     ctx.fillStyle = CHART_COLORS.axis;
@@ -884,13 +1059,9 @@
       ctx.fillText(fmtAxisDate(new Date(t), g.spanDays), x, g.plotY1 + 8);
     }
 
-    // ── Drawdown (banda inferior, escala própria) ──
     if (g.ddActive) drawDrawdownBand(ctx, g);
-
-    // ── Área gradient sob a equidade ──
     fillEquityArea(ctx, g);
 
-    // ── Benchmark tracejado + curva de equidade ──
     strokePath(ctx, g.bmPts, CHART_COLORS.benchLine, 1.25, [4, 4]);
     strokePath(ctx, g.eqPts, CHART_COLORS.accent, 2);
     if (g.eqPts.length === 1) {
@@ -905,27 +1076,30 @@
       ctx.fill();
     }
 
-    // ── Crosshair (por cima das séries) ──
     const hits = drawCrosshair(ctx, g);
-
-    // ── Legenda (chips, canto superior direito) ──
     drawLegend(ctx, g);
-
-    // ── Tooltip (overlay no topo) ──
     if (hits) drawTooltip(ctx, g, hits);
   }
 
   function drawChart(equity, benchmark, drawdown) {
-    const canvas = els.canvas;
+    const ui = getUIElements();
+    const canvas = ui.canvas;
     if (!canvas) return;
-    bindChartHover(canvas); // regista listeners UMA vez
+
+    const cssWidth = canvas.clientWidth || 0;
+    if (cssWidth <= 0 || !isSimulationTabVisible()) {
+      chartRef.pendingDraw = { equity, benchmark, drawdown };
+      return;
+    }
+    chartRef.pendingDraw = null;
+
+    bindChartHover(canvas);
 
     const dpr = window.devicePixelRatio || 1;
-    const cssWidth = canvas.clientWidth || 900;
     const cssHeight = 300;
     const pw = Math.round(cssWidth * dpr);
     const ph = Math.round(cssHeight * dpr);
-    if (canvas.width !== pw || canvas.height !== ph) { // evita flicker em redraws de hover
+    if (canvas.width !== pw || canvas.height !== ph) {
       canvas.width = pw;
       canvas.height = ph;
     }
@@ -938,7 +1112,8 @@
 
   // ── Tabela de trades ──
   function getFilteredTrades() {
-    const trades = (state.lastResult && state.lastResult.trades) || [];
+    const result = state.lastResult || currentSimulationState.results;
+    const trades = (result && result.trades) || [];
     let list = trades;
     const q = state.searchQuery;
     if (q) {
@@ -954,7 +1129,7 @@
         const va = a[key];
         const vb = b[key];
         if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
-        return String(va).localeCompare(String(vb)) * dir;
+        return String(va || '').localeCompare(String(vb || '')) * dir;
       });
     }
     return list;
@@ -984,26 +1159,28 @@
   }
 
   function renderTrades() {
-    if (!els.tradesBody) return;
+    const ui = getUIElements();
+    if (!ui.tradesBody) return;
     const filtered = getFilteredTrades();
     const totalPages = Math.max(1, Math.ceil(filtered.length / state.pageSize));
     if (state.page >= totalPages) state.page = totalPages - 1;
     const start = state.page * state.pageSize;
     const pageItems = filtered.slice(start, start + state.pageSize);
 
-    els.tradesBody.innerHTML = '';
+    ui.tradesBody.innerHTML = '';
+    const result = state.lastResult || currentSimulationState.results;
     if (pageItems.length === 0) {
       const tr = document.createElement('tr');
       tr.className = 'empty';
       const td = document.createElement('td');
       td.colSpan = 9;
-      td.textContent = state.lastResult && (state.lastResult.trades || []).length > 0
+      td.textContent = result && (result.trades || []).length > 0
         ? 'Nenhum trade corresponde à pesquisa.'
         : 'Nenhum trade no resultado da simulação.';
       tr.appendChild(td);
-      els.tradesBody.appendChild(tr);
+      ui.tradesBody.appendChild(tr);
     } else {
-      for (const t of pageItems) els.tradesBody.appendChild(buildTradeRow(t));
+      for (const t of pageItems) ui.tradesBody.appendChild(buildTradeRow(t));
     }
 
     updateSortIndicators();
@@ -1011,16 +1188,18 @@
   }
 
   function updatePagination(total, totalPages) {
-    if (els.pageInfo) {
+    const ui = getUIElements();
+    if (ui.pageInfo) {
       const from = total === 0 ? 0 : state.page * state.pageSize + 1;
       const to = Math.min(total, (state.page + 1) * state.pageSize);
-      els.pageInfo.textContent = from + '–' + to + ' de ' + total.toLocaleString('pt-PT');
+      ui.pageInfo.textContent = from + '–' + to + ' de ' + total.toLocaleString('pt-PT');
     }
-    if (els.pagePrev) els.pagePrev.disabled = state.page <= 0 || total === 0;
-    if (els.pageNext) els.pageNext.disabled = state.page >= totalPages - 1 || total === 0;
+    if (ui.pagePrev) ui.pagePrev.disabled = state.page <= 0 || total === 0;
+    if (ui.pageNext) ui.pageNext.disabled = state.page >= totalPages - 1 || total === 0;
   }
 
   function onSortClick(th) {
+    if (!th || !th.dataset) return;
     const key = th.dataset.sort;
     if (state.sortKey === key) {
       state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
@@ -1035,6 +1214,7 @@
   function updateSortIndicators() {
     const ths = document.querySelectorAll('#sim-trades-table thead th[data-sort]');
     ths.forEach((th) => {
+      if (!th) return;
       th.classList.toggle('sort-active', th.dataset.sort === state.sortKey);
       const arrow = th.querySelector('.sim-sort-arrow');
       if (arrow) arrow.textContent = th.dataset.sort === state.sortKey ? (state.sortDir === 'asc' ? ' ▲' : ' ▼') : '';

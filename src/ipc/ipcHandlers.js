@@ -468,6 +468,8 @@ function resolveParams(uiParams) {
   const uiUseVolFilter = uiParams?.useVolFilter;
   const uiUseLatestClosed = uiParams?.useLatestClosed ?? uiParams?.use_latest_closed;
   const uiTimeframe = uiParams?.timeframe;
+  const uiUseRvolGate = uiParams?.useRvolGate ?? uiParams?.rvolGate;
+  const uiRvolMin = uiParams?.rvol_min ?? uiParams?.rvolMin;
 
   return {
     edge_threshold: uiEdge != null ? Number(uiEdge) : Number(dbParams.edge_threshold),
@@ -476,6 +478,8 @@ function resolveParams(uiParams) {
     horizon_days: uiHorizon != null ? Number(uiHorizon) : Number(dbParams.horizon_days),
     useVolFilter: uiUseVolFilter !== undefined ? Boolean(uiUseVolFilter) : true,
     useLatestClosed: uiUseLatestClosed === true,
+    useRvolGate: uiUseRvolGate !== undefined ? Boolean(uiUseRvolGate) : true,
+    rvol_min: uiRvolMin != null ? Number(uiRvolMin) : 1.0,
     timeframe: uiTimeframe || '1d'
   };
 }
@@ -741,30 +745,96 @@ app.whenReady().then(async () => {
       return { ok: true };
     });
 
-    // Spec Passo 3 – 4.1 Handler START_SIMULATION (workerData)
+    // Spec: Handler START_SIMULATION com Pool Paralela de Worker Threads baseada em os.cpus().length
     ipcMain.handle('START_SIMULATION', async (event, params) => {
       return new Promise((resolve, reject) => {
         const dbPath = path.join(app.getPath('userData'), 'trades.db');
         const workerScript = path.join(__dirname, 'src/engine/simulationWorker.js');
-        // params pode conter { tickers, startDate, endDate, config } ou { tickers, params }
-        const tickers = params.tickers || params.universe || [];
+        const rawTickers = params.tickers || params.universe || [];
         const startDate = params.startDate || params.params?.startDate || null;
         const endDate = params.endDate || params.params?.endDate || null;
         const config = params.config || params.params || {};
-        // normaliza tickers para array de strings
-        const normTickers = (Array.isArray(tickers) ? tickers : []).map(t => typeof t === 'string' ? t : (t.ticker || '')).filter(Boolean);
-        const worker = new Worker(workerScript, { workerData: { dbPath, tickers: normTickers, startDate, endDate, config } });
-        worker.on('message', (msg) => {
-          if (msg.type === 'PROGRESS') {
-            event.sender.send('SIMULATION_PROGRESS', msg.data);
-          } else if (msg.type === 'COMPLETE') {
-            resolve({ success: true, results: msg.results });
-          } else if (msg.type === 'ERROR') {
-            reject(new Error(msg.error || 'Worker error'));
-          }
+        const normTickers = (Array.isArray(rawTickers) ? rawTickers : []).map(t => typeof t === 'string' ? t : (t.ticker || '')).filter(Boolean);
+
+        if (normTickers.length === 0) {
+          return resolve({ success: true, results: [] });
+        }
+
+        const numCores = Math.max(1, os.cpus().length - 1);
+        const workerCount = Math.min(numCores, normTickers.length);
+        const chunks = Array.from({ length: workerCount }, () => []);
+
+        normTickers.forEach((t, index) => {
+          chunks[index % workerCount].push(t);
         });
-        worker.on('error', (err) => { console.error('[Simulation Error]', err); reject(err); });
-        worker.on('exit', (code) => { if (code !== 0) console.warn(`[Simulation Worker] Terminou com código de saída ${code}`); });
+
+        let completedWorkers = 0;
+        let totalProcessed = 0;
+        const allResults = [];
+        let hasError = false;
+
+        chunks.forEach((tickerChunk) => {
+          if (tickerChunk.length === 0) {
+            completedWorkers++;
+            if (completedWorkers === workerCount && !hasError) {
+              resolve({ success: true, results: allResults });
+            }
+            return;
+          }
+
+          const worker = new Worker(workerScript, {
+            workerData: {
+              ...params,
+              tickers: tickerChunk,
+              startDate,
+              endDate,
+              config,
+              dbPath
+            }
+          });
+
+          worker.on('message', (msg) => {
+            if (msg.type === 'PROGRESS') {
+              totalProcessed += (msg.data && msg.data.deltaProcessed) || 1;
+              if (event && event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('SIMULATION_PROGRESS', {
+                  current: totalProcessed,
+                  total: normTickers.length,
+                  ticker: msg.data.ticker,
+                  tradesCount: allResults.length + (msg.data.tradesCount || 0)
+                });
+              }
+            } else if (msg.type === 'COMPLETE') {
+              if (Array.isArray(msg.results)) {
+                allResults.push(...msg.results);
+              }
+              completedWorkers++;
+              if (completedWorkers === workerCount && !hasError) {
+                resolve({ success: true, results: allResults });
+              }
+            } else if (msg.type === 'ERROR') {
+              console.error('[Simulation Worker Error]', msg.error);
+              completedWorkers++;
+              if (completedWorkers === workerCount && !hasError) {
+                resolve({ success: true, results: allResults });
+              }
+            }
+          });
+
+          worker.on('error', (err) => {
+            console.error('[Simulation Worker Fatal Error]', err);
+            completedWorkers++;
+            if (completedWorkers === workerCount && !hasError) {
+              resolve({ success: true, results: allResults });
+            }
+          });
+
+          worker.on('exit', (code) => {
+            if (code !== 0) {
+              console.warn(`[Simulation Worker] Terminou com código de saída ${code}`);
+            }
+          });
+        });
       });
     });
 
