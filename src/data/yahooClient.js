@@ -1036,6 +1036,71 @@ async function fetchMissingRecentCandles(ticker, lastDate) {
   return networkLimit(() => fetchWithRetry(fn, 3, 500));
 }
 
+async function fetchLatestCandlesForSingleTicker(ticker, lastDate) {
+  const cleanTicker = encodeURIComponent(String(ticker).trim().toUpperCase());
+  let url = '';
+
+  if (lastDate) {
+    const p1 = Math.floor(new Date(lastDate).getTime() / 1000) + 86400;
+    const p2 = Math.floor(Date.now() / 1000);
+    if (p1 >= p2) return [];
+    url = `https://query1.finance.yahoo.com/v8/finance/chart/${cleanTicker}?period1=${p1}&period2=${p2}&interval=1d`;
+  } else {
+    url = `https://query1.finance.yahoo.com/v8/finance/chart/${cleanTicker}?range=5d&interval=1d`;
+  }
+
+  const retries = 3;
+  let lastErr = null;
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await axios.get(url, {
+        timeout: 8000,
+        headers: { 'User-Agent': USER_AGENT }
+      });
+
+      const result = response.data?.chart?.result?.[0];
+      if (!result || !result.timestamp || result.timestamp.length === 0) {
+        return [];
+      }
+
+      const timestamps = result.timestamp;
+      const quote = result.indicators?.quote?.[0] || {};
+      const candles = [];
+
+      for (let i = 0; i < timestamps.length; i++) {
+        if (quote.close?.[i] == null) continue;
+        const d = new Date(timestamps[i] * 1000);
+        const dateStr = d.toISOString().slice(0, 10);
+        const closeVal = Number(quote.close[i]);
+        if (!Number.isFinite(closeVal)) continue;
+        candles.push({
+          ticker: String(ticker).trim().toUpperCase(),
+          date: dateStr,
+          open: Number.isFinite(Number(quote.open?.[i])) ? Number(quote.open[i]) : closeVal,
+          high: Number.isFinite(Number(quote.high?.[i])) ? Number(quote.high[i]) : Math.max(closeVal, Number.isFinite(Number(quote.open?.[i])) ? Number(quote.open[i]) : closeVal),
+          low: Number.isFinite(Number(quote.low?.[i])) ? Number(quote.low[i]) : Math.min(closeVal, Number.isFinite(Number(quote.open?.[i])) ? Number(quote.open[i]) : closeVal),
+          close: closeVal,
+          volume: Number.isFinite(Number(quote.volume?.[i])) ? Number(quote.volume[i]) : 0
+        });
+      }
+
+      return candles;
+    } catch (err) {
+      lastErr = err;
+      if (attempt === retries || isDefinitiveDataError(err)) break;
+      const isRateLimit = isRateLimitError(err);
+      const baseWait = attempt === 1 ? 1000 : 3000;
+      const jitter = 200 + Math.floor(Math.random() * 300);
+      const delay = (isRateLimit ? baseWait * 1.5 : baseWait) + jitter;
+      console.warn(`[Yahoo Sync Retry] ${ticker} tentativa ${attempt}/${retries} falhou (${err.message}). A aguardar ${delay}ms...`);
+      await sleep(delay);
+    }
+  }
+
+  throw lastErr || new Error(`Falha ao obter cotações para ${ticker}`);
+}
+
 async function fetchIncrementalCandles(ticker, lastDate) {
   const cleanTicker = encodeURIComponent(String(ticker).trim().toUpperCase());
   let url = '';
@@ -1145,6 +1210,7 @@ module.exports = {
   fetchYahooCandles,
   fetchRecentFallback,
   fetchMissingRecentCandles,
+  fetchLatestCandlesForSingleTicker,
   fetchIncrementalCandles,
   syncSingleTicker,
   searchTickers,

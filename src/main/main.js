@@ -1619,155 +1619,174 @@ app.whenReady().then(async () => {
       }
     });
 
-    const handleSyncAllRecentPrices = async (event, input = {}) => {
-      try {
-        const indexFilter = (input && typeof input === 'object')
-          ? (input.indexFilter || input.index || input.indexName || null)
-          : (typeof input === 'string' ? input : null);
+    let syncRecentInProgress = false;
 
-        // 1. Auditoria local rápida de todos os ativos da lista
-        const assets = db.getMyListAssetsSyncStatus(indexFilter);
+    ipcMain.handle('sync-audit', async (_event, input = {}) => {
+      const startTime = Date.now();
+      const indexFilter = (input && typeof input === 'object')
+        ? (input.indexFilter || input.index || input.indexName || null)
+        : (typeof input === 'string' ? input : null);
+
+      console.log('[sync-audit] Starting audit with indexFilter:', indexFilter);
+
+      try {
+        const allStoredStocks = typeof db.auditMyListAssets === 'function'
+          ? db.auditMyListAssets(indexFilter)
+          : db.getMyListAssetsSyncStatus(indexFilter);
+        
+        console.log('[sync-audit] Audit completed in', Date.now() - startTime, 'ms, found', allStoredStocks?.length || 0, 'stocks');
+
         const expectedTradingDay = db.getLastExpectedTradingDay();
 
-        if (!assets || assets.length === 0) {
+        if (!allStoredStocks || allStoredStocks.length === 0) {
           return {
-            ok: true,
-            success: true,
-            total: 0,
-            totalStocks: 0,
-            updatedCount: 0,
-            skippedCount: 0,
-            alreadySyncedCount: 0,
-            alreadyUpToDateCount: 0,
-            failedCount: 0,
-            failedTickers: []
+            ok: true, total: 0, pending: 0, upToDate: 0,
+            pendingList: [], upToDateList: []
           };
         }
 
-        const pendingAssets = [];
-        let alreadyUpToDateCount = 0;
+        const pendingList = [];
+        const upToDateList = [];
 
-        for (const asset of assets) {
+        for (const asset of allStoredStocks) {
           if (asset.last_date && expectedTradingDay && asset.last_date >= expectedTradingDay) {
-            alreadyUpToDateCount++;
+            upToDateList.push(asset);
           } else {
-            pendingAssets.push(asset);
+            pendingList.push(asset);
           }
         }
 
-        const totalToProcess = pendingAssets.length;
-        if (totalToProcess === 0) {
-          return {
-            ok: true,
-            success: true,
-            total: assets.length,
-            totalStocks: assets.length,
-            updatedCount: 0,
-            skippedCount: alreadyUpToDateCount,
-            alreadySyncedCount: alreadyUpToDateCount,
-            alreadyUpToDateCount,
-            failedCount: 0,
-            failedTickers: []
-          };
-        }
-
-        const allNewCandles = [];
-        const updatedTickers = [];
-        const failedTickers = [];
-        let fallbackInitialized = 0;
-        let completedCount = 0;
-
-        // 2. Execução paralela controlada via p-limit(5) com try/catch isolado
-        const tasks = pendingAssets.map(asset => yahooClient.networkLimit(async () => {
-          try {
-            const candles = await yahooClient.fetchIncrementalCandles(asset.ticker, asset.last_date);
-            if (candles && candles.length > 0) {
-              allNewCandles.push(...candles);
-              updatedTickers.push(asset.ticker);
-              if (!asset.last_date) {
-                fallbackInitialized++;
-              }
-            }
-          } catch (err) {
-            console.warn(`[Sync Warning] Falha ao atualizar ${asset.ticker}: ${err.message}`);
-            failedTickers.push({ ticker: asset.ticker, reason: err.message });
-          } finally {
-            completedCount++;
-            // Throttling IPC: envia progresso a cada 10 ativos ou no último
-            if (completedCount % 10 === 0 || completedCount === totalToProcess) {
-              const payload = {
-                current: completedCount,
-                total: totalToProcess,
-                ticker: asset.ticker,
-                percent: Math.round((completedCount / totalToProcess) * 100)
-              };
-              if (event && event.sender && !event.sender.isDestroyed()) {
-                event.sender.send('SYNC_RECENT_PROGRESS', payload);
-                event.sender.send('sync-all-progress', payload);
-              } else if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('SYNC_RECENT_PROGRESS', payload);
-                mainWindow.webContents.send('sync-all-progress', payload);
-              }
-            }
-          }
-        }));
-
-        await Promise.all(tasks);
-
-        // 3. Gravação atómica em lote na SQLite
-        let totalNewCandles = 0;
-        if (allNewCandles.length > 0) {
-          totalNewCandles = db.saveBulkIncrementalCandles(allNewCandles);
-        }
-
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('sync-all-done', {
-            totalStocks: assets.length,
-            total: assets.length,
-            updatedCount: updatedTickers.length,
-            updated: updatedTickers.length,
-            skippedCount: alreadyUpToDateCount,
-            alreadySyncedCount: alreadyUpToDateCount,
-            alreadyUpToDateCount,
-            fallbackInitialized,
-            failedCount: failedTickers.length,
-            totalNewCandles,
-            status: 'done'
-          });
-        }
+        console.log('[sync-audit] Pending:', pendingList.length, 'Up to date:', upToDateList.length);
 
         return {
           ok: true,
-          success: true,
-          total: assets.length,
-          totalStocks: assets.length,
-          updated: updatedTickers.length,
-          updatedCount: updatedTickers.length,
-          alreadyUpToDateCount,
-          alreadySyncedCount: alreadyUpToDateCount,
-          skippedCount: alreadyUpToDateCount,
-          fallbackInitialized,
-          failed: failedTickers,
-          failedTickers,
-          failedCount: failedTickers.length
+          total: allStoredStocks.length,
+          pending: pendingList.length,
+          upToDate: upToDateList.length,
+          pendingList,
+          upToDateList,
+          expectedTradingDay
         };
-      } catch (fatalError) {
-        console.error('[Sync Fatal Error]', fatalError);
-        return {
-          ok: false,
-          success: false,
-          updated: 0,
-          updatedCount: 0,
-          failed: [],
-          failedTickers: [],
-          failedCount: 0,
-          error: fatalError.message
-        };
+      } catch (err) {
+        console.error('[sync-audit] Error:', err);
+        return { ok: false, error: err.message || String(err), total: 0, pending: 0, upToDate: 0 };
       }
-    };
+    });
 
-    ipcMain.handle('sync-all-recent-prices', handleSyncAllRecentPrices);
-    ipcMain.handle('sync-all-list-stocks', handleSyncAllRecentPrices);
+    ipcMain.handle('sync-start-download', async (event, input = {}) => {
+      if (syncRecentInProgress) {
+        return { ok: false, error: 'sync-already-in-progress' };
+      }
+
+      const indexFilter = (input && typeof input === 'object')
+        ? (input.indexFilter || input.index || input.indexName || null)
+        : (typeof input === 'string' ? input : null);
+
+      const sender = event && event.sender && !event.sender.isDestroyed()
+        ? event.sender
+        : (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null);
+
+      const sendEvent = (channel, payload) => {
+        if (sender && !sender.isDestroyed()) sender.send(channel, payload);
+      };
+
+      let allStoredStocks;
+      let expectedTradingDay;
+      try {
+        allStoredStocks = typeof db.auditMyListAssets === 'function'
+          ? db.auditMyListAssets(indexFilter)
+          : db.getMyListAssetsSyncStatus(indexFilter);
+        expectedTradingDay = db.getLastExpectedTradingDay();
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+
+      if (!allStoredStocks || allStoredStocks.length === 0) {
+        return { ok: true, started: false, total: 0, pending: 0 };
+      }
+
+      const pendingQueue = [];
+      let alreadyUpToDateCount = 0;
+
+      for (const asset of allStoredStocks) {
+        if (asset.last_date && expectedTradingDay && asset.last_date >= expectedTradingDay) {
+          alreadyUpToDateCount++;
+        } else {
+          pendingQueue.push(asset);
+        }
+      }
+
+      const totalPending = pendingQueue.length;
+      if (totalPending === 0) {
+        return { ok: true, started: false, total: allStoredStocks.length, pending: 0, alreadyUpToDateCount };
+      }
+
+      syncRecentInProgress = true;
+
+      (async () => {
+        let updatedCount = 0;
+        const failedTickers = [];
+        let fallbackInitialized = 0;
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        try {
+          for (let i = 0; i < totalPending; i++) {
+            const asset = pendingQueue[i];
+            try {
+              const fetchFn = typeof yahooClient.fetchLatestCandlesForSingleTicker === 'function'
+                ? yahooClient.fetchLatestCandlesForSingleTicker
+                : yahooClient.fetchIncrementalCandles;
+              const candles = await fetchFn(asset.ticker, asset.last_date);
+
+              if (candles && candles.length > 0) {
+                if (typeof db.saveSingleAssetCandles === 'function') {
+                  db.saveSingleAssetCandles(candles);
+                } else {
+                  db.saveBulkIncrementalCandles(candles);
+                }
+                updatedCount++;
+                if (!asset.last_date) fallbackInitialized++;
+              }
+            } catch (err) {
+              console.warn(`[Sync Warning] Falha ao sincronizar ${asset.ticker}:`, err.message);
+              failedTickers.push({ ticker: asset.ticker, reason: err.message });
+            }
+
+            sendEvent('SYNC_RECENT_PROGRESS', {
+              current: i + 1,
+              total: totalPending,
+              ticker: asset.ticker,
+              percent: Math.round(((i + 1) / totalPending) * 100)
+            });
+
+            if (i < totalPending - 1) await sleep(100);
+          }
+        } catch (fatalError) {
+          console.error('[Sync Fatal Error]', fatalError);
+        } finally {
+          syncRecentInProgress = false;
+        }
+
+        sendEvent('sync-all-done', {
+          totalStocks: allStoredStocks.length,
+          total: allStoredStocks.length,
+          updatedCount,
+          alreadyUpToDateCount,
+          fallbackInitialized,
+          failedCount: failedTickers.length,
+          failedTickers,
+          status: 'done'
+        });
+      })();
+
+      return {
+        ok: true,
+        started: true,
+        total: allStoredStocks.length,
+        pending: totalPending,
+        alreadyUpToDateCount
+      };
+    });
 
     ipcMain.handle('download-full-history-for-index', async (event, input) => {
       const { index, operationId: requestedId } = indexInput(input);

@@ -92,14 +92,17 @@ test('update-stock-metadata expõe um único handler que delega em db.updateStoc
   assert.match(preload, /updateStockMetadata:\s*\(ticker,\s*data\)\s*=>\s*ipcRenderer\.invoke\('update-stock-metadata',\s*\{\s*ticker,\s*data\s*\}\)/);
 });
 
-test('sync-all-recent-prices expõe contrato de auditoria rápida, p-limit e try/catch isolado', () => {
-  assert.equal((main.match(/ipcMain\.handle\(['"]sync-all-recent-prices['"]/g) || []).length, 1);
-  assert.match(main, /db\.getMyListAssetsSyncStatus\(indexFilter\)/);
+test('sync-audit e sync-start-download expõem contrato de 2 fases separadas', () => {
+  assert.equal((main.match(/ipcMain\.handle\(['"]sync-audit['"]/g) || []).length, 1);
+  assert.equal((main.match(/ipcMain\.handle\(['"]sync-start-download['"]/g) || []).length, 1);
+  assert.match(main, /db\.auditMyListAssets|db\.getMyListAssetsSyncStatus/);
   assert.match(main, /db\.getLastExpectedTradingDay\(\)/);
-  assert.match(main, /yahooClient\.networkLimit\(/);
-  assert.match(main, /yahooClient\.fetchIncrementalCandles\(/);
-  assert.match(main, /db\.saveBulkIncrementalCandles\(/);
-  assert.match(preload, /syncAllRecentPrices:\s*\(indexFilter\)\s*=>\s*ipcRenderer\.invoke\('sync-all-recent-prices',\s*indexFilter\)/);
+  assert.match(main, /yahooClient\.fetchLatestCandlesForSingleTicker|yahooClient\.fetchIncrementalCandles/);
+  assert.match(main, /db\.saveSingleAssetCandles|db\.saveBulkIncrementalCandles/);
+  assert.match(main, /pendingList/);
+  assert.match(main, /upToDateList/);
+  assert.match(preload, /syncAudit:/);
+  assert.match(preload, /syncStartDownload:/);
   assert.match(preload, /'SYNC_RECENT_PROGRESS'/);
 });
 

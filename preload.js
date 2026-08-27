@@ -59,6 +59,8 @@ const apiBridge = {
   deleteTickerHistory: (ticker) => ipcRenderer.invoke('ticker:deleteHistory', { ticker }),
   getTickerDataRange: (ticker) => ipcRenderer.invoke('get-ticker-data-range', { ticker }),
   purgeInactiveStocks: (daysCutoff = 60) => ipcRenderer.invoke('db:purgeInactive', { daysCutoff }),
+  syncAudit: (indexFilter) => ipcRenderer.invoke('sync-audit', { indexFilter }),
+  syncStartDownload: (indexFilter) => ipcRenderer.invoke('sync-start-download', { indexFilter }),
   syncAllRecentPrices: (indexFilter) => ipcRenderer.invoke('sync-all-recent-prices', indexFilter),
   syncAllListStocks: (indexFilter) => ipcRenderer.invoke('sync-all-recent-prices', indexFilter),
   checkListFreshness: (indexFilter) => ipcRenderer.invoke('check-list-freshness', indexFilter),
