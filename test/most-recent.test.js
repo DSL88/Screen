@@ -328,9 +328,9 @@ test('fetchIncrementalCandles calcula período correto e ignora se já atualizad
     assert.equal(res[0].ticker, 'AAPL');
     assert.equal(res[0].close, 154);
 
-    // Caso B: Ativo sem data prévia
+    // Caso B: Ativo sem data prévia (fallback contingência 3mo / 5d)
     const resVirgin = await fetchIncrementalCandles('NVDA', null);
-    assert.match(requestedUrl, /range=5d/);
+    assert.match(requestedUrl, /range=(3mo|5d)/);
     assert.equal(resVirgin.length, 1);
     assert.equal(resVirgin[0].ticker, 'NVDA');
 

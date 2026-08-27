@@ -1046,38 +1046,97 @@ async function fetchIncrementalCandles(ticker, lastDate) {
     if (p1 >= p2) return []; // Já se encontra atualizado
     url = `https://query1.finance.yahoo.com/v8/finance/chart/${cleanTicker}?period1=${p1}&period2=${p2}&interval=1d`;
   } else {
-    // Ativo sem histórico prévio: puxa apenas os últimos 5 dias para inicializar
-    url = `https://query1.finance.yahoo.com/v8/finance/chart/${cleanTicker}?range=5d&interval=1d`;
+    // Ativo virgem sem histórico: download de contingência (3 meses) para aquisição imediata
+    url = `https://query1.finance.yahoo.com/v8/finance/chart/${cleanTicker}?range=3mo&interval=1d`;
   }
 
-  const response = await axios.get(url, {
-    timeout: 7000,
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-  });
+  const retries = 3;
+  let lastErr = null;
 
-  const result = response.data?.chart?.result?.[0];
-  if (!result || !result.timestamp || result.timestamp.length === 0) return [];
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await axios.get(url, {
+        timeout: 7000,
+        headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' }
+      });
 
-  const timestamps = result.timestamp;
-  const quote = result.indicators?.quote?.[0] || {};
-  const candles = [];
+      const result = response.data?.chart?.result?.[0];
+      if (!result || !result.timestamp || result.timestamp.length === 0) return [];
 
-  for (let i = 0; i < timestamps.length; i++) {
-    if (quote.close?.[i] == null) continue;
-    const d = new Date(timestamps[i] * 1000);
-    const dateStr = d.toISOString().slice(0, 10);
-    candles.push({
-      ticker: ticker.toUpperCase(),
-      date: dateStr,
-      open: Number(quote.open?.[i] || quote.close[i]),
-      high: Number(quote.high?.[i] || quote.close[i]),
-      low: Number(quote.low?.[i] || quote.close[i]),
-      close: Number(quote.close[i]),
-      volume: Number(quote.volume?.[i] || 0)
-    });
+      const timestamps = result.timestamp;
+      const quote = result.indicators?.quote?.[0] || {};
+      const candles = [];
+
+      for (let i = 0; i < timestamps.length; i++) {
+        if (quote.close?.[i] == null) continue;
+        const d = new Date(timestamps[i] * 1000);
+        const dateStr = d.toISOString().slice(0, 10);
+        const closeVal = Number(quote.close[i]);
+        if (!Number.isFinite(closeVal)) continue;
+
+        const openVal = Number.isFinite(Number(quote.open?.[i])) ? Number(quote.open[i]) : closeVal;
+        const highVal = Number.isFinite(Number(quote.high?.[i])) ? Number(quote.high[i]) : Math.max(openVal, closeVal);
+        const lowVal = Number.isFinite(Number(quote.low?.[i])) ? Number(quote.low[i]) : Math.min(openVal, closeVal);
+        const volVal = Number.isFinite(Number(quote.volume?.[i])) ? Number(quote.volume[i]) : 0;
+
+        candles.push({
+          ticker: String(ticker).toUpperCase().trim(),
+          date: dateStr,
+          open: openVal,
+          high: highVal,
+          low: lowVal,
+          close: closeVal,
+          volume: volVal
+        });
+      }
+
+      return candles;
+    } catch (err) {
+      lastErr = err;
+      if (attempt === retries || isDefinitiveDataError(err)) {
+        break;
+      }
+      const isRateLimit = isRateLimitError(err);
+      const baseWait = attempt === 1 ? 1000 : 3000;
+      const jitter = 200 + Math.floor(Math.random() * 300);
+      const delay = (isRateLimit ? baseWait * 1.5 : baseWait) + jitter;
+      console.warn(`[Yahoo Sync Retry] ${ticker} tentativa ${attempt}/${retries} falhou (${err.message}). A aguardar ${delay}ms...`);
+      await sleep(delay);
+    }
   }
 
-  return candles;
+  // Se falhar e for ativo virgem (3mo), tenta um último recurso de 5d antes de desistir
+  if (!lastDate && lastErr) {
+    try {
+      const fallbackUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${cleanTicker}?range=5d&interval=1d`;
+      const fallbackRes = await axios.get(fallbackUrl, {
+        timeout: 7000,
+        headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' }
+      });
+      const result = fallbackRes.data?.chart?.result?.[0];
+      if (result && result.timestamp && result.timestamp.length > 0) {
+        const timestamps = result.timestamp;
+        const quote = result.indicators?.quote?.[0] || {};
+        const candles = [];
+        for (let i = 0; i < timestamps.length; i++) {
+          if (quote.close?.[i] == null) continue;
+          const d = new Date(timestamps[i] * 1000);
+          candles.push({
+            ticker: String(ticker).toUpperCase().trim(),
+            date: d.toISOString().slice(0, 10),
+            open: Number(quote.open?.[i] || quote.close[i]),
+            high: Number(quote.high?.[i] || quote.close[i]),
+            low: Number(quote.low?.[i] || quote.close[i]),
+            close: Number(quote.close[i]),
+            volume: Number(quote.volume?.[i] || 0)
+          });
+        }
+        if (candles.length > 0) return candles;
+      }
+    } catch (_) {}
+  }
+
+  throw lastErr || new Error(`Falha ao obter cotações para ${ticker}`);
 }
 
 module.exports = {

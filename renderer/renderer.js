@@ -2228,8 +2228,10 @@
       .filter(Boolean).forEach((btn) => { if (btn) btn.disabled = busy; });
   }
 
+  let isSyncingFirstRegisto = false;
   if (btnFirstRegisto) {
     btnFirstRegisto.addEventListener('click', async () => {
+      if (isSyncingFirstRegisto) return;
       const requestIndex = getSelectedIndexDbName();
       const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
       const idxLabel = idx === 'ALL' ? 'Todos os Índices'
@@ -2242,6 +2244,7 @@
         return;
       }
 
+      isSyncingFirstRegisto = true;
       firstRegistoActive = true;
       setFirstRegistoBusy(true);
       const label = btnFirstRegisto.querySelector('span');
@@ -2292,6 +2295,7 @@
         if (typeof status !== 'undefined' && status) status.textContent = 'Erro no 1º Registo: ' + (err.message || String(err));
         if (indexBulkProgressLabel) indexBulkProgressLabel.innerHTML = iconSvg('x-circle') + ' ' + escapeHtml(err.message || String(err));
       } finally {
+        isSyncingFirstRegisto = false;
         firstRegistoActive = false;
         setFirstRegistoBusy(false);
         label.textContent = originalLabel;
@@ -2302,7 +2306,10 @@
   }
 
   // --- Mais Recente (sincronizar até à última sessão de mercado) ---
+  let isSyncingRecent = false;
   async function handleSyncAllRecent() {
+    if (isSyncingRecent) return;
+    isSyncingRecent = true;
     const btn = btnMostRecent || document.getElementById('btn-sync-recent') || document.getElementById('btn-most-recent');
     const spinner = document.getElementById('sync-spinner');
     const progressLabel = document.getElementById('sync-progress-label');
@@ -2335,6 +2342,7 @@
         const totalProc = res.totalStocks || res.total || 0;
         const updated = res.updated != null ? res.updated : (res.updatedCount || 0);
         const already = res.alreadySyncedCount || res.alreadyUpToDateCount || res.skippedCount || 0;
+        const fallback = res.fallbackInitialized || 0;
         const failedArr = Array.isArray(res.failed) ? res.failed : (res.failedTickers || []);
         const failed = res.failedCount != null ? res.failedCount : failedArr.length;
 
@@ -2342,14 +2350,14 @@
           console.warn('[Ativos com Falha na Sincronização]', failedArr);
         }
 
-        const toastMsg = `Atualização concluída: ${updated} atualizados, ${already} já estavam em dia, ${failed} falhas.`;
-        showToast(toastMsg, failed > 0 && updated === 0 && already === 0 ? 'error' : 'success', 5000);
+        const toastMsg = `Sincronização Concluída: Total: ${totalProc} | Atualizados: ${updated} | Já em dia: ${already} | Inicializados (Fallback): ${fallback} | Falhas: ${failed}`;
+        showToast(toastMsg, failed > 0 && updated === 0 && already === 0 && fallback === 0 ? 'error' : 'success', 6000);
 
         if (typeof status !== 'undefined' && status) {
-          status.textContent = `Atualização concluída: ${totalProc} processados (${updated} atualizados, ${already} em dia, ${failed} falhas).`;
+          status.textContent = toastMsg;
         }
         if (indexBulkProgressLabel) {
-          indexBulkProgressLabel.innerHTML = iconSvg('check-circle') + ' ' + escapeHtml(`Atualização concluída: ${updated} atualizados, ${already} em dia, ${failed} falhas.`);
+          indexBulkProgressLabel.innerHTML = iconSvg('check-circle') + ' ' + escapeHtml(toastMsg);
         }
         if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
       } else {
@@ -2363,6 +2371,7 @@
       if (typeof status !== 'undefined' && status) status.textContent = 'Erro na sincronização: ' + (err.message || String(err));
     } finally {
       // Desativação incondicional do spinner para nunca ficar em loop
+      isSyncingRecent = false;
       if (btn) btn.disabled = false;
       mostRecentActive = false;
       if (spinner) spinner.classList.add('hidden');

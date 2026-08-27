@@ -1269,10 +1269,9 @@ class DB {
   saveHistoricalCandlesFromImport(ticker, candles) {
     if (!Array.isArray(candles) || candles.length === 0) return { changes: 0 };
 
-    // Sort by date ASC before inserting
+    const canTicker = canonicalTicker(ticker);
     const sorted = [...candles].sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
-
-    const stmt = this.db.prepare(`
+    const stmt = this._stmtUpsertPrice || this.db.prepare(`
       INSERT INTO historical_prices (ticker, date, open, high, low, close, volume)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(ticker, date) DO UPDATE SET
@@ -1289,7 +1288,7 @@ class DB {
       let changes = 0;
       for (const c of rows) {
         const r = stmt.run(
-          canonicalTicker(ticker),
+          canTicker,
           c.date,
           c.open,
           c.high,
@@ -1299,16 +1298,21 @@ class DB {
         );
         changes += r.changes || 0;
       }
-      // Preencher first_date automaticamente quando ainda não existe:
-      // a primeira vela do lote (ordenado ASC) marca a origem.
-      const stock = this.db.prepare('SELECT first_date FROM stocks WHERE ticker = ?').get(canonicalTicker(ticker));
-      if (stock && (!stock.first_date || String(stock.first_date).trim() === '') && rows.length > 0 && rows[0].date) {
-        this.updateStockFirstDate(ticker, rows[0].date);
-      }
       return changes;
     });
 
-    return { changes: tx(sorted) };
+    const changes = tx(sorted);
+
+    try {
+      if (sorted.length > 0 && sorted[0].date) {
+        const stock = this.db.prepare('SELECT first_date FROM stocks WHERE UPPER(TRIM(ticker)) = ?').get(canTicker);
+        if (stock && (!stock.first_date || String(stock.first_date).trim() === '')) {
+          this.updateStockFirstDate(canTicker, sorted[0].date);
+        }
+      }
+    } catch (_) {}
+
+    return { changes };
   }
 
   hasHistoricalData(ticker) {
@@ -1681,20 +1685,11 @@ class DB {
 
   saveBulkIncrementalCandles(candlesArray) {
     if (!Array.isArray(candlesArray) || candlesArray.length === 0) return 0;
-    if (this._insertBatchTransaction) {
-      this._insertBatchTransaction(candlesArray);
-      return candlesArray.length;
-    }
     return this.saveIncrementalCandles(candlesArray);
   }
 
   saveIncrementalCandles(candlesList) {
     if (!Array.isArray(candlesList) || candlesList.length === 0) return 0;
-
-    const insertRecentCandleStmt = this._insertRecentCandleStmt || this._stmtUpsertPrice || this.db.prepare(`
-      INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
 
     const formatted = candlesList.map(c => ({
       ticker: canonicalTicker(c.ticker),
@@ -1708,38 +1703,66 @@ class DB {
 
     if (formatted.length === 0) return 0;
 
-    const saveBatchTransaction = this._insertBatchTransaction || this.db.transaction((list) => {
-      let count = 0;
-      for (const candle of list) {
-        insertRecentCandleStmt.run(
-          candle.ticker,
-          candle.date,
-          candle.open,
-          candle.high,
-          candle.low,
-          candle.close,
-          candle.volume
-        );
-        count++;
-      }
-      return count;
-    });
-
-    const savedCount = saveBatchTransaction(formatted);
-
-    // Preencher first_date automaticamente para ativos sem first_date
-    const tickerSet = new Set(formatted.map(c => c.ticker));
-    for (const t of tickerSet) {
-      const stock = this.db.prepare('SELECT first_date FROM stocks WHERE UPPER(TRIM(ticker)) = ?').get(t);
-      if (stock && (!stock.first_date || String(stock.first_date).trim() === '')) {
-        let minDate = null;
-        for (const c of formatted) {
-          if (c.ticker !== t || !c.date) continue;
-          if (!minDate || c.date < minDate) minDate = c.date;
+    let savedCount = 0;
+    if (this._insertBatchTransaction) {
+      savedCount = this._insertBatchTransaction(formatted);
+    } else {
+      const stmt = this.db.prepare(`
+        INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      const tx = this.db.transaction((list) => {
+        let count = 0;
+        for (const candle of list) {
+          stmt.run(
+            candle.ticker,
+            candle.date,
+            candle.open,
+            candle.high,
+            candle.low,
+            candle.close,
+            candle.volume
+          );
+          count++;
         }
-        if (minDate) this.updateStockFirstDate(t, minDate);
-      }
+        return count;
+      });
+      savedCount = tx(formatted);
     }
+
+    // Preencher first_date eficientemente em O(N) para ativos sem first_date
+    try {
+      const minDatesByTicker = new Map();
+      for (const c of formatted) {
+        if (!c.ticker || !c.date) continue;
+        const cur = minDatesByTicker.get(c.ticker);
+        if (!cur || c.date < cur) {
+          minDatesByTicker.set(c.ticker, c.date);
+        }
+      }
+
+      const virginStocks = this.db.prepare(`
+        SELECT ticker 
+        FROM stocks 
+        WHERE first_date IS NULL OR TRIM(first_date) = ''
+      `).all();
+
+      if (virginStocks.length > 0) {
+        const updateStmt = this.db.prepare(`
+          UPDATE stocks SET first_date = ? WHERE UPPER(TRIM(ticker)) = ?
+        `);
+        const updateTx = this.db.transaction((list) => {
+          for (const s of list) {
+            const canonicalT = canonicalTicker(s.ticker);
+            const minDate = minDatesByTicker.get(canonicalT);
+            if (minDate) {
+              updateStmt.run(minDate, canonicalT);
+            }
+          }
+        });
+        updateTx(virginStocks);
+      }
+    } catch (_) {}
 
     return savedCount;
   }

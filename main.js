@@ -749,7 +749,18 @@ app.whenReady().then(async () => {
     ipcMain.handle('START_SIMULATION', async (event, params) => {
       return new Promise((resolve, reject) => {
         const dbPath = path.join(app.getPath('userData'), 'trades.db');
-        const workerScript = path.join(__dirname, 'src/engine/simulationWorker.js');
+        const workerScript = (() => {
+          const candidates = [
+            path.join(__dirname, '../engine/simulationWorker.js'),
+            path.join(__dirname, 'src/engine/simulationWorker.js'),
+            path.join(__dirname, 'engine/simulationWorker.js'),
+            path.join(app.getAppPath(), 'src/engine/simulationWorker.js')
+          ];
+          for (const c of candidates) {
+            try { if (fs.existsSync(c)) return c; } catch (_) {}
+          }
+          return path.join(__dirname, 'src/engine/simulationWorker.js');
+        })();
         const rawTickers = params.tickers || params.universe || [];
         const startDate = params.startDate || params.params?.startDate || null;
         const endDate = params.endDate || params.params?.endDate || null;
@@ -1663,15 +1674,19 @@ app.whenReady().then(async () => {
         const allNewCandles = [];
         const updatedTickers = [];
         const failedTickers = [];
+        let fallbackInitialized = 0;
         let completedCount = 0;
 
-        // 2. Execução paralela controlada via p-limit
+        // 2. Execução paralela controlada via p-limit(5) com try/catch isolado
         const tasks = pendingAssets.map(asset => yahooClient.networkLimit(async () => {
           try {
             const candles = await yahooClient.fetchIncrementalCandles(asset.ticker, asset.last_date);
             if (candles && candles.length > 0) {
               allNewCandles.push(...candles);
               updatedTickers.push(asset.ticker);
+              if (!asset.last_date) {
+                fallbackInitialized++;
+              }
             }
           } catch (err) {
             console.warn(`[Sync Warning] Falha ao atualizar ${asset.ticker}: ${err.message}`);
@@ -1710,9 +1725,11 @@ app.whenReady().then(async () => {
             totalStocks: assets.length,
             total: assets.length,
             updatedCount: updatedTickers.length,
+            updated: updatedTickers.length,
             skippedCount: alreadyUpToDateCount,
             alreadySyncedCount: alreadyUpToDateCount,
             alreadyUpToDateCount,
+            fallbackInitialized,
             failedCount: failedTickers.length,
             totalNewCandles,
             status: 'done'
@@ -1722,16 +1739,17 @@ app.whenReady().then(async () => {
         return {
           ok: true,
           success: true,
-          updated: updatedTickers.length,
-          updatedCount: updatedTickers.length,
-          failed: failedTickers,
-          failedTickers,
-          failedCount: failedTickers.length,
           total: assets.length,
           totalStocks: assets.length,
-          skippedCount: alreadyUpToDateCount,
+          updated: updatedTickers.length,
+          updatedCount: updatedTickers.length,
+          alreadyUpToDateCount,
           alreadySyncedCount: alreadyUpToDateCount,
-          alreadyUpToDateCount
+          skippedCount: alreadyUpToDateCount,
+          fallbackInitialized,
+          failed: failedTickers,
+          failedTickers,
+          failedCount: failedTickers.length
         };
       } catch (fatalError) {
         console.error('[Sync Fatal Error]', fatalError);
@@ -2068,8 +2086,6 @@ app.whenReady().then(async () => {
       if (lock.busy) return lock.result;
       const operation = lock.operation;
 
-      const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-      const jitterSleep = () => sleep(350 + Math.random() * 350);
       const errors = [];
       let completed = 0;
       let updated = 0;
@@ -2078,6 +2094,7 @@ app.whenReady().then(async () => {
       });
 
       try {
+        // FASE 1: Auditoria e Triagem Local Instantânea
         const audit = db.auditIndexStocks(index);
         const pending = audit.stocks.filter(s => !s.isComplete);
 
@@ -2090,52 +2107,61 @@ app.whenReady().then(async () => {
 
         const total = pending.length;
 
-        for (let i = 0; i < pending.length; i++) {
-          if (isPipelineCancelled(operation)) break;
-          const stock = pending[i];
+        // FASE 2: Concorrência Controlada com p-limit(5) e Gravação em Lote
+        const tasks = pending.map((stock) => yahooClient.networkLimit(async () => {
+          if (isPipelineCancelled(operation)) return;
           const ticker = stock.ticker;
-          emit({ current: i + 1, total, ticker, name: stock.name || '', status: 'syncing', state: 'syncing' });
-
           try {
-            // 1) first_date: reutilizar o existente ou obter do Yahoo.
-            let firstDate = stock.firstDate || null;
-            if (!firstDate) {
-              firstDate = await yahooClient.fetchFirstAvailableDate(ticker);
-            }
-            if (isPipelineCancelled(operation)) break;
-            if (firstDate) db.updateStockFirstDate(ticker, firstDate);
-
-            // 2) Bloco histórico diário desde a origem.
             const candles = await yahooClient.fetchFullHistoryFromIPO(ticker);
-            if (isPipelineCancelled(operation)) break;
+            if (isPipelineCancelled(operation)) return;
 
             if (!candles || candles.length === 0) {
               const error = 'empty-history';
               errors.push({ ticker, error });
-              emit({ current: i + 1, total, ticker, name: stock.name || '', firstDate: firstDate || null,
-                status: 'error', state: 'failed', error, errorCount: errors.length });
             } else {
+              const firstDate = candles[0].date;
               db.saveHistoricalCandlesFromImport(ticker, candles);
-              db.cacheOHLCV(ticker, candles);
+              if (firstDate) db.updateStockFirstDate(ticker, firstDate);
               db.setFullHistoryFetched(ticker);
               updated++;
-              emit({ current: i + 1, total, ticker, name: stock.name || '', firstDate: firstDate || null,
-                percent: Math.round((i + 1) / total * 100), status: 'updated', state: 'success',
-                candles: candles.length, errorCount: errors.length });
             }
           } catch (err) {
             const error = err.message || String(err);
             errors.push({ ticker, error });
             console.error(`[sync-index-first-records] ${ticker}: ${error}`);
-            emit({ current: i + 1, total, ticker, name: stock.name || '', status: 'error', state: 'failed',
-              error, errorCount: errors.length });
+          } finally {
+            completed++;
+            const pct = Math.round((completed / total) * 100);
+            if (completed % 5 === 0 || completed === total) {
+              emit({
+                current: completed,
+                total,
+                ticker,
+                name: stock.name || '',
+                percent: pct,
+                status: 'syncing',
+                state: 'syncing',
+                updated,
+                errorCount: errors.length
+              });
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('first-registo-progress', {
+                  operationId: operation.operationId,
+                  index,
+                  current: completed,
+                  total,
+                  ticker,
+                  percent: pct,
+                  status: 'syncing',
+                  updated,
+                  errorCount: errors.length
+                });
+              }
+            }
           }
+        }));
 
-          completed++;
-          if (i + 1 < pending.length && !isPipelineCancelled(operation)) {
-            await jitterSleep();
-          }
-        }
+        await Promise.all(tasks);
 
         const finalStatus = operationStatus(total, errors, operation.cancelled, completed, updated);
         const finalAudit = db.auditIndexStocks(index);
