@@ -343,5 +343,19 @@ test('fetchIncrementalCandles calcula período correto e ignora se já atualizad
   }
 });
 
+test('getAllHistoricalMaxDates devolve Map com todas as datas máximas agrupadas por ticker', { skip: !SQLITE_AVAILABLE }, t => {
+  const { directory, database } = openDatabase();
+  t.after(() => { database.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+
+  database.saveHistoricalCandles('AAA', [candle('AAA', '2024-01-01'), candle('AAA', '2024-01-05')]);
+  database.saveHistoricalCandles('BBB', [candle('BBB', '2024-02-01')]);
+
+  const map = database.getAllHistoricalMaxDates();
+  assert.equal(map.get('AAA'), '2024-01-05');
+  assert.equal(map.get('BBB'), '2024-02-01');
+  assert.equal(map.get('CCC'), undefined);
+});
+
+
 
 

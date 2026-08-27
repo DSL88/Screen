@@ -903,6 +903,22 @@ class DB {
     return row && row.last_date ? row.last_date : null;
   }
 
+  getAllHistoricalMaxDates() {
+    const rows = this.db.prepare(`
+      SELECT ticker, MAX(date) as last_date
+      FROM historical_prices
+      GROUP BY ticker
+    `).all();
+
+    const map = new Map();
+    for (const r of rows) {
+      if (r && r.ticker) {
+        map.set(canonicalTicker(r.ticker), r.last_date ? String(r.last_date).slice(0, 10) : null);
+      }
+    }
+    return map;
+  }
+
   // ═══════════════════════════════════════════════════════════
   //  STOCKS — Metadata for imported assets
   // ═══════════════════════════════════════════════════════════

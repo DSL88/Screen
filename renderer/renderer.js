@@ -2333,12 +2333,13 @@
 
       if (res && (res.ok || res.success)) {
         const totalProc = res.totalStocks || res.total || 0;
-        const updated = res.updatedCount || 0;
+        const updated = res.updated != null ? res.updated : (res.updatedCount || 0);
         const already = res.alreadySyncedCount || res.alreadyUpToDateCount || res.skippedCount || 0;
-        const failed = res.failedCount || (res.failedTickers ? res.failedTickers.length : (res.errors ? res.errors.length : 0));
+        const failedArr = Array.isArray(res.failed) ? res.failed : (res.failedTickers || []);
+        const failed = res.failedCount != null ? res.failedCount : failedArr.length;
 
-        if (res.failedTickers && res.failedTickers.length > 0) {
-          console.warn('[Ativos com Falha na Sincronização]', res.failedTickers);
+        if (failedArr.length > 0) {
+          console.warn('[Ativos com Falha na Sincronização]', failedArr);
         }
 
         const toastMsg = `Atualização concluída: ${updated} atualizados, ${already} já estavam em dia, ${failed} falhas.`;

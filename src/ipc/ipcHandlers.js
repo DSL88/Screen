@@ -1722,20 +1722,27 @@ app.whenReady().then(async () => {
         return {
           ok: true,
           success: true,
+          updated: updatedTickers.length,
+          updatedCount: updatedTickers.length,
+          failed: failedTickers,
+          failedTickers,
+          failedCount: failedTickers.length,
           total: assets.length,
           totalStocks: assets.length,
-          updatedCount: updatedTickers.length,
           skippedCount: alreadyUpToDateCount,
           alreadySyncedCount: alreadyUpToDateCount,
-          alreadyUpToDateCount,
-          failedCount: failedTickers.length,
-          failedTickers
+          alreadyUpToDateCount
         };
       } catch (fatalError) {
         console.error('[Sync Fatal Error]', fatalError);
         return {
           ok: false,
           success: false,
+          updated: 0,
+          updatedCount: 0,
+          failed: [],
+          failedTickers: [],
+          failedCount: 0,
           error: fatalError.message
         };
       }
