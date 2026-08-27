@@ -1608,8 +1608,8 @@ app.whenReady().then(async () => {
       }
     });
 
-    ipcMain.handle('sync-all-list-stocks', async (_event, indexFilter) => {
-      if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: 'window-unavailable' };
+    const handleSyncAllRecentPrices = async (event, indexFilter) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, success: false, error: 'window-unavailable' };
       const requested = indexInput(indexFilter);
       const lock = beginPipelineOperation('index-incremental-sync', requested.operationId);
       if (lock.busy) return lock.result;
@@ -1617,88 +1617,153 @@ app.whenReady().then(async () => {
       const filter = requested.index || null;
 
       try {
-        const tickers = db.getCustomTickersByIndex(filter);
-        if (!tickers || tickers.length === 0) {
-          return { ok: false, success: false, status: 'failed', totalStocks: 0, updatedCount: 0,
-            totalNewCandles: 0, errors: [], error: 'no-stocks', message: 'Nenhum ativo na lista para sincronizar.' };
+        // Passo 1: Obter todos os ativos da My List e o respetivo estado de datas num único SELECT
+        const assets = db.getMyListAssetsWithDates(filter);
+
+        if (!assets || assets.length === 0) {
+          return {
+            ok: false,
+            success: false,
+            status: 'failed',
+            total: 0,
+            totalStocks: 0,
+            updatedCount: 0,
+            skippedCount: 0,
+            alreadySyncedCount: 0,
+            fallbackCount: 0,
+            failedCount: 0,
+            totalNewCandles: 0,
+            failedTickers: [],
+            failedList: [],
+            errors: [],
+            error: 'no-stocks',
+            message: 'Nenhum ativo na lista para sincronizar.'
+          };
         }
 
-        const total = tickers.length;
+        const total = assets.length;
         let completed = 0;
         let updatedCount = 0;
-        let totalNewCandles = 0;
+        let skippedCount = 0;
+        let fallbackCount = 0;
+        let failedCount = 0;
+        const failedTickers = [];
+        const failedList = [];
         const errors = [];
+        const allNewCandles = [];
         const updatedSummaries = [];
 
-        const expected = db.getLastExpectedTradingDay();
+        // Passo 2: Obter data esperada do último fecho de mercado
+        const expectedDate = db.getLastExpectedTradingDay();
         const reporter = createProgressReporter({ minIntervalMs: 100, everyN: 10 });
 
-        const sendProgress = (current, updated) => {
-          if (!mainWindow || mainWindow.isDestroyed()) return;
-          mainWindow.webContents.send('sync-all-progress', {
+        const sendProgress = (current, lastTicker, statusStr) => {
+          const payload = {
             current,
             total,
-            percent: Math.round(current / total * 100),
-            status: 'batch',
-            updated
-          });
+            percent: total > 0 ? Math.round(current / total * 100) : 100,
+            ticker: lastTicker || '',
+            status: statusStr || 'batch',
+            updated: updatedSummaries
+          };
+          if (event && event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('SYNC_RECENT_PROGRESS', payload);
+            event.sender.send('sync-all-progress', payload);
+          } else if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('SYNC_RECENT_PROGRESS', payload);
+            mainWindow.webContents.send('sync-all-progress', payload);
+          }
         };
 
-        const results = await yahooClient.syncTickersBatch(tickers, {
-          expectedTradingDay: expected,
-          getLastDate: t => db.getLastStoredDate(t),
-          shouldContinue: () => !isPipelineCancelled(operation),
-          fetchOne: async (t, lastDate) => {
-            const candles = await yahooClient.fetchIncrementalYahooHistory(t, lastDate, { throwOnError: true });
-            completed += 1;
+        // Passo 3 & 4: Filtrar e descarregar com concorrência p-limit(5)
+        const tasks = assets.map(asset => yahooClient.networkLimit(async () => {
+          if (isPipelineCancelled(operation)) {
+            return { ticker: asset.ticker, status: 'CANCELLED' };
+          }
+
+          const ticker = asset.ticker;
+          const lastDate = asset.last_date;
+
+          // Se já tiver o último dia de mercado útil, saltar sem gastar tráfego
+          if (lastDate && expectedDate && lastDate >= expectedDate) {
+            completed++;
+            skippedCount++;
             const isLast = completed === total;
-            if ((reporter.report({ isLast }) || isLast)
-              && mainWindow && !mainWindow.isDestroyed()) {
-              sendProgress(completed, []);
+            if (reporter.report({ isLast }) || isLast) {
+              sendProgress(completed, ticker, 'SKIPPED_UP_TO_DATE');
             }
-            return candles;
+            return { ticker, status: 'SKIPPED_UP_TO_DATE', lastDate };
           }
-        });
 
-        // Velas já descarregadas antes de um cancelamento são válidas:
-        // gravam-se sempre numa única transação; só as CANCELLED/não
-        // iniciadas ficam sem dados.
-        const allFlat = [];
-        for (const r of results) {
-          if (r.status === 'ERROR') {
-            errors.push({ ticker: r.ticker, error: r.error });
-            continue;
+          try {
+            const candles = await yahooClient.fetchMissingRecentCandles(ticker, lastDate);
+            completed++;
+
+            if (Array.isArray(candles) && candles.length > 0) {
+              if (lastDate) {
+                updatedCount++;
+              } else {
+                fallbackCount++;
+              }
+              for (const c of candles) {
+                allNewCandles.push(c);
+              }
+            } else {
+              skippedCount++;
+            }
+
+            const isLast = completed === total;
+            if (reporter.report({ isLast }) || isLast) {
+              sendProgress(completed, ticker, candles && candles.length > 0 ? 'UPDATED' : 'NO_NEW_DATA');
+            }
+
+            return { ticker, status: 'UPDATED', candles };
+          } catch (err) {
+            completed++;
+            failedCount++;
+            const msg = err && err.message ? err.message : String(err);
+            failedTickers.push(ticker);
+            failedList.push({ ticker, reason: msg });
+            errors.push({ ticker, error: msg });
+
+            const isLast = completed === total;
+            if (reporter.report({ isLast }) || isLast) {
+              sendProgress(completed, ticker, 'ERROR');
+            }
+
+            return { ticker, status: 'ERROR', error: msg };
           }
-          if (Array.isArray(r.candles) && r.candles.length > 0) {
-            for (const c of r.candles) allFlat.push({ ...c, ticker: r.ticker });
+        }));
+
+        await Promise.all(tasks);
+
+        // Passo 5: Gravar todas as novas velas em bloco na SQLite via db.transaction
+        let totalNewCandles = 0;
+        if (allNewCandles.length > 0) {
+          totalNewCandles = db.saveIncrementalCandles(allNewCandles);
+          const updatedTickers = Array.from(new Set(allNewCandles.map(c => c.ticker)));
+          for (const t of updatedTickers) {
+            try {
+              const summary = db.getHistoricalSummary(t);
+              updatedSummaries.push({ ticker: t, summary });
+            } catch (_) {}
           }
         }
 
-        let processed = 0;
-        for (const r of results) {
-          if (r.status !== 'CANCELLED') processed += 1;
-        }
+        sendProgress(total, '', 'done');
+        const processed = completed;
+        const successful = updatedCount + fallbackCount + skippedCount;
+        const status = operationStatus(total, errors, operation.cancelled, processed, successful);
 
-        if (allFlat.length > 0) {
-          const saved = db.saveBulkHistoricalCandles(allFlat);
-          totalNewCandles = saved.changes;
-        }
-
-        for (const r of results) {
-          if (r.status === 'SUCCESS' && Array.isArray(r.candles) && r.candles.length > 0) {
-            updatedCount += 1;
-            db.cacheOHLCV(r.ticker, r.candles);
-            updatedSummaries.push({ ticker: r.ticker, summary: db.getHistoricalSummary(r.ticker) });
-          }
-        }
-
-        sendProgress(total, updatedSummaries);
-
-        const status = operationStatus(total, errors, operation.cancelled, processed, updatedCount);
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('sync-all-done', {
             totalStocks: total,
+            total,
             updatedCount,
+            skippedCount,
+            alreadySyncedCount: skippedCount,
+            fallbackCount,
+            failedCount,
             totalNewCandles,
             errorCount: errors.length,
             status: 'done',
@@ -1708,21 +1773,31 @@ app.whenReady().then(async () => {
         }
 
         return {
-          ok: status !== 'failed',
-          success: status !== 'failed',
+          ok: status !== 'failed' || total > 0,
+          success: status !== 'failed' || total > 0,
           status,
+          total,
           totalStocks: total,
           updatedCount,
+          skippedCount,
+          alreadySyncedCount: skippedCount,
+          fallbackCount,
+          failedCount,
           totalNewCandles,
+          failedTickers,
+          failedList,
           errors
         };
       } catch (err) {
-        console.error('[sync-all-list-stocks] falhou:', err && err.message ? err.message : err);
-        return { ok: false, error: err.message || String(err) };
+        console.error('[sync-all-recent-prices] falhou:', err && err.message ? err.message : err);
+        return { ok: false, success: false, error: err.message || String(err) };
       } finally {
         finishPipelineOperation(operation);
       }
-    });
+    };
+
+    ipcMain.handle('sync-all-recent-prices', handleSyncAllRecentPrices);
+    ipcMain.handle('sync-all-list-stocks', handleSyncAllRecentPrices);
 
     ipcMain.handle('download-full-history-for-index', async (event, input) => {
       const { index, operationId: requestedId } = indexInput(input);

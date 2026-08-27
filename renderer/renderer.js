@@ -2313,21 +2313,35 @@
       btnMostRecent.disabled = true;
       mostRecentActive = true;
       const label = btnMostRecent.querySelector('span');
-      const originalLabel = label.textContent;
-      label.textContent = 'A sincronizar...';
+      const originalLabel = label ? label.textContent : 'Mais Recente';
+      if (label) label.textContent = 'A verificar e atualizar...';
       if (indexBulkProgress) indexBulkProgress.hidden = false;
-      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `Mais Recente de ${idxLabel}: a iniciar...`;
+      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A verificar e atualizar cotações recentes (${idxLabel})...`;
       if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
 
       try {
-        const res = await window.api.syncAllListStocks(requestIndex);
-        if (res && res.ok) {
-          const msg = res.totalNewCandles > 0
-            ? `Lista atualizada! ${res.totalNewCandles} novas velas gravadas (${idxLabel}).`
-            : (res.message || 'Lista já estava atualizada até ao último dia de mercado.');
-          showToast(msg, 'success');
-          if (typeof status !== 'undefined' && status) status.textContent = msg;
-          if (indexBulkProgressLabel) indexBulkProgressLabel.innerHTML = iconSvg('check-circle') + ' ' + escapeHtml(msg);
+        const syncFn = (window.api && window.api.syncAllRecentPrices) || (window.api && window.api.syncAllListStocks);
+        const res = syncFn ? await syncFn(requestIndex) : { ok: false, error: 'API indisponível' };
+        if (res && (res.ok || res.success)) {
+          const totalProc = res.totalStocks || res.total || 0;
+          const updated = res.updatedCount || 0;
+          const already = res.alreadySyncedCount || res.skippedCount || 0;
+          const fallback = res.fallbackCount || 0;
+          const failed = res.failedCount || (res.errors ? res.errors.length : 0);
+
+          if (res.failedList && res.failedList.length > 0) {
+            console.warn('[Ativos com Falha na Sincronização]', res.failedList);
+          }
+
+          const toastMsg = `Atualização concluída: ${updated} atualizados, ${already} já estavam em dia, ${failed} falhas.`;
+          showToast(toastMsg, failed > 0 && updated === 0 && already === 0 ? 'error' : 'success', 5000);
+
+          if (typeof status !== 'undefined' && status) {
+            status.textContent = `Atualização concluída: ${totalProc} processados (${updated} atualizados, ${already} em dia, ${failed} falhas).`;
+          }
+          if (indexBulkProgressLabel) {
+            indexBulkProgressLabel.innerHTML = iconSvg('check-circle') + ' ' + escapeHtml(`Atualização concluída: ${updated} atualizados, ${already} em dia, ${failed} falhas.`);
+          }
           if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
         } else {
           const errMsg = res && res.error ? res.error : 'Erro desconhecido';
@@ -2340,7 +2354,7 @@
       } finally {
         btnMostRecent.disabled = false;
         mostRecentActive = false;
-        label.textContent = originalLabel;
+        if (label) label.textContent = originalLabel;
         await reloadMyListFromDatabase();
         await refreshIndexStatusBadge();
       }
@@ -4179,16 +4193,18 @@
   });
 
   // Listeners for sync-all progress and done events
-  subscribeApiEvent('on', 'sync-all-progress', (p) => {
+  const handleRecentSyncProgress = (p) => {
     if (!p) return;
     const label = btnMostRecent && btnMostRecent.querySelector('span');
     if (mostRecentActive && label && p.current != null && p.total != null) {
-      label.textContent = `A sincronizar ${p.current}/${p.total}...`;
+      label.textContent = `A atualizar cotações recentes (${p.current} de ${p.total})...`;
     }
     if (p.current != null && p.total != null && p.total > 0) {
-      const pct = Math.round(p.current / p.total * 100);
+      const pct = typeof p.percent === 'number' ? p.percent : Math.round(p.current / p.total * 100);
       if (indexBulkProgressFill) indexBulkProgressFill.style.width = pct + '%';
-      if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `${mostRecentActive ? 'Mais Recente' : 'Baixar Tudo'}: ${p.current}/${p.total} ativos (${pct}%)...`;
+      if (indexBulkProgressLabel) {
+        indexBulkProgressLabel.textContent = `A atualizar cotações recentes: ${p.current}/${p.total} ativos (${pct}%)...`;
+      }
     }
     if (Array.isArray(p.updated)) {
       for (const u of p.updated) {
@@ -4197,7 +4213,10 @@
         }
       }
     }
-  });
+  };
+
+  subscribeApiEvent('on', 'sync-all-progress', handleRecentSyncProgress);
+  subscribeApiEvent('on', 'SYNC_RECENT_PROGRESS', handleRecentSyncProgress);
 
   subscribeApiEvent('on', 'sync-all-done', (p) => {
     if (p && p.errorCount > 0 && typeof status !== 'undefined' && status) {

@@ -584,40 +584,59 @@ class DB {
   //  HISTORICAL PRICES — Cache permanente de OHLCV
   // ═══════════════════════════════════════════════════════════
 
-  saveHistoricalCandles(candles) {
+  saveHistoricalCandles(tickerOrCandles, maybeCandles) {
+    let ticker = null;
+    let candles = [];
+    if (typeof tickerOrCandles === 'string') {
+      ticker = tickerOrCandles;
+      candles = Array.isArray(maybeCandles) ? maybeCandles : [];
+    } else if (Array.isArray(tickerOrCandles)) {
+      candles = tickerOrCandles;
+    }
     if (!Array.isArray(candles) || candles.length === 0) return { changes: 0 };
+
+    const formatted = candles.map(c => ({
+      ticker: canonicalTicker(c.ticker || ticker),
+      date: String(c.date || '').slice(0, 10),
+      open: Number(c.open),
+      high: Number(c.high),
+      low: Number(c.low),
+      close: Number(c.close),
+      volume: Number(c.volume || 0)
+    })).filter(c => c.ticker && c.date && Number.isFinite(c.close));
+
+    if (formatted.length === 0) return { changes: 0 };
 
     // Statement hoisted em _prepareStatements() — chamado por ticker no ciclo
     // de mensagens do scanner worker, não deve recompilar por invocação.
     const stmt = this._stmtUpsertPrice;
 
-    const tx = this.db.transaction((rows) => {
+    const tx = this.db.transaction((candlesList) => {
       let changes = 0;
-      for (const c of rows) {
+      for (const candle of candlesList) {
         const r = stmt.run(
-          canonicalTicker(c.ticker),
-          c.date,
-          c.open,
-          c.high,
-          c.low,
-          c.close,
-          c.volume
+          candle.ticker,
+          candle.date,
+          candle.open,
+          candle.high,
+          candle.low,
+          candle.close,
+          candle.volume
         );
         changes += r.changes || 0;
       }
       // Preencher first_date automaticamente quando ainda não existe:
       // usa a data mais antiga deste lote como referência da origem.
       const tickerSet = new Set();
-      for (const c of rows) {
-        const t = canonicalTicker(c.ticker);
-        if (t) tickerSet.add(t);
+      for (const c of candlesList) {
+        if (c.ticker) tickerSet.add(c.ticker);
       }
       for (const t of tickerSet) {
         const stock = this.db.prepare('SELECT first_date FROM stocks WHERE ticker = ?').get(t);
         if (stock && (!stock.first_date || String(stock.first_date).trim() === '')) {
           let minDate = null;
-          for (const c of rows) {
-            if (canonicalTicker(c.ticker) !== t || !c.date) continue;
+          for (const c of candlesList) {
+            if (c.ticker !== t || !c.date) continue;
             if (!minDate || c.date < minDate) minDate = c.date;
           }
           if (minDate) this.updateStockFirstDate(t, minDate);
@@ -626,7 +645,7 @@ class DB {
       return changes;
     });
 
-    return { changes: tx(candles) };
+    return { changes: tx(formatted) };
   }
 
   saveHistoricalCandlesBatch(entries) {
@@ -1132,10 +1151,12 @@ class DB {
   updateStockFirstDate(ticker, firstDate) {
     const symbol = canonicalTicker(ticker);
     const baseSymbol = symbol.replace(/\.[A-Z]{1,4}$/i, '');
-    const value = firstDate == null || String(firstDate).trim() === '' ? null : String(firstDate).trim();
-    return this.db.prepare(
-      'UPDATE stocks SET first_date = ? WHERE LOWER(ticker) = LOWER(?) OR LOWER(ticker) = LOWER(?)'
-    ).run(value, symbol, baseSymbol);
+    const value = firstDate == null || String(firstDate).trim() === '' ? null : String(firstDate).trim().slice(0, 10);
+    return this.db.prepare(`
+      UPDATE stocks 
+      SET first_date = ? 
+      WHERE UPPER(TRIM(ticker)) = UPPER(TRIM(?)) OR UPPER(TRIM(ticker)) = UPPER(TRIM(?))
+    `).run(value, symbol, baseSymbol);
   }
 
   updateStockMetadata(ticker, data) {
@@ -1561,6 +1582,115 @@ class DB {
       expectedDate,
       outdatedTickers
     };
+  }
+
+  getMyListAssetsWithDates(indexFilter = null) {
+    let sql = `
+      SELECT 
+        s.ticker,
+        s.name,
+        s.index_name,
+        MAX(hp.date) AS last_date
+      FROM stocks s
+      LEFT JOIN historical_prices hp ON UPPER(TRIM(s.ticker)) = UPPER(TRIM(hp.ticker))
+    `;
+    const params = [];
+    if (indexFilter && indexFilter !== 'ALL') {
+      sql += ` WHERE LOWER(TRIM(s.index_name)) = LOWER(TRIM(?))`;
+      params.push(indexFilter);
+    }
+    sql += ` GROUP BY s.ticker ORDER BY s.ticker ASC`;
+
+    let rows = [];
+    try {
+      rows = this.db.prepare(sql).all(...params);
+    } catch (_) {
+      rows = [];
+    }
+
+    if (rows.length === 0) {
+      let ctSql = `
+        SELECT 
+          ct.ticker,
+          ct.name,
+          ct.index_name,
+          MAX(hp.date) AS last_date
+        FROM custom_tickers ct
+        LEFT JOIN historical_prices hp ON UPPER(TRIM(ct.ticker)) = UPPER(TRIM(hp.ticker))
+      `;
+      const ctParams = [];
+      if (indexFilter && indexFilter !== 'ALL') {
+        ctSql += ` WHERE LOWER(TRIM(ct.index_name)) = LOWER(TRIM(?))`;
+        ctParams.push(indexFilter);
+      }
+      ctSql += ` GROUP BY ct.ticker ORDER BY ct.ticker ASC`;
+      try {
+        rows = this.db.prepare(ctSql).all(...ctParams);
+      } catch (_) {}
+    }
+
+    return rows.map(r => ({
+      ticker: (r.ticker || '').toUpperCase().trim(),
+      name: r.name || r.ticker,
+      index_name: r.index_name || '',
+      last_date: r.last_date ? String(r.last_date).slice(0, 10) : null
+    }));
+  }
+
+  saveIncrementalCandles(candlesList) {
+    if (!Array.isArray(candlesList) || candlesList.length === 0) return 0;
+
+    const insertRecentCandleStmt = this._stmtUpsertPrice || this.db.prepare(`
+      INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const formatted = candlesList.map(c => ({
+      ticker: canonicalTicker(c.ticker),
+      date: String(c.date || '').slice(0, 10),
+      open: Number(c.open),
+      high: Number(c.high),
+      low: Number(c.low),
+      close: Number(c.close),
+      volume: Number(c.volume || 0)
+    })).filter(c => c.ticker && c.date && Number.isFinite(c.close));
+
+    if (formatted.length === 0) return 0;
+
+    const saveBatchTransaction = this.db.transaction((list) => {
+      let count = 0;
+      for (const candle of list) {
+        insertRecentCandleStmt.run(
+          candle.ticker,
+          candle.date,
+          candle.open,
+          candle.high,
+          candle.low,
+          candle.close,
+          candle.volume
+        );
+        count++;
+      }
+      return count;
+    });
+
+    const savedCount = saveBatchTransaction(formatted);
+
+    // Preencher first_date automaticamente para ativos sem first_date
+    const tickerSet = new Set(formatted.map(c => c.ticker));
+    for (const t of tickerSet) {
+      const stock = this.db.prepare('SELECT first_date FROM stocks WHERE UPPER(TRIM(ticker)) = ?').get(t);
+      if (stock && (!stock.first_date || String(stock.first_date).trim() === '')) {
+        let minDate = null;
+        for (const c of formatted) {
+          if (c.ticker !== t || !c.date) continue;
+          if (!minDate || c.date < minDate) minDate = c.date;
+        }
+        if (minDate) this.updateStockFirstDate(t, minDate);
+      }
+    }
+
+    return savedCount;
   }
 
   close() {

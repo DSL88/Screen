@@ -1,5 +1,6 @@
 const yahooFinance = require('yahoo-finance2').default || require('yahoo-finance2');
 const pLimit = require('p-limit');
+const axios = require('axios');
 const tickerLists = require('./tickerLists');
 
 // Suprimir avisos de validação de esquema no terminal
@@ -59,7 +60,7 @@ function isRateLimitError(err) {
 
 // Retry genérico com backoff exponencial + jitter; delay duplicado em 429.
 // opts.sleepFn injetável para testes determinísticos.
-// Spec 1.2 (PASSO 1) exige assinatura fetchWithRetry(fn, retries=3, baseDelay=500) com jitter 250 e log "[Yahoo Sync]"
+// Spec 1.2 (PASSO 1) exige assinatura fetchWithRetry(fn, retries=3, baseDelay=500) com jitter e log "[Yahoo Sync]"
 // Mantida compatibilidade: fetchWithBackoff(fn, opts) continua disponível para código existente.
 async function fetchWithBackoff(fn, opts = {}) {
   const retries = opts.retries ?? 3;
@@ -81,17 +82,15 @@ async function fetchWithBackoff(fn, opts = {}) {
   }
 }
 
-// Spec 1.2 – assinatura exata do prompt (compatível com fetchWithBackoff)
+// Spec 1.1 / 1.2 – assinatura exata do prompt
 async function fetchWithRetrySpec(fn, retries = 3, baseDelay = 500) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       return await fn();
     } catch (error) {
-      const isRateLimit = error.message && (error.message.includes('429') || error.message.includes('Too Many Requests'));
       if (attempt === retries) throw error;
-      const jitter = Math.floor(Math.random() * 250);
+      const jitter = Math.floor(Math.random() * 300);
       const delay = (baseDelay * Math.pow(2, attempt - 1)) + jitter;
-      console.warn(`[Yahoo Sync] Tentativa ${attempt} falhou para o pedido. A aguardar ${delay}ms... Motivo: ${error.message}`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -882,4 +881,178 @@ async function syncTickersBatch(tickers, options = {}) {
   return Promise.all(tasks.map(run => run()));
 }
 
-module.exports = { fetchWithRetry, fetchWithRetrySpec, searchTickers, getBulkIndexTickers, normalizeTicker, fetchFullYahooHistory, fetchIncrementalYahooHistory, fetchIncrementalCandles: fetchIncrementalYahooHistory, buildIncrementalPeriod1, fetchFirstTradeDate, fetchHistorySince, fetchFirstAvailableDate, fetchFullHistoryFromIPO, networkLimit, fetchWithBackoff, syncTickersBatch };
+async function fetchYahooCandles(ticker, period1, period2) {
+  const p1 = period1 instanceof Date ? period1 : (typeof period1 === 'number' ? new Date(period1 * 1000) : (period1 ? new Date(period1) : new Date(Date.now() - 90 * 86400 * 1000)));
+  const p2 = period2 instanceof Date ? period2 : (typeof period2 === 'number' ? new Date(period2 * 1000) : (period2 ? new Date(period2) : new Date()));
+  const normalizedTicker = normalizeTicker(ticker);
+
+  await microStagger();
+  const result = await networkLimit(() => fetchWithBackoff(
+    () => yahooFinance.chart(
+      normalizedTicker,
+      { period1: p1, period2: p2, interval: '1d' },
+      {
+        fetchOptions: {
+          headers: { 'User-Agent': USER_AGENT }
+        }
+      }
+    ),
+    { retries: 3 }
+  ));
+
+  const quotes = result && result.quotes;
+  if (!Array.isArray(quotes) || quotes.length === 0) return [];
+  return processQuotes(quotes, ticker);
+}
+
+async function fetchRecentFallback(ticker, range = '3mo') {
+  const normalizedTicker = normalizeTicker(ticker);
+  let period1;
+  if (typeof range === 'string' && range.endsWith('mo')) {
+    const months = parseInt(range, 10) || 3;
+    period1 = new Date(Date.now() - months * 30 * 24 * 60 * 60 * 1000);
+  } else if (typeof range === 'string' && range.endsWith('y')) {
+    const years = parseInt(range, 10) || 1;
+    period1 = new Date(Date.now() - years * 365 * 24 * 60 * 60 * 1000);
+  } else if (typeof range === 'string' && range.endsWith('d')) {
+    const days = parseInt(range, 10) || 90;
+    period1 = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  } else {
+    period1 = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  }
+  const period2 = new Date();
+
+  await microStagger();
+  const result = await networkLimit(() => fetchWithBackoff(
+    () => yahooFinance.chart(
+      normalizedTicker,
+      { period1, period2, interval: '1d' },
+      {
+        fetchOptions: {
+          headers: { 'User-Agent': USER_AGENT }
+        }
+      }
+    ),
+    { retries: 3 }
+  ));
+
+  const quotes = result && result.quotes;
+  if (!Array.isArray(quotes) || quotes.length === 0) return [];
+  return processQuotes(quotes, ticker);
+}
+
+async function syncSingleTicker(ticker, expectedDate, dbInstance) {
+  const db = dbInstance;
+  const lastDate = await db.getLastStoredDate(ticker);
+
+  // CASO A: Ativo já possui histórico na SQLite
+  if (lastDate) {
+    if (expectedDate && lastDate >= expectedDate) {
+      return { ticker, status: 'SKIPPED_ALREADY_SYNCED', lastDate };
+    }
+    const period1 = Math.floor(new Date(lastDate).getTime() / 1000) + 86400;
+    const period2 = Math.floor(Date.now() / 1000);
+
+    const newCandles = await fetchWithRetry(() => fetchYahooCandles(ticker, period1, period2));
+    if (newCandles && newCandles.length > 0) {
+      db.saveHistoricalCandles(ticker, newCandles);
+      return { ticker, status: 'UPDATED', count: newCandles.length, lastDate: newCandles[newCandles.length - 1].date };
+    }
+    return { ticker, status: 'NO_NEW_DATA', lastDate };
+  }
+
+  // CASO B: Ativo virgem sem histórico (Fallback de Contingência)
+  try {
+    const fallbackCandles = await fetchWithRetry(() => fetchRecentFallback(ticker, '3mo'));
+    if (fallbackCandles && fallbackCandles.length > 0) {
+      db.saveHistoricalCandles(ticker, fallbackCandles);
+      db.updateStockFirstDate(ticker, fallbackCandles[0].date);
+      return { ticker, status: 'INITIALIZED_FALLBACK', count: fallbackCandles.length, lastDate: fallbackCandles[fallbackCandles.length - 1].date };
+    }
+  } catch (fallbackErr) {
+    return { ticker, status: 'FAILED_UNAVAILABLE', error: fallbackErr.message };
+  }
+
+  return { ticker, status: 'FAILED_NO_DATA', error: 'Sem cotações disponíveis no Yahoo Finance' };
+}
+
+async function fetchMissingRecentCandles(ticker, lastDate) {
+  const normTicker = normalizeTicker(ticker);
+  let url = '';
+  if (lastDate) {
+    const p1 = Math.floor(new Date(lastDate).getTime() / 1000) + 86400;
+    const p2 = Math.floor(Date.now() / 1000);
+    if (p1 >= p2) return []; // Já está no timestamp atual
+    url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(normTicker)}?period1=${p1}&period2=${p2}&interval=1d`;
+  } else {
+    // Apenas últimos dias para não sobrecarregar
+    url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(normTicker)}?range=5d&interval=1d`;
+  }
+
+  await microStagger();
+
+  const fn = async () => {
+    const response = await axios.get(url, {
+      timeout: 8000,
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept': 'application/json'
+      }
+    });
+    const result = response.data?.chart?.result?.[0];
+    if (!result || !result.timestamp || result.timestamp.length === 0) return [];
+
+    const timestamps = result.timestamp;
+    const quote = result.indicators?.quote?.[0] || {};
+    const candles = [];
+
+    for (let i = 0; i < timestamps.length; i++) {
+      if (quote.close?.[i] == null) continue;
+      const d = new Date(timestamps[i] * 1000);
+      const dateStr = d.toISOString().slice(0, 10);
+      const closeVal = Number(quote.close[i]);
+      if (!Number.isFinite(closeVal)) continue;
+
+      const openVal = Number.isFinite(Number(quote.open?.[i])) ? Number(quote.open[i]) : closeVal;
+      const highVal = Number.isFinite(Number(quote.high?.[i])) ? Number(quote.high[i]) : Math.max(openVal, closeVal);
+      const lowVal = Number.isFinite(Number(quote.low?.[i])) ? Number(quote.low[i]) : Math.min(openVal, closeVal);
+      const volVal = Number.isFinite(Number(quote.volume?.[i])) ? Number(quote.volume[i]) : 0;
+
+      candles.push({
+        ticker: ticker.toUpperCase().trim(),
+        date: dateStr,
+        open: openVal,
+        high: highVal,
+        low: lowVal,
+        close: closeVal,
+        volume: volVal
+      });
+    }
+    return candles;
+  };
+
+  return networkLimit(() => fetchWithRetry(fn, 3, 500));
+}
+
+module.exports = {
+  fetchWithRetry,
+  fetchWithRetrySpec,
+  fetchYahooCandles,
+  fetchRecentFallback,
+  fetchMissingRecentCandles,
+  syncSingleTicker,
+  searchTickers,
+  getBulkIndexTickers,
+  normalizeTicker,
+  fetchFullYahooHistory,
+  fetchIncrementalYahooHistory,
+  fetchIncrementalCandles: fetchIncrementalYahooHistory,
+  buildIncrementalPeriod1,
+  fetchFirstTradeDate,
+  fetchHistorySince,
+  fetchFirstAvailableDate,
+  fetchFullHistoryFromIPO,
+  networkLimit,
+  fetchWithBackoff,
+  syncTickersBatch
+};
