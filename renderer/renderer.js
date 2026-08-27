@@ -2302,63 +2302,82 @@
   }
 
   // --- Mais Recente (sincronizar até à última sessão de mercado) ---
-  if (btnMostRecent) {
-    btnMostRecent.addEventListener('click', async () => {
-      const requestIndex = getSelectedIndexDbName();
-      const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
-      const idxLabel = idx === 'ALL' ? 'Todos os Índices'
-        : (selectIndexBulkFetch && selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0]
-          ? selectIndexBulkFetch.selectedOptions[0].textContent : idx);
+  async function handleSyncAllRecent() {
+    const btn = btnMostRecent || document.getElementById('btn-sync-recent') || document.getElementById('btn-most-recent');
+    const spinner = document.getElementById('sync-spinner');
+    const progressLabel = document.getElementById('sync-progress-label');
+    const label = btn ? btn.querySelector('span') : null;
+    const originalLabel = label ? label.textContent : 'Mais Recente';
 
-      btnMostRecent.disabled = true;
+    const requestIndex = getSelectedIndexDbName();
+    const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
+    const idxLabel = idx === 'ALL' ? 'Todos os Índices'
+      : (selectIndexBulkFetch && selectIndexBulkFetch.selectedOptions && selectIndexBulkFetch.selectedOptions[0]
+        ? selectIndexBulkFetch.selectedOptions[0].textContent : idx);
+
+    try {
+      if (btn) btn.disabled = true;
       mostRecentActive = true;
-      const label = btnMostRecent.querySelector('span');
-      const originalLabel = label ? label.textContent : 'Mais Recente';
+      if (spinner) spinner.classList.remove('hidden');
       if (label) label.textContent = 'A verificar e atualizar...';
+      if (progressLabel) progressLabel.textContent = 'A verificar lista de ativos...';
       if (indexBulkProgress) indexBulkProgress.hidden = false;
       if (indexBulkProgressLabel) indexBulkProgressLabel.textContent = `A verificar e atualizar cotações recentes (${idxLabel})...`;
       if (indexBulkProgressFill) indexBulkProgressFill.style.width = '0%';
 
-      try {
-        const syncFn = (window.api && window.api.syncAllRecentPrices) || (window.api && window.api.syncAllListStocks);
-        const res = syncFn ? await syncFn(requestIndex) : { ok: false, error: 'API indisponível' };
-        if (res && (res.ok || res.success)) {
-          const totalProc = res.totalStocks || res.total || 0;
-          const updated = res.updatedCount || 0;
-          const already = res.alreadySyncedCount || res.skippedCount || 0;
-          const fallback = res.fallbackCount || 0;
-          const failed = res.failedCount || (res.errors ? res.errors.length : 0);
+      const syncFn = (window.electronAPI && window.electronAPI.syncAllRecentPrices)
+        || (window.api && window.api.syncAllRecentPrices)
+        || (window.api && window.api.syncAllListStocks);
 
-          if (res.failedList && res.failedList.length > 0) {
-            console.warn('[Ativos com Falha na Sincronização]', res.failedList);
-          }
+      const res = syncFn ? await syncFn({ indexFilter: requestIndex }) : { ok: false, error: 'API indisponível' };
 
-          const toastMsg = `Atualização concluída: ${updated} atualizados, ${already} já estavam em dia, ${failed} falhas.`;
-          showToast(toastMsg, failed > 0 && updated === 0 && already === 0 ? 'error' : 'success', 5000);
+      if (res && (res.ok || res.success)) {
+        const totalProc = res.totalStocks || res.total || 0;
+        const updated = res.updatedCount || 0;
+        const already = res.alreadySyncedCount || res.alreadyUpToDateCount || res.skippedCount || 0;
+        const failed = res.failedCount || (res.failedTickers ? res.failedTickers.length : (res.errors ? res.errors.length : 0));
 
-          if (typeof status !== 'undefined' && status) {
-            status.textContent = `Atualização concluída: ${totalProc} processados (${updated} atualizados, ${already} em dia, ${failed} falhas).`;
-          }
-          if (indexBulkProgressLabel) {
-            indexBulkProgressLabel.innerHTML = iconSvg('check-circle') + ' ' + escapeHtml(`Atualização concluída: ${updated} atualizados, ${already} em dia, ${failed} falhas.`);
-          }
-          if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
-        } else {
-          const errMsg = res && res.error ? res.error : 'Erro desconhecido';
-          showToast('Erro na sincronização: ' + errMsg, 'error');
-          if (typeof status !== 'undefined' && status) status.textContent = 'Erro na sincronização: ' + errMsg;
+        if (res.failedTickers && res.failedTickers.length > 0) {
+          console.warn('[Ativos com Falha na Sincronização]', res.failedTickers);
         }
-      } catch (err) {
-        showToast('Erro na sincronização: ' + (err.message || String(err)), 'error');
-        if (typeof status !== 'undefined' && status) status.textContent = 'Erro na sincronização: ' + (err.message || String(err));
-      } finally {
-        btnMostRecent.disabled = false;
-        mostRecentActive = false;
-        if (label) label.textContent = originalLabel;
-        await reloadMyListFromDatabase();
-        await refreshIndexStatusBadge();
+
+        const toastMsg = `Atualização concluída: ${updated} atualizados, ${already} já estavam em dia, ${failed} falhas.`;
+        showToast(toastMsg, failed > 0 && updated === 0 && already === 0 ? 'error' : 'success', 5000);
+
+        if (typeof status !== 'undefined' && status) {
+          status.textContent = `Atualização concluída: ${totalProc} processados (${updated} atualizados, ${already} em dia, ${failed} falhas).`;
+        }
+        if (indexBulkProgressLabel) {
+          indexBulkProgressLabel.innerHTML = iconSvg('check-circle') + ' ' + escapeHtml(`Atualização concluída: ${updated} atualizados, ${already} em dia, ${failed} falhas.`);
+        }
+        if (indexBulkProgressFill) indexBulkProgressFill.style.width = '100%';
+      } else {
+        const errMsg = res && res.error ? res.error : 'Erro desconhecido';
+        showToast('Erro na sincronização: ' + errMsg, 'error');
+        if (typeof status !== 'undefined' && status) status.textContent = 'Erro na sincronização: ' + errMsg;
       }
-    });
+    } catch (err) {
+      console.error('Erro na UI durante a sincronização:', err);
+      showToast('Erro inesperado durante a atualização.', 'error');
+      if (typeof status !== 'undefined' && status) status.textContent = 'Erro na sincronização: ' + (err.message || String(err));
+    } finally {
+      // Desativação incondicional do spinner para nunca ficar em loop
+      if (btn) btn.disabled = false;
+      mostRecentActive = false;
+      if (spinner) spinner.classList.add('hidden');
+      if (label) label.textContent = originalLabel;
+      if (progressLabel) progressLabel.textContent = '';
+      await reloadMyListFromDatabase();
+      await refreshIndexStatusBadge();
+    }
+  }
+
+  if (btnMostRecent) {
+    btnMostRecent.addEventListener('click', handleSyncAllRecent);
+  }
+  const btnSyncRecentAlt = document.getElementById('btn-sync-recent');
+  if (btnSyncRecentAlt && btnSyncRecentAlt !== btnMostRecent) {
+    btnSyncRecentAlt.addEventListener('click', handleSyncAllRecent);
   }
 
   // Freshness banner "Go to My List" button

@@ -337,6 +337,28 @@ class DB {
          OR historical_prices.close IS NOT excluded.close
          OR historical_prices.volume IS NOT excluded.volume
     `);
+
+    this._insertRecentCandleStmt = this.db.prepare(`
+      INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume)
+      VALUES (@ticker, @date, @open, @high, @low, @close, @volume)
+    `);
+
+    this._insertBatchTransaction = this.db.transaction((candlesList) => {
+      let count = 0;
+      for (const candle of candlesList) {
+        this._insertRecentCandleStmt.run({
+          ticker: String(candle.ticker).trim().toUpperCase(),
+          date: String(candle.date).slice(0, 10),
+          open: Number(candle.open),
+          high: Number(candle.high),
+          low: Number(candle.low),
+          close: Number(candle.close),
+          volume: Number(candle.volume || 0)
+        });
+        count++;
+      }
+      return count;
+    });
   }
 
   getAdaptiveParams() {
@@ -1584,8 +1606,8 @@ class DB {
     };
   }
 
-  getMyListAssetsWithDates(indexFilter = null) {
-    let sql = `
+  getMyListAssetsSyncStatus(indexFilter = null) {
+    let query = `
       SELECT 
         s.ticker,
         s.name,
@@ -1595,15 +1617,15 @@ class DB {
       LEFT JOIN historical_prices hp ON UPPER(TRIM(s.ticker)) = UPPER(TRIM(hp.ticker))
     `;
     const params = [];
-    if (indexFilter && indexFilter !== 'ALL') {
-      sql += ` WHERE LOWER(TRIM(s.index_name)) = LOWER(TRIM(?))`;
+    if (indexFilter && indexFilter !== 'ALL' && indexFilter !== '') {
+      query += ` WHERE LOWER(TRIM(s.index_name)) = LOWER(TRIM(?))`;
       params.push(indexFilter);
     }
-    sql += ` GROUP BY s.ticker ORDER BY s.ticker ASC`;
+    query += ` GROUP BY s.ticker ORDER BY s.ticker ASC`;
 
     let rows = [];
     try {
-      rows = this.db.prepare(sql).all(...params);
+      rows = this.db.prepare(query).all(...params);
     } catch (_) {
       rows = [];
     }
@@ -1619,7 +1641,7 @@ class DB {
         LEFT JOIN historical_prices hp ON UPPER(TRIM(ct.ticker)) = UPPER(TRIM(hp.ticker))
       `;
       const ctParams = [];
-      if (indexFilter && indexFilter !== 'ALL') {
+      if (indexFilter && indexFilter !== 'ALL' && indexFilter !== '') {
         ctSql += ` WHERE LOWER(TRIM(ct.index_name)) = LOWER(TRIM(?))`;
         ctParams.push(indexFilter);
       }
@@ -1637,10 +1659,23 @@ class DB {
     }));
   }
 
+  getMyListAssetsWithDates(indexFilter = null) {
+    return this.getMyListAssetsSyncStatus(indexFilter);
+  }
+
+  saveBulkIncrementalCandles(candlesArray) {
+    if (!Array.isArray(candlesArray) || candlesArray.length === 0) return 0;
+    if (this._insertBatchTransaction) {
+      this._insertBatchTransaction(candlesArray);
+      return candlesArray.length;
+    }
+    return this.saveIncrementalCandles(candlesArray);
+  }
+
   saveIncrementalCandles(candlesList) {
     if (!Array.isArray(candlesList) || candlesList.length === 0) return 0;
 
-    const insertRecentCandleStmt = this._stmtUpsertPrice || this.db.prepare(`
+    const insertRecentCandleStmt = this._insertRecentCandleStmt || this._stmtUpsertPrice || this.db.prepare(`
       INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
@@ -1657,7 +1692,7 @@ class DB {
 
     if (formatted.length === 0) return 0;
 
-    const saveBatchTransaction = this.db.transaction((list) => {
+    const saveBatchTransaction = this._insertBatchTransaction || this.db.transaction((list) => {
       let count = 0;
       for (const candle of list) {
         insertRecentCandleStmt.run(

@@ -1,7 +1,9 @@
 const yahooFinance = require('yahoo-finance2').default || require('yahoo-finance2');
 const pLimit = require('p-limit');
 const axios = require('axios');
-const tickerLists = require('./tickerLists');
+const tickerLists = (() => {
+  try { return require('./tickerLists'); } catch (_) { return require('../data/tickerLists'); }
+})();
 
 // Suprimir avisos de validação de esquema no terminal
 const yfConfig = yahooFinance._opts;
@@ -1034,19 +1036,63 @@ async function fetchMissingRecentCandles(ticker, lastDate) {
   return networkLimit(() => fetchWithRetry(fn, 3, 500));
 }
 
+async function fetchIncrementalCandles(ticker, lastDate) {
+  const cleanTicker = encodeURIComponent(String(ticker).trim().toUpperCase());
+  let url = '';
+
+  if (lastDate) {
+    const p1 = Math.floor(new Date(lastDate).getTime() / 1000) + 86400; // +1 dia
+    const p2 = Math.floor(Date.now() / 1000);
+    if (p1 >= p2) return []; // Já se encontra atualizado
+    url = `https://query1.finance.yahoo.com/v8/finance/chart/${cleanTicker}?period1=${p1}&period2=${p2}&interval=1d`;
+  } else {
+    // Ativo sem histórico prévio: puxa apenas os últimos 5 dias para inicializar
+    url = `https://query1.finance.yahoo.com/v8/finance/chart/${cleanTicker}?range=5d&interval=1d`;
+  }
+
+  const response = await axios.get(url, {
+    timeout: 7000,
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+  });
+
+  const result = response.data?.chart?.result?.[0];
+  if (!result || !result.timestamp || result.timestamp.length === 0) return [];
+
+  const timestamps = result.timestamp;
+  const quote = result.indicators?.quote?.[0] || {};
+  const candles = [];
+
+  for (let i = 0; i < timestamps.length; i++) {
+    if (quote.close?.[i] == null) continue;
+    const d = new Date(timestamps[i] * 1000);
+    const dateStr = d.toISOString().slice(0, 10);
+    candles.push({
+      ticker: ticker.toUpperCase(),
+      date: dateStr,
+      open: Number(quote.open?.[i] || quote.close[i]),
+      high: Number(quote.high?.[i] || quote.close[i]),
+      low: Number(quote.low?.[i] || quote.close[i]),
+      close: Number(quote.close[i]),
+      volume: Number(quote.volume?.[i] || 0)
+    });
+  }
+
+  return candles;
+}
+
 module.exports = {
   fetchWithRetry,
   fetchWithRetrySpec,
   fetchYahooCandles,
   fetchRecentFallback,
   fetchMissingRecentCandles,
+  fetchIncrementalCandles,
   syncSingleTicker,
   searchTickers,
   getBulkIndexTickers,
   normalizeTicker,
   fetchFullYahooHistory,
   fetchIncrementalYahooHistory,
-  fetchIncrementalCandles: fetchIncrementalYahooHistory,
   buildIncrementalPeriod1,
   fetchFirstTradeDate,
   fetchHistorySince,
@@ -1056,3 +1102,4 @@ module.exports = {
   fetchWithBackoff,
   syncTickersBatch
 };
+

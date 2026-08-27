@@ -1608,191 +1608,136 @@ app.whenReady().then(async () => {
       }
     });
 
-    const handleSyncAllRecentPrices = async (event, indexFilter) => {
-      if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, success: false, error: 'window-unavailable' };
-      const requested = indexInput(indexFilter);
-      const lock = beginPipelineOperation('index-incremental-sync', requested.operationId);
-      if (lock.busy) return lock.result;
-      const operation = lock.operation;
-      const filter = requested.index || null;
-
+    const handleSyncAllRecentPrices = async (event, input = {}) => {
       try {
-        // Passo 1: Obter todos os ativos da My List e o respetivo estado de datas num único SELECT
-        const assets = db.getMyListAssetsWithDates(filter);
+        const indexFilter = (input && typeof input === 'object')
+          ? (input.indexFilter || input.index || input.indexName || null)
+          : (typeof input === 'string' ? input : null);
+
+        // 1. Auditoria local rápida de todos os ativos da lista
+        const assets = db.getMyListAssetsSyncStatus(indexFilter);
+        const expectedTradingDay = db.getLastExpectedTradingDay();
 
         if (!assets || assets.length === 0) {
           return {
-            ok: false,
-            success: false,
-            status: 'failed',
+            ok: true,
+            success: true,
             total: 0,
             totalStocks: 0,
             updatedCount: 0,
             skippedCount: 0,
             alreadySyncedCount: 0,
-            fallbackCount: 0,
+            alreadyUpToDateCount: 0,
             failedCount: 0,
-            totalNewCandles: 0,
-            failedTickers: [],
-            failedList: [],
-            errors: [],
-            error: 'no-stocks',
-            message: 'Nenhum ativo na lista para sincronizar.'
+            failedTickers: []
           };
         }
 
-        const total = assets.length;
-        let completed = 0;
-        let updatedCount = 0;
-        let skippedCount = 0;
-        let fallbackCount = 0;
-        let failedCount = 0;
-        const failedTickers = [];
-        const failedList = [];
-        const errors = [];
-        const allNewCandles = [];
-        const updatedSummaries = [];
+        const pendingAssets = [];
+        let alreadyUpToDateCount = 0;
 
-        // Passo 2: Obter data esperada do último fecho de mercado
-        const expectedDate = db.getLastExpectedTradingDay();
-        const reporter = createProgressReporter({ minIntervalMs: 100, everyN: 10 });
+        for (const asset of assets) {
+          if (asset.last_date && expectedTradingDay && asset.last_date >= expectedTradingDay) {
+            alreadyUpToDateCount++;
+          } else {
+            pendingAssets.push(asset);
+          }
+        }
 
-        const sendProgress = (current, lastTicker, statusStr) => {
-          const payload = {
-            current,
-            total,
-            percent: total > 0 ? Math.round(current / total * 100) : 100,
-            ticker: lastTicker || '',
-            status: statusStr || 'batch',
-            updated: updatedSummaries
+        const totalToProcess = pendingAssets.length;
+        if (totalToProcess === 0) {
+          return {
+            ok: true,
+            success: true,
+            total: assets.length,
+            totalStocks: assets.length,
+            updatedCount: 0,
+            skippedCount: alreadyUpToDateCount,
+            alreadySyncedCount: alreadyUpToDateCount,
+            alreadyUpToDateCount,
+            failedCount: 0,
+            failedTickers: []
           };
-          if (event && event.sender && !event.sender.isDestroyed()) {
-            event.sender.send('SYNC_RECENT_PROGRESS', payload);
-            event.sender.send('sync-all-progress', payload);
-          } else if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('SYNC_RECENT_PROGRESS', payload);
-            mainWindow.webContents.send('sync-all-progress', payload);
-          }
-        };
+        }
 
-        // Passo 3 & 4: Filtrar e descarregar com concorrência p-limit(5)
-        const tasks = assets.map(asset => yahooClient.networkLimit(async () => {
-          if (isPipelineCancelled(operation)) {
-            return { ticker: asset.ticker, status: 'CANCELLED' };
-          }
+        const allNewCandles = [];
+        const updatedTickers = [];
+        const failedTickers = [];
+        let completedCount = 0;
 
-          const ticker = asset.ticker;
-          const lastDate = asset.last_date;
-
-          // Se já tiver o último dia de mercado útil, saltar sem gastar tráfego
-          if (lastDate && expectedDate && lastDate >= expectedDate) {
-            completed++;
-            skippedCount++;
-            const isLast = completed === total;
-            if (reporter.report({ isLast }) || isLast) {
-              sendProgress(completed, ticker, 'SKIPPED_UP_TO_DATE');
-            }
-            return { ticker, status: 'SKIPPED_UP_TO_DATE', lastDate };
-          }
-
+        // 2. Execução paralela controlada via p-limit
+        const tasks = pendingAssets.map(asset => yahooClient.networkLimit(async () => {
           try {
-            const candles = await yahooClient.fetchMissingRecentCandles(ticker, lastDate);
-            completed++;
-
-            if (Array.isArray(candles) && candles.length > 0) {
-              if (lastDate) {
-                updatedCount++;
-              } else {
-                fallbackCount++;
-              }
-              for (const c of candles) {
-                allNewCandles.push(c);
-              }
-            } else {
-              skippedCount++;
+            const candles = await yahooClient.fetchIncrementalCandles(asset.ticker, asset.last_date);
+            if (candles && candles.length > 0) {
+              allNewCandles.push(...candles);
+              updatedTickers.push(asset.ticker);
             }
-
-            const isLast = completed === total;
-            if (reporter.report({ isLast }) || isLast) {
-              sendProgress(completed, ticker, candles && candles.length > 0 ? 'UPDATED' : 'NO_NEW_DATA');
-            }
-
-            return { ticker, status: 'UPDATED', candles };
           } catch (err) {
-            completed++;
-            failedCount++;
-            const msg = err && err.message ? err.message : String(err);
-            failedTickers.push(ticker);
-            failedList.push({ ticker, reason: msg });
-            errors.push({ ticker, error: msg });
-
-            const isLast = completed === total;
-            if (reporter.report({ isLast }) || isLast) {
-              sendProgress(completed, ticker, 'ERROR');
+            console.warn(`[Sync Warning] Falha ao atualizar ${asset.ticker}: ${err.message}`);
+            failedTickers.push({ ticker: asset.ticker, reason: err.message });
+          } finally {
+            completedCount++;
+            // Throttling IPC: envia progresso a cada 10 ativos ou no último
+            if (completedCount % 10 === 0 || completedCount === totalToProcess) {
+              const payload = {
+                current: completedCount,
+                total: totalToProcess,
+                ticker: asset.ticker,
+                percent: Math.round((completedCount / totalToProcess) * 100)
+              };
+              if (event && event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('SYNC_RECENT_PROGRESS', payload);
+                event.sender.send('sync-all-progress', payload);
+              } else if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('SYNC_RECENT_PROGRESS', payload);
+                mainWindow.webContents.send('sync-all-progress', payload);
+              }
             }
-
-            return { ticker, status: 'ERROR', error: msg };
           }
         }));
 
         await Promise.all(tasks);
 
-        // Passo 5: Gravar todas as novas velas em bloco na SQLite via db.transaction
+        // 3. Gravação atómica em lote na SQLite
         let totalNewCandles = 0;
         if (allNewCandles.length > 0) {
-          totalNewCandles = db.saveIncrementalCandles(allNewCandles);
-          const updatedTickers = Array.from(new Set(allNewCandles.map(c => c.ticker)));
-          for (const t of updatedTickers) {
-            try {
-              const summary = db.getHistoricalSummary(t);
-              updatedSummaries.push({ ticker: t, summary });
-            } catch (_) {}
-          }
+          totalNewCandles = db.saveBulkIncrementalCandles(allNewCandles);
         }
-
-        sendProgress(total, '', 'done');
-        const processed = completed;
-        const successful = updatedCount + fallbackCount + skippedCount;
-        const status = operationStatus(total, errors, operation.cancelled, processed, successful);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('sync-all-done', {
-            totalStocks: total,
-            total,
-            updatedCount,
-            skippedCount,
-            alreadySyncedCount: skippedCount,
-            fallbackCount,
-            failedCount,
+            totalStocks: assets.length,
+            total: assets.length,
+            updatedCount: updatedTickers.length,
+            skippedCount: alreadyUpToDateCount,
+            alreadySyncedCount: alreadyUpToDateCount,
+            alreadyUpToDateCount,
+            failedCount: failedTickers.length,
             totalNewCandles,
-            errorCount: errors.length,
-            status: 'done',
-            state: status,
-            cancelled: operation.cancelled
+            status: 'done'
           });
         }
 
         return {
-          ok: status !== 'failed' || total > 0,
-          success: status !== 'failed' || total > 0,
-          status,
-          total,
-          totalStocks: total,
-          updatedCount,
-          skippedCount,
-          alreadySyncedCount: skippedCount,
-          fallbackCount,
-          failedCount,
-          totalNewCandles,
-          failedTickers,
-          failedList,
-          errors
+          ok: true,
+          success: true,
+          total: assets.length,
+          totalStocks: assets.length,
+          updatedCount: updatedTickers.length,
+          skippedCount: alreadyUpToDateCount,
+          alreadySyncedCount: alreadyUpToDateCount,
+          alreadyUpToDateCount,
+          failedCount: failedTickers.length,
+          failedTickers
         };
-      } catch (err) {
-        console.error('[sync-all-recent-prices] falhou:', err && err.message ? err.message : err);
-        return { ok: false, success: false, error: err.message || String(err) };
-      } finally {
-        finishPipelineOperation(operation);
+      } catch (fatalError) {
+        console.error('[Sync Fatal Error]', fatalError);
+        return {
+          ok: false,
+          success: false,
+          error: fatalError.message
+        };
       }
     };
 

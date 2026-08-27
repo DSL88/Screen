@@ -257,4 +257,91 @@ test('fetchMissingRecentCandles requisita velas incrementais ou 5d para novos at
   }
 });
 
+test('getMyListAssetsSyncStatus e saveBulkIncrementalCandles cumprem o fluxo otimizado', { skip: !SQLITE_AVAILABLE }, t => {
+  const { directory, database } = openDatabase();
+  t.after(() => { database.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+
+  database.upsertStock({ ticker: 'AAPL', name: 'Apple Inc', country: 'US', indexName: 'SP500' });
+  database.upsertStock({ ticker: 'MSFT', name: 'Microsoft', country: 'US', indexName: 'SP500' });
+  database.upsertStock({ ticker: 'EDP.LS', name: 'EDP', country: 'PT', indexName: 'PSI' });
+
+  // Sem cotações
+  const initialStatus = database.getMyListAssetsSyncStatus('SP500');
+  assert.equal(initialStatus.length, 2);
+  assert.equal(initialStatus[0].ticker, 'AAPL');
+  assert.equal(initialStatus[0].last_date, null);
+  assert.equal(initialStatus[1].ticker, 'MSFT');
+  assert.equal(initialStatus[1].last_date, null);
+
+  // Inserção em bloco com saveBulkIncrementalCandles
+  const candles = [
+    { ticker: 'AAPL', date: '2026-08-25', open: 220, high: 225, low: 219, close: 224, volume: 50000000 },
+    { ticker: 'AAPL', date: '2026-08-26', open: 224, high: 228, low: 223, close: 227, volume: 48000000 },
+    { ticker: 'MSFT', date: '2026-08-26', open: 410, high: 415, low: 409, close: 414, volume: 20000000 }
+  ];
+
+  const saved = database.saveBulkIncrementalCandles(candles);
+  assert.equal(saved, 3);
+
+  // Re-auditoria instantânea
+  const updatedStatus = database.getMyListAssetsSyncStatus('SP500');
+  assert.equal(updatedStatus.length, 2);
+  assert.equal(updatedStatus.find(a => a.ticker === 'AAPL').last_date, '2026-08-26');
+  assert.equal(updatedStatus.find(a => a.ticker === 'MSFT').last_date, '2026-08-26');
+
+  // Filtro ALL
+  const allStatus = database.getMyListAssetsSyncStatus('ALL');
+  assert.equal(allStatus.length, 3);
+});
+
+test('fetchIncrementalCandles calcula período correto e ignora se já atualizado', async () => {
+  const axios = require('axios');
+  const originalGet = axios.get;
+  const { fetchIncrementalCandles } = require('../src/services/yahooClient');
+
+  try {
+    let requestedUrl = '';
+    axios.get = async (url) => {
+      requestedUrl = url;
+      return {
+        data: {
+          chart: {
+            result: [
+              {
+                timestamp: [1718000000],
+                indicators: {
+                  quote: [
+                    { open: [150], high: [155], low: [149], close: [154], volume: [2000] }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      };
+    };
+
+    // Caso A: Ativo com data anterior
+    const res = await fetchIncrementalCandles('AAPL', '2024-01-01');
+    assert.match(requestedUrl, /period1=/);
+    assert.equal(res.length, 1);
+    assert.equal(res[0].ticker, 'AAPL');
+    assert.equal(res[0].close, 154);
+
+    // Caso B: Ativo sem data prévia
+    const resVirgin = await fetchIncrementalCandles('NVDA', null);
+    assert.match(requestedUrl, /range=5d/);
+    assert.equal(resVirgin.length, 1);
+    assert.equal(resVirgin[0].ticker, 'NVDA');
+
+    // Caso C: Ativo com data no futuro ou timestamp atual
+    const futureDate = new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10);
+    const resFuture = await fetchIncrementalCandles('AAPL', futureDate);
+    assert.deepEqual(resFuture, []);
+  } finally {
+    axios.get = originalGet;
+  }
+});
+
+
 
