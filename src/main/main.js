@@ -2138,9 +2138,7 @@ app.whenReady().then(async () => {
               const error = 'empty-history';
               errors.push({ ticker, error });
             } else {
-              const firstDate = candles[0].date;
               db.saveHistoricalCandlesFromImport(ticker, candles);
-              if (firstDate) db.updateStockFirstDate(ticker, firstDate);
               db.setFullHistoryFetched(ticker);
               updated++;
             }

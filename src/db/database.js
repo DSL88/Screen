@@ -648,7 +648,7 @@ class DB {
         changes += r.changes || 0;
       }
       // Preencher first_date automaticamente quando ainda não existe:
-      // usa a data mais antiga deste lote como referência da origem.
+      // usa a data mais antiga do histórico armazenado como referência da origem.
       const tickerSet = new Set();
       for (const c of candlesList) {
         if (c.ticker) tickerSet.add(c.ticker);
@@ -656,12 +656,11 @@ class DB {
       for (const t of tickerSet) {
         const stock = this.db.prepare('SELECT first_date FROM stocks WHERE ticker = ?').get(t);
         if (stock && (!stock.first_date || String(stock.first_date).trim() === '')) {
-          let minDate = null;
-          for (const c of candlesList) {
-            if (c.ticker !== t || !c.date) continue;
-            if (!minDate || c.date < minDate) minDate = c.date;
-          }
-          if (minDate) this.updateStockFirstDate(t, minDate);
+          const histRow = this.db.prepare(
+            'SELECT MIN(date) as min_date FROM historical_prices WHERE ticker = ?'
+          ).get(t);
+          const trueFirstDate = histRow && histRow.min_date ? histRow.min_date : null;
+          if (trueFirstDate) this.updateStockFirstDate(t, trueFirstDate);
         }
       }
       return changes;
@@ -1304,11 +1303,13 @@ class DB {
     const changes = tx(sorted);
 
     try {
-      if (sorted.length > 0 && sorted[0].date) {
-        const stock = this.db.prepare('SELECT first_date FROM stocks WHERE UPPER(TRIM(ticker)) = ?').get(canTicker);
-        if (stock && (!stock.first_date || String(stock.first_date).trim() === '')) {
-          this.updateStockFirstDate(canTicker, sorted[0].date);
-        }
+      const stock = this.db.prepare('SELECT first_date FROM stocks WHERE UPPER(TRIM(ticker)) = ?').get(canTicker);
+      if (stock && (!stock.first_date || String(stock.first_date).trim() === '')) {
+        const histRow = this.db.prepare(
+          'SELECT MIN(date) as min_date FROM historical_prices WHERE ticker = ?'
+        ).get(canTicker);
+        const trueFirstDate = histRow && histRow.min_date ? histRow.min_date : null;
+        if (trueFirstDate) this.updateStockFirstDate(canTicker, trueFirstDate);
       }
     } catch (_) {}
 
@@ -1746,23 +1747,27 @@ class DB {
     const savedCount = tx(candles);
 
     try {
-      let minDate = null;
       let ticker = null;
       for (const c of candles) {
         const t = String(c.ticker || '').trim().toUpperCase();
         const d = String(c.date || '').slice(0, 10);
         if (!t || !d || !Number.isFinite(Number(c.close))) continue;
         if (!ticker) ticker = t;
-        if (!minDate || d < minDate) minDate = d;
       }
-      if (ticker && minDate) {
+      if (ticker) {
         const row = this.db.prepare(
           `SELECT first_date FROM stocks WHERE UPPER(TRIM(ticker)) = ?`
         ).get(ticker);
         if (row && (!row.first_date || String(row.first_date).trim() === '')) {
-          this.db.prepare(
-            `UPDATE stocks SET first_date = ? WHERE UPPER(TRIM(ticker)) = ?`
-          ).run(minDate, ticker);
+          const histRow = this.db.prepare(
+            `SELECT MIN(date) as min_date FROM historical_prices WHERE ticker = ?`
+          ).get(ticker);
+          const trueFirstDate = histRow && histRow.min_date ? histRow.min_date : null;
+          if (trueFirstDate) {
+            this.db.prepare(
+              `UPDATE stocks SET first_date = ? WHERE UPPER(TRIM(ticker)) = ?`
+            ).run(trueFirstDate, ticker);
+          }
         }
       }
     } catch (_) {}
@@ -1813,16 +1818,8 @@ class DB {
     }
 
     // Preencher first_date eficientemente em O(N) para ativos sem first_date
+    // usando o MIN(date) do histórico armazenado, não do lote atual.
     try {
-      const minDatesByTicker = new Map();
-      for (const c of formatted) {
-        if (!c.ticker || !c.date) continue;
-        const cur = minDatesByTicker.get(c.ticker);
-        if (!cur || c.date < cur) {
-          minDatesByTicker.set(c.ticker, c.date);
-        }
-      }
-
       const virginStocks = this.db.prepare(`
         SELECT ticker 
         FROM stocks 
@@ -1833,12 +1830,16 @@ class DB {
         const updateStmt = this.db.prepare(`
           UPDATE stocks SET first_date = ? WHERE UPPER(TRIM(ticker)) = ?
         `);
+        const minDateStmt = this.db.prepare(`
+          SELECT MIN(date) as min_date FROM historical_prices WHERE ticker = ?
+        `);
         const updateTx = this.db.transaction((list) => {
           for (const s of list) {
             const canonicalT = canonicalTicker(s.ticker);
-            const minDate = minDatesByTicker.get(canonicalT);
-            if (minDate) {
-              updateStmt.run(minDate, canonicalT);
+            const histRow = minDateStmt.get(canonicalT);
+            const trueFirstDate = histRow && histRow.min_date ? histRow.min_date : null;
+            if (trueFirstDate) {
+              updateStmt.run(trueFirstDate, canonicalT);
             }
           }
         });
