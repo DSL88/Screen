@@ -244,6 +244,37 @@ class DB {
         }
       }
 
+      // Índice composto para agregações MIN/MAX/COUNT instantâneas por ativo.
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_ticker_date ON historical_prices (ticker, date)');
+
+      // AUTOCORREÇÃO DA PRIMEIRA DATA HISTÓRICA
+      // ------------------------------------------------------------------
+      // Recalcula first_date para TODOS os ativos já gravados na BD, com
+      // base no MIN(date) real de historical_prices. Isto corrige
+      // retroativamente registos cujo first_date tinha sido populado com a
+      // data do download (em vez da vela mais antiga) por versões anteriores.
+      try {
+        const fixStmt = this.db.prepare(`
+          UPDATE stocks
+          SET first_date = (
+            SELECT MIN(hp.date)
+            FROM historical_prices hp
+            WHERE UPPER(TRIM(hp.ticker)) = UPPER(TRIM(stocks.ticker))
+          )
+          WHERE EXISTS (
+            SELECT 1
+            FROM historical_prices hp
+            WHERE UPPER(TRIM(hp.ticker)) = UPPER(TRIM(stocks.ticker))
+          )
+        `);
+        const fixResult = fixStmt.run();
+        if (fixResult.changes > 0) {
+          console.log(`[DB Migration] first_date recalculado para ${fixResult.changes} ativo(s) a partir do MIN(date) real.`);
+        }
+      } catch (err) {
+        console.error('[DB Migration] Falha ao recalcular first_date:', err && err.message ? err.message : err);
+      }
+
       // Older releases stored labels such as "EUA — S&P 500" in this
       // column.  Convert them once, defensively, before any indexed query.
       const stockRows = this.db.prepare('SELECT ticker, index_name FROM stocks').all();
@@ -1358,6 +1389,47 @@ class DB {
       lastDate: row.last_date,
       totalCandles: row.total_candles,
       fullHistoryFetched: !!row.full_history_fetched
+    };
+  }
+
+  // Agregação resiliente dos limites reais do histórico local (MIN/MAX/COUNT)
+  // que, além de devolver os limites, sincroniza a coluna first_date da
+  // tabela stocks quando esta está nula ou divergente do MIN(date) real.
+  getStockHistorySummary(ticker) {
+    const cleanTicker = String(ticker).trim().toUpperCase();
+    const row = this.db.prepare(`
+      SELECT
+        MIN(date) AS first_date,
+        MAX(date) AS last_date,
+        COUNT(*)  AS total_candles
+      FROM historical_prices
+      WHERE UPPER(TRIM(ticker)) = ?
+    `).get(cleanTicker);
+
+    if (!row || row.total_candles === 0) {
+      return { first_date: null, last_date: null, total_candles: 0 };
+    }
+
+    // Corrige first_date divergendo do MIN(date) real (segurança adicional
+    // à migração de arranque e aos saves incrementais).
+    if (row.first_date) {
+      try {
+        const stock = this.db.prepare(
+          'SELECT first_date FROM stocks WHERE UPPER(TRIM(ticker)) = ?'
+        ).get(cleanTicker);
+        const stored = stock && stock.first_date ? String(stock.first_date).trim() : '';
+        if (!stored || stored !== String(row.first_date).trim()) {
+          this.db.prepare(
+            'UPDATE stocks SET first_date = ? WHERE UPPER(TRIM(ticker)) = ?'
+          ).run(String(row.first_date).trim(), cleanTicker);
+        }
+      } catch (_) { /* não bloqueia a leitura */ }
+    }
+
+    return {
+      first_date: row.first_date,
+      last_date: row.last_date,
+      total_candles: row.total_candles
     };
   }
 

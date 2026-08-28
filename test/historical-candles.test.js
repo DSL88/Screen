@@ -144,3 +144,45 @@ test('saveHistoricalCandles com lista vazia não toca na base e devolve changes 
   db.close();
   removeTempDir(dir);
 });
+
+test('getStockHistorySummary agrega MIN/MAX/COUNT e sincroniza first_date divergente', { skip: !SQLITE_AVAILABLE }, async () => {
+  const { db, dir } = makeDb();
+  db.upsertStock({ ticker: 'CCC', name: 'CCC', country: 'EUA', indexName: 'SP500' });
+  // first_date corrompido (data do download) enquanto o histórico começa em 1994.
+  db.updateStockFirstDate('CCC', '2026-08-27');
+
+  db.saveHistoricalCandles([
+    makeCandle('CCC', '1994-05-02', 10),
+    makeCandle('CCC', '2024-06-10', 11),
+    makeCandle('CCC', '2024-06-11', 12)
+  ]);
+
+  const summary = db.getStockHistorySummary('CCC');
+  assert.equal(summary.first_date, '1994-05-02');
+  assert.equal(summary.last_date, '2024-06-11');
+  assert.equal(summary.total_candles, 3);
+
+  // A leitura deve ter corrigido o first_date armazenado.
+  assert.equal(db.getStockByTicker('CCC').first_date, '1994-05-02');
+  db.close();
+  removeTempDir(dir);
+});
+
+test('migração de arranque recalcula first_date a partir do MIN(date) real', { skip: !SQLITE_AVAILABLE }, async () => {
+  const { db, dir } = makeDb();
+  db.upsertStock({ ticker: 'DDD', name: 'DDD', country: 'EUA', indexName: 'SP500' });
+  db.saveHistoricalCandles([
+    makeCandle('DDD', '1988-01-03', 10),
+    makeCandle('DDD', '2024-06-10', 11)
+  ]);
+  // Simula dado corrompido pré-existente antes da migração.
+  db.updateStockFirstDate('DDD', '2026-08-27');
+
+  // Reinicializa a BD para disparar a migração de autocorrção.
+  db.close();
+  const db2 = new DB(dir);
+  db2.init();
+  assert.equal(db2.getStockByTicker('DDD').first_date, '1988-01-03');
+  db2.close();
+  removeTempDir(dir);
+});

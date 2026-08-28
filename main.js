@@ -1406,7 +1406,14 @@ app.whenReady().then(async () => {
       if (!ticker) return { ok: false, error: 'missing-ticker' };
       try {
         const stock = db.getStockByTicker(ticker);
-        const summary = db.getHistoricalSummary(ticker);
+        const historySummary = db.getStockHistorySummary(ticker);
+        const summary = {
+          hasData: !!(historySummary && historySummary.total_candles > 0),
+          firstDate: historySummary ? historySummary.first_date : null,
+          lastDate: historySummary ? historySummary.last_date : null,
+          totalCandles: historySummary ? historySummary.total_candles : 0,
+          fullHistoryFetched: !!(stock && stock.full_history_fetched)
+        };
         const customTicker = db.db.prepare(
           'SELECT ticker, name, exchange, type FROM custom_tickers WHERE ticker = ?'
         ).get(ticker);
