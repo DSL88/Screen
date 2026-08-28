@@ -967,8 +967,11 @@ async function syncSingleTicker(ticker, expectedDate, dbInstance) {
   try {
     const fallbackCandles = await fetchWithRetry(() => fetchRecentFallback(ticker, '3mo'));
     if (fallbackCandles && fallbackCandles.length > 0) {
+      // NUNCA sobrescrever first_date com a data de um lote parcial recente:
+      // saveHistoricalCandles preenche first_date apenas quando ainda está
+      // vazio (MIN(date) real), e a reconciliação global (arranque / IPC)
+      // repõe o MIN(date) verdadeiro assim que o histórico completo existir.
       db.saveHistoricalCandles(ticker, fallbackCandles);
-      db.updateStockFirstDate(ticker, fallbackCandles[0].date);
       return { ticker, status: 'INITIALIZED_FALLBACK', count: fallbackCandles.length, lastDate: fallbackCandles[fallbackCandles.length - 1].date };
     }
   } catch (fallbackErr) {

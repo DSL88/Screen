@@ -708,33 +708,69 @@ class DB {
     return { changes: tx(formatted) };
   }
 
-  saveHistoricalCandlesBatch(entries) {
+  // Gravação segura de histórico descarregado. Aceita (ticker, candles) para um
+  // ativo ou a forma legada de lote (entries) com [{ ticker, candles }]. Após
+  // gravar, recalcula e fixa imediatamente o MIN(date) real na tabela stocks —
+  // nunca a data do download — para que o "PRIMEIRO REGISTO" não regresse a
+  // uma data recente quando o lote descarregado é parcial.
+  saveHistoricalCandlesBatch(ticker, maybeCandles) {
+    let entries = null;
+    if (typeof ticker === 'string') {
+      const cleanTicker = canonicalTicker(ticker);
+      entries = (Array.isArray(maybeCandles) ? maybeCandles : []).map(c => ({
+        ticker: cleanTicker,
+        candles: [c]
+      }));
+    } else if (Array.isArray(ticker)) {
+      entries = ticker;
+    }
     if (!Array.isArray(entries) || entries.length === 0) return { changes: 0 };
 
-    // Statement hoisted em _prepareStatements() — usado pelo sync em lote
-    // (sync-all-list-stocks) uma vez por chunk; sem prepare por chamada.
-    const stmt = this._stmtUpsertPrice;
+    // UPSERT condicional hoisted em _prepareStatements(): reenvios idênticos
+    // contam 0 e atualizações contam 1 — preserva o contrato de {changes}.
+    const stmt = this._stmtUpsertPrice || this.db.prepare(`
+      INSERT INTO historical_prices (ticker, date, open, high, low, close, volume)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(ticker, date) DO UPDATE SET
+        open = excluded.open, high = excluded.high, low = excluded.low,
+        close = excluded.close, volume = excluded.volume
+      WHERE historical_prices.open IS NOT excluded.open
+         OR historical_prices.high IS NOT excluded.high
+         OR historical_prices.low IS NOT excluded.low
+         OR historical_prices.close IS NOT excluded.close
+         OR historical_prices.volume IS NOT excluded.volume
+    `);
 
-    const tx = this.db.transaction((batch) => {
+    const tx = this.db.transaction((list) => {
       let changes = 0;
-      for (const entry of batch) {
+      for (const entry of list) {
         for (const c of entry.candles) {
-          const r = stmt.run(
+          const date = String(c.date || '').slice(0, 10);
+          const close = Number(c.close);
+          if (!date || !Number.isFinite(close)) continue;
+          changes += stmt.run(
             canonicalTicker(entry.ticker),
-            c.date,
-            c.open,
-            c.high,
-            c.low,
-            c.close,
-            c.volume
-          );
-          changes += r.changes || 0;
+            date,
+            Number(c.open),
+            Number(c.high),
+            Number(c.low),
+            close,
+            Number(c.volume || 0)
+          ).changes || 0;
         }
       }
       return changes;
     });
 
-    return { changes: tx(entries) };
+    const changes = tx(entries);
+
+    // Recalcular e fixar imediatamente o MIN(date) real na tabela stocks.
+    const tickerSet = new Set(entries.map(e => canonicalTicker(e.ticker)).filter(Boolean));
+    for (const t of tickerSet) {
+      this.getStockHistorySummary(t);
+    }
+
+    return { changes };
   }
 
   // API flat para gravação consolidada via IPC: recebe velas já "achatadas"
@@ -1299,6 +1335,23 @@ class DB {
     return rows.map(r => r.index_name);
   }
 
+  // Países distintos já guardados (stocks + custom_tickers), limpos e por
+  // ordem alfabética. Alimenta o autocomplete do campo "País" no modal de
+  // adição de ativos; quando um país ainda não existe, é gravado no submit.
+  getAllDistinctCountries() {
+    const rows = this.db.prepare(`
+      SELECT DISTINCT TRIM(country) AS country
+      FROM (
+        SELECT country FROM stocks
+        UNION
+        SELECT country FROM custom_tickers
+      )
+      WHERE country IS NOT NULL AND TRIM(country) != ''
+      ORDER BY country ASC
+    `).all();
+    return rows.map(r => r.country);
+  }
+
   getFullHistoryFetched(ticker) {
     const row = this.db.prepare('SELECT full_history_fetched FROM stocks WHERE ticker = ?').get(canonicalTicker(ticker));
     return row ? !!row.full_history_fetched : false;
@@ -1439,6 +1492,71 @@ class DB {
       last_date: row.last_date,
       total_candles: row.total_candles
     };
+  }
+
+  // Auditoria e reconciliação global: repõe o MIN(date) real de
+  // historical_prices na coluna first_date de todos os ativos. Executada no
+  // arranque da aplicação e sob pedido via IPC (reconcile-all-dates), para
+  // que datas escritas por sincronizações incrementais recentes (ex.: o dia
+  // de hoje) nunca sejam apresentadas como "PRIMEIRO REGISTO".
+  reconcileAllStocksFirstDate() {
+    try {
+      // Garante que a coluna first_date existe na tabela stocks.
+      const cols = this.db.prepare('PRAGMA table_info(stocks)').all();
+      if (!cols.some(c => c.name === 'first_date')) {
+        this.db.exec('ALTER TABLE stocks ADD COLUMN first_date TEXT');
+      }
+
+      // Garante o índice composto que acelera as agregações MIN/MAX/COUNT.
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date)');
+
+      // Passo 1 — correspondência exata de ticker (usa o índice composto;
+      // corre em milissegundos mesmo com milhões de velas). Os tickers são
+      // gravados de forma canónica (UPPER + TRIM) em todos os caminhos de
+      // escrita, pelo que o match exato cobre a esmagadora maioria dos casos.
+      const fastResult = this.db.prepare(`
+        UPDATE stocks
+        SET first_date = (
+          SELECT MIN(hp.date)
+          FROM historical_prices hp
+          WHERE hp.ticker = stocks.ticker
+        )
+        WHERE EXISTS (
+          SELECT 1
+          FROM historical_prices hp
+          WHERE hp.ticker = stocks.ticker
+        )
+      `).run();
+
+      // Passo 2 — resíduos legados cujo ticker diverge em caixa/trim (não
+      // apanhados pelo match exato). Raro, por isso é aceitável pagar a
+      // varredura UPPER(TRIM) apenas nesses ativos.
+      const stragglersResult = this.db.prepare(`
+        UPDATE stocks
+        SET first_date = (
+          SELECT MIN(hp.date)
+          FROM historical_prices hp
+          WHERE UPPER(TRIM(hp.ticker)) = UPPER(TRIM(stocks.ticker))
+        )
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM historical_prices hp
+          WHERE hp.ticker = stocks.ticker
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM historical_prices hp
+          WHERE UPPER(TRIM(hp.ticker)) = UPPER(TRIM(stocks.ticker))
+        )
+      `).run();
+
+      const updatedCount = (fastResult.changes || 0) + (stragglersResult.changes || 0);
+      console.log(`[Reconciliação Concluída] Datas de 1º registo corrigidas para ${updatedCount} ativos.`);
+      return { success: true, updatedCount };
+    } catch (error) {
+      console.error('[Erro na Reconciliação Global]:', error && error.message ? error.message : error);
+      return { success: false, error: (error && error.message) || String(error) };
+    }
   }
 
   getHistoricalSummaryBatch(tickers) {

@@ -705,8 +705,14 @@
             id="modal-country"
             class="form-input"
             placeholder="ex: Portugal, Espanha, EUA..."
+            list="modal-country-list"
+            autocomplete="off"
+            spellcheck="false"
             required
           />
+          <datalist id="modal-country-list">
+            <!-- Populado dinamicamente com os países já guardados na base de dados -->
+          </datalist>
         </div>
         <div class="form-group">
           <label class="form-label" for="manual-stock-index">Índice Respetivo *</label>

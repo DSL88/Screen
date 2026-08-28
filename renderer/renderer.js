@@ -1283,7 +1283,32 @@
     modalResults.innerHTML = '<div class="modal-result-empty">Escreve um símbolo para ver sugestões.</div>';
     modalHint.className = 'form-hint';
     modalHint.textContent = '';
+    // Autocomplete de países já guardados na base de dados; países novos
+    // continuam a ser gravados no submit do formulário.
+    void populateCountryDatalist();
     setTimeout(() => modalTicker.focus(), 50);
+  }
+
+  // Preenche o <datalist> do campo "País" com os países que já existem na
+  // base de dados, evitando escrever o nome completo. Um país que ainda não
+  // existe pode ser digitado à mesma — fica guardado quando o ativo é criado.
+  async function populateCountryDatalist() {
+    const listEl = document.getElementById('modal-country-list');
+    if (!listEl || !window.api.getDistinctCountries) return;
+    try {
+      const res = await window.api.getDistinctCountries();
+      const countries = (res && res.ok && Array.isArray(res.countries)) ? res.countries : [];
+      listEl.innerHTML = '';
+      for (const c of countries) {
+        if (!c) continue;
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        listEl.appendChild(opt);
+      }
+    } catch (err) {
+      console.warn('[populateCountryDatalist] Falha a carregar países:', err);
+    }
   }
 
   function closeAddModal() {
@@ -3515,14 +3540,13 @@
   // Valores de metadados ativos (fonte de verdade para a camada de edição).
   let assetDetailCurrentValues = { name: '', country: '', indexName: '' };
 
-  function fmtDate(d) {
-    if (!d) return '—';
-    const str = String(d).split('T')[0];
-    const p = str.split('-');
-    if (p.length === 3 && p[0].length === 4) {
-      return `${p[2]}-${p[1]}-${p[0]}`;
-    }
-    return String(d);
+  // Formatação de datas ISO YYYY-MM-DD para o padrão europeu DD-MM-AAAA.
+  function formatDateDisplay(isoDateString) {
+    if (!isoDateString || typeof isoDateString !== 'string') return '--';
+    const clean = isoDateString.trim().slice(0, 10);
+    const parts = clean.split('-');
+    if (parts.length !== 3) return isoDateString;
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
   }
 
   function renderModalState(hasData, details) {
@@ -3536,8 +3560,8 @@
     const hasFirstDateMetadata = !!summary.firstDate;
     if (hasData || hasFirstDateMetadata) {
       if (historySummaryZone) historySummaryZone.style.display = 'block';
-      if (firstEl) firstEl.textContent = fmtDate(summary.firstDate);
-      if (lastEl) lastEl.textContent = hasData ? fmtDate(summary.lastDate) : '—';
+      if (firstEl) firstEl.textContent = formatDateDisplay(summary.firstDate);
+      if (lastEl) lastEl.textContent = hasData ? formatDateDisplay(summary.lastDate) : '—';
       if (candlesEl) candlesEl.textContent = summary.totalCandles != null ? Number(summary.totalCandles).toLocaleString('pt-PT') : '—';
     } else {
       if (historySummaryZone) historySummaryZone.style.display = 'none';

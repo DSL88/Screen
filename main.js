@@ -564,6 +564,12 @@ app.whenReady().then(async () => {
     db = new Database(app.getPath('userData'));
     await db.init();
 
+    // Auditoria e reconciliação global: repõe o MIN(date) real na coluna
+    // first_date de todos os ativos ANTES de a UI carregar, para que o
+    // "PRIMEIRO REGISTO" do modal e da My List nunca apresente a data de um
+    // download incremental recente em vez da vela mais antiga guardada.
+    db.reconcileAllStocksFirstDate();
+
     // All index imports share one mutex.  Cancellation is cooperative: an
     // in-flight HTTP request is allowed to finish, but its result is never
     // persisted after cancellation.
@@ -1429,6 +1435,29 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('get-stock-details', async (_event, payload) => {
+      const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
+      if (!ticker) return { ok: false, error: 'missing-ticker' };
+      try {
+        const stockInfo = db.getStockByTicker(ticker) || {};
+        // getStockHistorySummary recalcula o MIN/MAX/COUNT real e auto-corrige
+        // first_date caso esta esteja vazia ou divergente.
+        const historySummary = db.getStockHistorySummary(ticker);
+        return {
+          ok: true,
+          ticker,
+          name: stockInfo.name || ticker,
+          country: stockInfo.country || '--',
+          index_name: stockInfo.index_name || '--',
+          first_date: historySummary.first_date,
+          last_date: historySummary.last_date,
+          total_candles: historySummary.total_candles
+        };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
     ipcMain.handle('update-stock-metadata', async (_event, payload) => {
       const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
       if (!ticker) return { ok: false, error: 'missing-ticker' };
@@ -1449,6 +1478,27 @@ app.whenReady().then(async () => {
         return { ok: true, indices };
       } catch (err) {
         return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    // Países já existentes na base de dados (autocomplete do modal de adição).
+    ipcMain.handle('get-distinct-countries', async () => {
+      try {
+        const countries = db.getAllDistinctCountries();
+        return { ok: true, countries };
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+    });
+
+    // Auditoria/reconciliação manual: força a correção global de first_date
+    // para o MIN(date) real em todos os ativos (usa também no arranque).
+    ipcMain.handle('reconcile-all-dates', async () => {
+      try {
+        const result = db.reconcileAllStocksFirstDate();
+        return { ok: !!result.success, ...result };
+      } catch (err) {
+        return { ok: false, success: false, error: err.message || String(err) };
       }
     });
 

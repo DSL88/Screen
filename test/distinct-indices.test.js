@@ -89,3 +89,32 @@ test('getAllDistinctIndices lê apenas stocks: custom_tickers sem stock correspo
   db.close();
   removeTempDir(dir);
 });
+
+test('getAllDistinctCountries devolve países de stocks + custom_tickers, limpos e ordenados', { skip: !SQLITE_AVAILABLE }, () => {
+  const { db, dir } = makeDb();
+  assert.deepEqual(db.getAllDistinctCountries(), []);
+
+  db.upsertStock({ ticker: 'A.LS', name: 'A', country: 'Portugal', indexName: 'PSI' });
+  db.upsertStock({ ticker: 'B.LS', name: 'B', country: ' Portugal ', indexName: 'PSI' }); // espaços extra → limpo
+  db.upsertStock({ ticker: 'C.MC', name: 'C', country: 'Espanha', indexName: 'IBEX 35' });
+  // País vazio/whitespace-only não conta.
+  db.upsertStock({ ticker: 'D.US', name: 'D', country: '', indexName: 'S&P 500' });
+  // Só na watchlist (custom_tickers), sem stock correspondente → também conta.
+  db.addCustomTicker({ ticker: 'ZZZ.DE', name: 'ZZZ', country: 'Alemanha', indexName: 'DAX40' });
+
+  assert.deepEqual(db.getAllDistinctCountries(), ['Alemanha', 'Espanha', 'Portugal']);
+  db.close();
+  removeTempDir(dir);
+});
+
+test('país novo digitado no submit fica guardado e surge no autocomplete', { skip: !SQLITE_AVAILABLE }, () => {
+  const { db, dir } = makeDb();
+  // Simula o ticker:add com um país novo (ex.: "Japão").
+  db.addCustomTicker({ ticker: 'AAA.T', name: 'AAA', country: 'Japão', indexName: 'NIKKEI30' });
+  db.upsertStock({ ticker: 'AAA.T', name: 'AAA', country: 'Japão', indexName: 'NIKKEI30' });
+
+  assert.equal(db.getStockByTicker('AAA.T').country, 'Japão');
+  assert.deepEqual(db.getAllDistinctCountries(), ['Japão']);
+  db.close();
+  removeTempDir(dir);
+});
