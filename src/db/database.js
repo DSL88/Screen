@@ -253,18 +253,26 @@ class DB {
       // base no MIN(date) real de historical_prices. Isto corrige
       // retroativamente registos cujo first_date tinha sido populado com a
       // data do download (em vez da vela mais antiga) por versões anteriores.
+      //
+      // NOTA DE PERFORMANCE: os tickers são sempre gravados de forma canónica
+      // (UPPER + TRIM) em todos os caminhos de escrita. Usar
+      // UPPER(TRIM(hp.ticker)) na comparação impediria o uso do índice
+      // composto idx_hist_ticker_date e forçaria uma varredura completa de
+      // historical_prices POR CADA ativo — em bases com milhões de velas
+      // (ex.: 905 ativos × 5.2M linhas) a migração nunca termina e a app
+      // "não arranca". A correspondência exata usa o índice (milissegundos).
       try {
         const fixStmt = this.db.prepare(`
           UPDATE stocks
           SET first_date = (
             SELECT MIN(hp.date)
             FROM historical_prices hp
-            WHERE UPPER(TRIM(hp.ticker)) = UPPER(TRIM(stocks.ticker))
+            WHERE hp.ticker = stocks.ticker
           )
           WHERE EXISTS (
             SELECT 1
             FROM historical_prices hp
-            WHERE UPPER(TRIM(hp.ticker)) = UPPER(TRIM(stocks.ticker))
+            WHERE hp.ticker = stocks.ticker
           )
         `);
         const fixResult = fixStmt.run();
@@ -825,7 +833,7 @@ class DB {
     const rows = this.db.prepare(`
       SELECT date, open, high, low, close, volume
       FROM historical_prices
-      WHERE UPPER(TRIM(ticker)) = ?
+      WHERE ticker = ?
       ORDER BY date DESC
       LIMIT 300
     `).all(cleanTicker).reverse();
@@ -880,7 +888,7 @@ class DB {
       const rows = this.db.prepare(`
         SELECT date, open, high, low, close, volume
         FROM historical_prices
-        WHERE UPPER(TRIM(ticker)) = ?
+        WHERE ticker = ?
         ORDER BY date ASC
       `).all(cleanTicker);
       return rows.map(toRow);
@@ -893,7 +901,7 @@ class DB {
     const warmupRows = this.db.prepare(`
       SELECT date, open, high, low, close, volume
       FROM historical_prices
-      WHERE UPPER(TRIM(ticker)) = ? AND date < ?
+      WHERE ticker = ? AND date < ?
       ORDER BY date DESC
       LIMIT 200
     `).all(cleanTicker, cleanStart).reverse();
@@ -901,7 +909,7 @@ class DB {
     const mainRows = this.db.prepare(`
       SELECT date, open, high, low, close, volume
       FROM historical_prices
-      WHERE UPPER(TRIM(ticker)) = ? AND date >= ? AND date <= ?
+      WHERE ticker = ? AND date >= ? AND date <= ?
       ORDER BY date ASC
     `).all(cleanTicker, cleanStart, cleanEnd);
 
@@ -1403,7 +1411,7 @@ class DB {
         MAX(date) AS last_date,
         COUNT(*)  AS total_candles
       FROM historical_prices
-      WHERE UPPER(TRIM(ticker)) = ?
+      WHERE ticker = ?
     `).get(cleanTicker);
 
     if (!row || row.total_candles === 0) {
