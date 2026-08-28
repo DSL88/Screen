@@ -57,6 +57,7 @@
   --radius:       12px;
   --radius-sm:    8px;
   --radius-xs:    5px;
+  --radius-pill:  999px;
 
   /* ── Typography ── */
   --font:         'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
@@ -5128,4 +5129,47 @@ tr.empty td .empty-state {
 .text-red { color: #ff5252 !important; font-weight: 600; }
 .text-muted { color: #8a99ad; }
 .hidden { display: none !important; }
+
+/* ═══════════════════════════════════════════════════════════
+   BOTÕES EM FORMATO PÍLULA
+   Override global: todos os botões de ação ficam totalmente
+   arredondados (border-radius: 999px). !important garante que
+   vence regras mais específicas (ex. .topbar-actions .btn-*,
+   .mylist-toolbar .btn-*) que impõem cantos arredondados.
+   Os tabs de navegação (.tab-btn) mantêm o estilo underline
+   original (fundo transparente — os cantos não são visíveis).
+   ═══════════════════════════════════════════════════════════ */
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-danger-ghost,
+.btn-investir,
+.btn-reanalisar,
+.btn-primary-action,
+.btn-secondary-action,
+.btn-view-full-report,
+.btn-success,
+.btn-cancel-operation,
+.btn-close-modal,
+.asset-detail-edit-btn,
+.asset-detail-sync-btn,
+.asset-detail-save-metadata-btn,
+.asset-detail-full-download-btn,
+.asset-detail-delete-btn,
+.shortcuts-search-btn,
+.modal-search-add-btn,
+.toolbar-btn,
+.sim-page-btn,
+.import-cancel-btn,
+.link-btn,
+.modal-close,
+.search-trigger,
+.index-action-item,
+.file-upload-remove,
+.suggestion-add,
+.modal-result-open,
+.wl-remove,
+.shortcut-result-add {
+  border-radius: var(--radius-pill) !important;
+}
 
