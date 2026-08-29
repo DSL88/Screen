@@ -173,6 +173,9 @@ const apiBridge = {
     ipcRenderer.on('simulation:error', handler);
     return () => ipcRenderer.removeListener('simulation:error', handler);
   },
+  runQuantFullPipeline: (payload) => ipcRenderer.invoke('quant:run-full-pipeline', payload),
+  runQuantPhase: (phase, params) => ipcRenderer.invoke('quant:run-phase', { phase, params }),
+  executeScreener: (payload) => ipcRenderer.invoke('execute-screener', payload),
   on: (channel, callback) => {
     if (!ALLOWED_EVENTS.has(channel)) {
       throw new Error(`Channel "${channel}" is not allowed`);
@@ -183,6 +186,14 @@ const apiBridge = {
   }
 };
 
+const quantApiBridge = {
+  runScreener: (payload) => ipcRenderer.invoke('execute-screener', payload),
+  runFullPipeline: (payload) => ipcRenderer.invoke('quant:run-full-pipeline', payload),
+  runPhase: (phase, params) => ipcRenderer.invoke('quant:run-phase', { phase, params }),
+};
+
 contextBridge.exposeInMainWorld('api', apiBridge);
 contextBridge.exposeInMainWorld('electronAPI', apiBridge);
+contextBridge.exposeInMainWorld('quantAPI', quantApiBridge);
+
 

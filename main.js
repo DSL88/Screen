@@ -13,6 +13,7 @@ const { isIncrementalUpToDate, addDays } = require('./src/utils/dateUtils');
 const { createProgressReporter } = require('./src/utils/progressThrottle');
 const { parseFile, importFromCsvFile } = require('./src/importer/historicalImporter');
 const { scanStock } = require('./src/scanner');
+const { PythonBridge } = require('./src/services/pythonBridge');
 let quantEngine = null;
 try { quantEngine = require('./src/native'); } catch (_) { quantEngine = null; }
 
@@ -589,6 +590,70 @@ app.whenReady().then(async () => {
         cancelled: true
       };
     });
+
+    // ═══════════════════════════════════════════════════════
+    //  QUANT PIPELINE — Python Engine Bridge (Fases 1 a 6)
+    // ═══════════════════════════════════════════════════════
+    const resolveMyListTickers = (payload) => {
+      const p = payload ? { ...payload } : {};
+      if ((!p.tickers || p.tickers.length === 0) && (p.universe === 'MY_LIST' || p.universe === 'my_list' || p.universe === 'ALL')) {
+        try {
+          const custom = db.getCustomTickers();
+          if (custom && custom.length > 0) {
+            p.tickers = custom.map(t => String(t.ticker || '').toUpperCase().trim()).filter(Boolean);
+          }
+        } catch (e) {
+          console.warn('[QuantEngine] Erro ao carregar custom_tickers do SQLite:', e);
+        }
+      }
+      return p;
+    };
+
+    ipcMain.handle('quant:run-full-pipeline', async (_event, payload) => {
+      try {
+        const enrichedPayload = resolveMyListTickers(payload);
+        const result = await PythonBridge.runPipeline('run_full_pipeline', enrichedPayload);
+        return { ok: true, data: result };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('execute-screener', async (_event, payload) => {
+      try {
+        const enrichedPayload = resolveMyListTickers(payload);
+        const result = await PythonBridge.runPipeline('run_full_pipeline', enrichedPayload);
+        return { ok: true, data: result };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('quant:run-phase', async (_event, { phase, params } = {}) => {
+      try {
+        const actionMap = {
+          1: 'run_fundamentals',
+          2: 'run_technical',
+          3: 'run_fracdiff',
+          4: 'run_sentiment',
+          5: 'run_purification',
+          6: 'run_cpcv',
+          'fundamentals': 'run_fundamentals',
+          'technical': 'run_technical',
+          'fracdiff': 'run_fracdiff',
+          'sentiment': 'run_sentiment',
+          'purification': 'run_purification',
+          'cpcv': 'run_cpcv',
+        };
+        const action = actionMap[phase] || 'run_full_pipeline';
+        const enrichedParams = resolveMyListTickers(params);
+        const result = await PythonBridge.runPipeline(action, enrichedParams);
+        return { ok: true, data: result };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
 
     // ═══════════════════════════════════════════════════════
     //  SCAN — Execução via Worker Thread

@@ -41,10 +41,13 @@
       <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark"></div>
-        <div>
+        <div class="brand-text-wrap sidebar-text">
           <div class="brand-title">Markov Scanner</div>
           <div class="brand-sub">Discrete-Time Markov Model</div>
         </div>
+        <button id="toggle-sidebar-btn" class="btn btn-sm btn-outline-secondary btn-toggle-sidebar" title="Recolher/Expandir Barra Lateral">
+          <span id="toggle-icon">◀</span>
+        </button>
       </div>
 
       <div class="panel search-panel">
@@ -103,7 +106,9 @@
         <button class="tab-btn" data-tab="portfolio">Monitorização de Investimentos</button>
         <button class="tab-btn" data-tab="history">Histórico de Trades</button>
         <button class="tab-btn" data-tab="simulation">Simulação de Estratégias</button>
+        <button class="tab-btn" data-tab="quant-pipeline">Alpha Quant Engine (Fases 1-6)</button>
       </nav>
+
 
       <div class="tab-content active" id="tab-scanner">
         <header class="topbar">
@@ -625,7 +630,326 @@
           </div>
         </div>
       </div>
+
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <!--  TAB: ALPHA QUANT ENGINE (FASES 1 A 6)                 -->
+      <!-- ═══════════════════════════════════════════════════════ -->
+      <div class="tab-content" id="tab-quant-pipeline">
+        <header class="topbar">
+          <div class="topbar-info">
+            <h1>Institutional Alpha Quant Engine</h1>
+            <p id="quant-status-line">Pipeline quantitativo institucional completo (Fases 1 a 6): Graham Solvency, McGinley Microstructure, FracDiff, FinBERT NLP, VIF Factor Neutralization e Validação CPCV.</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="form-group-inline">
+              <label for="quant-phase-select">Executar:</label>
+              <select id="quant-phase-select" class="form-control form-control-sm">
+                <option value="run_full_pipeline">⚡ Pipeline Completo (Fases 1 a 6)</option>
+                <option value="1">Fase 1: Triagem Fundamentalista & Solvência</option>
+                <option value="2">Fase 2: Microestrutura & McGinley Dynamic</option>
+                <option value="3">Fase 3: Diferenciação Fracionária (d*)</option>
+                <option value="4">Fase 4: Sentimento FinBERT & Divergência</option>
+                <option value="5">Fase 5: Purificação Fatorial & VIF</option>
+                <option value="6">Fase 6: Validação Robusta CPCV, DSR & PBO</option>
+              </select>
+            </div>
+            <div class="form-group-inline">
+              <label for="quant-universe-select">Universo:</label>
+              <select id="quant-universe-select" class="form-control form-control-sm">
+                <option value="MY_LIST" selected>⭐ My List (Ativos Selecionados)</option>
+                <option value="ALL">Watchlist + Core Portfolio</option>
+                <option value="SP500">S&P 500 Large-Caps</option>
+                <option value="TECH">Technology & Momentum</option>
+                <option value="SYNTHETIC">Universo Simulado (100 Ativos)</option>
+              </select>
+            </div>
+
+            <button class="btn-primary" id="btn-run-quant-pipeline">
+              <span class="btn-label" id="btn-quant-label">Executar Motor Quantitativo</span>
+              <span class="spinner" id="quant-spinner" hidden></span>
+            </button>
+          </div>
+        </header>
+
+        <!-- DASHBOARD CONTAINER -->
+        <div class="quant-dashboard-wrap">
+          <!-- 1. KPIS INSTITUCIONAIS -->
+          <div class="quant-kpi-grid metrics-cards-grid">
+            <div class="quant-kpi-card metric-card" id="card-quant-approval">
+              <div class="quant-kpi-header label">
+                <span class="quant-kpi-title">ESTADO DE APROVAÇÃO</span>
+                <span class="quant-badge badge bg-secondary" id="badge-production-status">Pronto</span>
+              </div>
+              <div class="quant-kpi-value value" id="val-production-status">Pronto a Executar</div>
+              <div class="quant-kpi-sub sub-label" id="sub-production-status">Anti-Overfitting CPCV</div>
+            </div>
+
+            <div class="quant-kpi-card metric-card">
+              <div class="quant-kpi-header label">
+                <span class="quant-kpi-title">SHARPE OOS (CPCV)</span>
+                <span class="quant-kpi-tag badge bg-secondary">Fase 6</span>
+              </div>
+              <div class="quant-kpi-value value text-bull" id="val-quant-sharpe">--</div>
+              <div class="quant-kpi-sub sub-label">Média Fora de Amostra</div>
+            </div>
+
+            <div class="quant-kpi-card metric-card">
+              <div class="quant-kpi-header label">
+                <span class="quant-kpi-title">DEFLATED SHARPE (DSR)</span>
+                <span class="quant-kpi-tag badge bg-secondary">p-value</span>
+              </div>
+              <div class="quant-kpi-value value" id="val-quant-dsr">--</div>
+              <div class="quant-kpi-sub sub-label">Ajuste p/ N=10 ensaios</div>
+            </div>
+
+            <div class="quant-kpi-card metric-card">
+              <div class="quant-kpi-header label">
+                <span class="quant-kpi-title">PROB. OVERFITTING (PBO)</span>
+                <span class="quant-kpi-tag badge bg-secondary">Limiar &lt; 30%</span>
+              </div>
+              <div class="quant-kpi-value value" id="val-quant-pbo">--</div>
+              <div class="quant-kpi-sub sub-label">Risco de sobreajuste</div>
+            </div>
+
+            <div class="quant-kpi-card metric-card">
+              <div class="quant-kpi-header label">
+                <span class="quant-kpi-title">FRACDIFF d* ÓTIMO</span>
+                <span class="quant-kpi-tag badge bg-secondary">Fase 3</span>
+              </div>
+              <div class="quant-kpi-value value text-accent" id="val-quant-fracdiff">--</div>
+              <div class="quant-kpi-sub sub-label">Estacionário + Memória</div>
+            </div>
+
+            <div class="quant-kpi-card metric-card">
+              <div class="quant-kpi-header label">
+                <span class="quant-kpi-title">VIF MÁXIMO (PURIFICADO)</span>
+                <span class="quant-kpi-tag badge bg-secondary">Fase 5</span>
+              </div>
+              <div class="quant-kpi-value value" id="val-quant-vif">--</div>
+              <div class="quant-kpi-sub sub-label">Multicolinearidade &lt; 5.0</div>
+            </div>
+          </div>
+
+          <!-- 2. SUB-NAVEGAÇÃO POR FASE -->
+          <div class="quant-subnav">
+            <button class="quant-subnav-btn active" data-phase-view="view-all">Visão Consolidada</button>
+            <button class="quant-subnav-btn" data-phase-view="view-phase-1">Fase 1: Fundamentos</button>
+            <button class="quant-subnav-btn" data-phase-view="view-phase-2">Fase 2: Microestrutura & McGinley</button>
+            <button class="quant-subnav-btn" data-phase-view="view-phase-3">Fase 3: FracDiff (d*)</button>
+            <button class="quant-subnav-btn" data-phase-view="view-phase-4">Fase 4: FinBERT Sentimento</button>
+            <button class="quant-subnav-btn" data-phase-view="view-phase-5">Fase 5: Purificação & VIF</button>
+            <button class="quant-subnav-btn" data-phase-view="view-phase-6">Fase 6: Validação CPCV</button>
+          </div>
+
+          <!-- 3. PAINÉIS DE DETALHE POR FASE -->
+          <div class="quant-views-container">
+            <!-- PAINEL 1: FUNDAMENTOS -->
+            <section class="quant-view-panel" id="view-phase-1">
+              <div class="quant-panel-header">
+                <div class="quant-panel-title">
+                  <span class="phase-number-badge">1</span>
+                  <div>
+                    <h3>Fase 1: Triagem Fundamentalista & Solvência (Graham Defensive Screen)</h3>
+                    <p>Filtro passa-baixo de solvência imediata (Current Ratio &gt; 1.5), alavancagem controlada (D/E &lt; 1.5) e pontuação de qualidade.</p>
+                  </div>
+                </div>
+                <div class="quant-panel-meta" id="meta-phase-1">6 ativos analisados</div>
+              </div>
+              <div class="table-responsive">
+                <table class="quant-table" id="table-phase-1">
+                  <thead>
+                    <tr>
+                      <th>Ticker</th>
+                      <th>Setor</th>
+                      <th>Market Cap</th>
+                      <th>Quality Score (0-100)</th>
+                      <th>ROA (%)</th>
+                      <th>Debt / Equity</th>
+                      <th>Earnings Yield (%)</th>
+                      <th>FCF Yield (%)</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-phase-1">
+                    <tr><td colspan="9" class="text-center text-muted">Clica em "Executar Motor Quantitativo" para calcular métricas.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <!-- PAINEL 2: MICROESTRUTURA & MCGINLEY DYNAMIC -->
+            <section class="quant-view-panel" id="view-phase-2">
+              <div class="quant-panel-header">
+                <div class="quant-panel-title">
+                  <span class="phase-number-badge">2</span>
+                  <div>
+                    <h3>Fase 2: Microestrutura de Mercado, Barras de Dólar & Indicadores Adaptativos</h3>
+                    <p>Rastreamento dinâmico sem desfasamento com McGinley Dynamic e Momentum Normalizado por Volatilidade.</p>
+                  </div>
+                </div>
+                <div class="quant-panel-meta" id="meta-phase-2">Amostras: 120 barras</div>
+              </div>
+              <div class="quant-chart-grid">
+                <div class="quant-chart-box">
+                  <h4>Rastreamento McGinley Dynamic vs Preço de Fecho</h4>
+                  <div class="quant-chart-canvas-wrap">
+                    <canvas id="chart-mcginley"></canvas>
+                  </div>
+                </div>
+                <div class="quant-chart-box">
+                  <h4>Momentum Ajustado à Volatilidade ($R / \sigma$)</h4>
+                  <div class="quant-chart-canvas-wrap">
+                    <canvas id="chart-momentum"></canvas>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- PAINEL 3: FRACDIFF -->
+            <section class="quant-view-panel" id="view-phase-3">
+              <div class="quant-panel-header">
+                <div class="quant-panel-title">
+                  <span class="phase-number-badge">3</span>
+                  <div>
+                    <h3>Fase 3: Diferenciação Fracionária com Memória Preservada (FFD)</h3>
+                    <p>Encontra o menor grau $d^*$ que atinge estacionariedade estatística (ADF p-value &lt; 0.05) maximizando a correlação com a série original.</p>
+                  </div>
+                </div>
+                <div class="quant-panel-meta" id="meta-phase-3">Ótimo d*: --</div>
+              </div>
+              <div class="quant-metrics-grid">
+                <div class="metric-highlight-card">
+                  <div class="metric-h-lbl">Grau de Diferenciação Ótimo (d*)</div>
+                  <div class="metric-h-val" id="fracdiff-opt-d">--</div>
+                  <div class="metric-h-sub">Minimiza perda de memória histórica</div>
+                </div>
+                <div class="metric-highlight-card">
+                  <div class="metric-h-lbl">Estatística ADF</div>
+                  <div class="metric-h-val" id="fracdiff-adf-stat">--</div>
+                  <div class="metric-h-sub">Teste de Raiz Unitária (Dickey-Fuller)</div>
+                </div>
+                <div class="metric-highlight-card">
+                  <div class="metric-h-lbl">ADF p-value</div>
+                  <div class="metric-h-val text-bull" id="fracdiff-p-val">--</div>
+                  <div class="metric-h-sub">Rejeição da não-estacionariedade (&lt; 0.05)</div>
+                </div>
+                <div class="metric-highlight-card">
+                  <div class="metric-h-lbl">Retenção de Memória (Correlação)</div>
+                  <div class="metric-h-val" id="fracdiff-corr">--</div>
+                  <div class="metric-h-sub">Correlação linear com série bruta de preços</div>
+                </div>
+              </div>
+            </section>
+
+            <!-- PAINEL 4: FINBERT SENTIMENT -->
+            <section class="quant-view-panel" id="view-phase-4">
+              <div class="quant-panel-header">
+                <div class="quant-panel-title">
+                  <span class="phase-number-badge">4</span>
+                  <div>
+                    <h3>Fase 4: Sentimento Alternativo FinBERT & Sinais de Divergência</h3>
+                    <p>Processamento de linguagem natural (NLP financeiro) identificando assimetrias entre sentimento de notícias e momentum de preços.</p>
+                  </div>
+                </div>
+                <div class="quant-panel-meta" id="meta-phase-4">Sinais analisados</div>
+              </div>
+              <div class="table-responsive">
+                <table class="quant-table" id="table-phase-4">
+                  <thead>
+                    <tr>
+                      <th>Ticker</th>
+                      <th>Manchete / Notícia Analisada</th>
+                      <th>Sentimento FinBERT</th>
+                      <th>Score [-1, +1]</th>
+                      <th>Momentum Preço</th>
+                      <th>Sinal de Divergência</th>
+                      <th>Interpretação</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-phase-4">
+                    <tr><td colspan="7" class="text-center text-muted">Sem dados carregados.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <!-- PAINEL 5: PURIFICAÇÃO & VIF -->
+            <section class="quant-view-panel" id="view-phase-5">
+              <div class="quant-panel-header">
+                <div class="quant-panel-title">
+                  <span class="phase-number-badge">5</span>
+                  <div>
+                    <h3>Fase 5: Purificação de Features e Neutralização Fatorial (VIF / 2-Stage)</h3>
+                    <p>Neutralização de viés setorial e capitalização de mercado (Size Bias) com eliminação de multicolinearidade severa ($VIF &lt; 5.0$).</p>
+                  </div>
+                </div>
+                <div class="quant-panel-meta" id="meta-phase-5">Universo: 100 ativos</div>
+              </div>
+              <div class="table-responsive">
+                <table class="quant-table" id="table-phase-5">
+                  <thead>
+                    <tr>
+                      <th>Indicador / Fator</th>
+                      <th>VIF Inicial (Bruto)</th>
+                      <th>VIF Final (Purificado)</th>
+                      <th>Redução de Multicolinearidade</th>
+                      <th>Estado do Sinal</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-phase-5">
+                    <tr><td colspan="5" class="text-center text-muted">Sem dados carregados.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <!-- PAINEL 6: VALIDAÇÃO CPCV, DSR & PBO -->
+            <section class="quant-view-panel" id="view-phase-6">
+              <div class="quant-panel-header">
+                <div class="quant-panel-title">
+                  <span class="phase-number-badge">6</span>
+                  <div>
+                    <h3>Fase 6: Framework de Validação Robusta & Anti-Overfitting (CPCV, DSR e PBO)</h3>
+                    <p>Validação Combinatória com Expurgo (*Purging*) e *Embargo*, Rácio de Sharpe Deflacionado e Probabilidade de Overfitting.</p>
+                  </div>
+                </div>
+                <div class="quant-panel-meta" id="meta-phase-6">10 Combinações CPCV</div>
+              </div>
+              <div class="quant-metrics-grid">
+                <div class="metric-highlight-card">
+                  <div class="metric-h-lbl">Rácio de Sharpe Médio OOS</div>
+                  <div class="metric-h-val text-bull" id="cpcv-sharpe-val">--</div>
+                  <div class="metric-h-sub">Desempenho Fora de Amostra</div>
+                </div>
+                <div class="metric-highlight-card">
+                  <div class="metric-h-lbl">Deflated Sharpe Ratio (DSR)</div>
+                  <div class="metric-h-val" id="cpcv-dsr-val">--</div>
+                  <div class="metric-h-sub">Confiança após N=10 ensaios (Limiar &gt; 95%)</div>
+                </div>
+                <div class="metric-highlight-card">
+                  <div class="metric-h-lbl">Probability of Overfitting (PBO)</div>
+                  <div class="metric-h-val" id="cpcv-pbo-val">--</div>
+                  <div class="metric-h-sub">Probabilidade de sobreajuste (Limiar &lt; 30%)</div>
+                </div>
+                <div class="metric-highlight-card">
+                  <div class="metric-h-lbl">Max Drawdown Combinado</div>
+                  <div class="metric-h-val text-bear" id="cpcv-mdd-val">--</div>
+                  <div class="metric-h-sub">Perda máxima simulada nas trajetórias</div>
+                </div>
+              </div>
+              <div class="cpcv-decision-box" id="cpcv-decision-box">
+                <div class="cpcv-decision-icon" id="cpcv-decision-icon">🛡️</div>
+                <div class="cpcv-decision-body">
+                  <h4 id="cpcv-decision-title">Aguardando Execução</h4>
+                  <p id="cpcv-decision-desc">Execute o pipeline para verificar a significância estatística do modelo.</p>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
     </main>
+
     </div>
     <div class="toast-container" id="toast-container"></div>
   </div>
@@ -1035,6 +1359,8 @@
     <script src="chart.umd.js"></script>
     <script src="renderer.js"></script>
     <script src="simulationRenderer.js"></script>
+    <script src="quantRenderer.js"></script>
 
 </body>
 </html>
+

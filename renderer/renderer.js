@@ -322,6 +322,32 @@
   const inputVolume = document.getElementById('input-volume');
   const inputTimeframe = document.getElementById('input-timeframe');
 
+  // ── Toggle Sidebar Retrátil ──────────────────────────────────
+  const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
+  if (toggleSidebarBtn) {
+    toggleSidebarBtn.addEventListener('click', () => {
+      const sidebar = document.querySelector('.sidebar');
+      const toggleIcon = document.getElementById('toggle-icon');
+      if (!sidebar) return;
+
+      sidebar.classList.toggle('collapsed');
+
+      if (sidebar.classList.contains('collapsed')) {
+        if (toggleIcon) toggleIcon.innerText = '▶';
+        toggleSidebarBtn.title = 'Expandir Barra Lateral';
+      } else {
+        if (toggleIcon) toggleIcon.innerText = '◀';
+        toggleSidebarBtn.title = 'Recolher Barra Lateral';
+      }
+
+      // Notificar Plotly / Chart.js / Datatables para redimensionar automaticamente
+      window.dispatchEvent(new Event('resize'));
+      setTimeout(() => {
+        window.dispatchEvent(new Event('resize'));
+      }, 310);
+    });
+  }
+
   const modalBacktest = document.getElementById('modal-backtest');
   const modalBacktestClose = document.getElementById('modal-backtest-close');
   const btnOpenBacktest = document.getElementById('btn-open-backtest');

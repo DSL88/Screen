@@ -78,7 +78,11 @@
 }
 
 html, body {
-  height: 100%;
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden; /* Evita a barra de scroll dupla no body */
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
@@ -161,17 +165,22 @@ body {
 
 /* ============== APP BODY ============== */
 .app-body {
-  display: grid;
-  grid-template-columns: 280px 1fr;
+  display: flex;
+  flex-direction: row;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 
 /* ═══════════════════════════════════════════════════════════
    SIDEBAR
    ═══════════════════════════════════════════════════════════ */
+/* Transição suave para a Sidebar e a área principal */
 .sidebar {
+  width: 260px;
+  min-width: 260px;
+  max-width: 260px;
   background: var(--bg-elev);
   backdrop-filter: blur(var(--glass-blur));
   display: flex;
@@ -179,9 +188,13 @@ body {
   padding: 20px 16px;
   gap: 20px;
   overflow-y: auto;
+  overflow-x: hidden;
+  white-space: nowrap;
   -webkit-app-region: no-drag;
   border-right: 1px solid var(--border);
   position: relative;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease;
+  z-index: 10;
 }
 .sidebar::before {
   content: "";
@@ -192,6 +205,88 @@ body {
   width: 1px;
   background: linear-gradient(180deg, var(--accent-soft), transparent 30%, transparent 70%, var(--accent-soft));
   pointer-events: none;
+}
+
+/* Estado Encolhido (Collapsed) */
+.sidebar.collapsed {
+  width: 65px;
+  min-width: 65px;
+  max-width: 65px;
+  padding: 16px 8px;
+}
+
+/* Ocultar textos e manter apenas ícones quando recolhida */
+.sidebar.collapsed .sidebar-text,
+.sidebar.collapsed .parameter-group,
+.sidebar.collapsed .trade-box,
+.sidebar.collapsed .brand-text-wrap,
+.sidebar.collapsed .brand-title,
+.sidebar.collapsed .brand-sub,
+.sidebar.collapsed .search-panel,
+.sidebar.collapsed .panel,
+.sidebar.collapsed .sidebar-footer {
+  display: none !important;
+}
+
+.sidebar.collapsed .brand {
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  gap: 12px;
+}
+
+/* Ajuste automático do conteúdo principal para ocupar 100% da largura */
+.main, .main-content {
+  flex: 1;
+  width: calc(100% - 260px);
+  min-width: 0;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.collapsed + .main,
+.sidebar.collapsed + .main-content,
+.sidebar.collapsed ~ .main,
+.sidebar.collapsed ~ .main-content {
+  width: calc(100% - 65px);
+}
+
+/* Botão de alternância da Sidebar */
+.btn-toggle-sidebar {
+  background: var(--glass-card);
+  border: 1px solid var(--border);
+  color: var(--text-mute);
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-left: auto;
+  font-size: 10px;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.btn-toggle-sidebar:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+  color: var(--accent-light);
+  transform: scale(1.05);
+}
+
+.sidebar.collapsed .btn-toggle-sidebar {
+  margin: 0 auto;
+  width: 32px;
+  height: 32px;
+}
+
+/* Garantir que a grelha de cartões topo (Metrics) seja responsiva */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
 }
 
 /* ── Brand ── */
@@ -231,6 +326,11 @@ body {
   inset: 8px;
   border: 2px solid rgba(255, 255, 255, 0.85);
   border-radius: 4px;
+}
+.brand-text-wrap {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .brand-title {
   font-weight: 700;
@@ -1219,12 +1319,16 @@ body {
 /* ═══════════════════════════════════════════════════════════
    MAIN AREA
    ═══════════════════════════════════════════════════════════ */
-.main {
+.main, .main-content {
+  flex: 1;
+  height: 100vh;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto; /* Ativa o scroll vertical apenas no conteúdo principal */
+  overflow-x: hidden;
   background: var(--bg);
   -webkit-app-region: no-drag;
+  box-sizing: border-box;
 }
 
 /* ── Tab Navigation ── */
@@ -1233,8 +1337,11 @@ body {
   gap: 0;
   background: var(--bg-elev);
   padding: 0 32px;
-  position: relative;
+  position: sticky;
+  top: 0;
+  z-index: 20;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .tab-btn {
   padding: 14px 22px;
@@ -1269,14 +1376,16 @@ body {
   box-shadow: 0 0 12px var(--accent-glow);
   border-radius: 1px;
 }
-.tab-content {
+.tab-pane, .tab-content {
   display: none;
   flex: 1;
   flex-direction: column;
-  overflow: hidden;
-  min-height: 0;
+  gap: 24px; /* Espaçamento vertical automático entre blocos de conteúdo */
+  padding-bottom: 60px; /* Margem extra no fundo para não cortar pela barra inferior */
+  overflow-y: visible;
+  box-sizing: border-box;
 }
-.tab-content.active {
+.tab-pane.active, .tab-content.active {
   display: flex;
   animation: fadeInUp 0.28s var(--ease);
 }
@@ -5172,4 +5281,509 @@ tr.empty td .empty-state {
 .shortcut-result-add {
   border-radius: var(--radius-pill) !important;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   ALPHA QUANT ENGINE (FASES 1 A 6) — ESTILOS DO DASHBOARD
+   ═══════════════════════════════════════════════════════════ */
+.form-group-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-group-inline label {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.form-control-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  outline: none;
+  transition: border-color var(--duration);
+}
+
+.form-control-sm:focus {
+  border-color: var(--accent);
+}
+
+.quant-dashboard-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 24px 32px 60px 32px;
+  box-sizing: border-box;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   GRELHA DOS CARTÕES SUPERIORES DE MÉTRICAS (ALPHA QUANT)
+   ═══════════════════════════════════════════════════════════ */
+.metrics-cards-grid,
+.quant-kpi-grid {
+  display: grid;
+  /* Cria colunas flexíveis com largura mínima de 170px para cada cartão */
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 16px; /* Espaço uniforme entre cada cartão */
+  width: 100%;
+  margin-top: 16px;
+  margin-bottom: 24px;
+}
+
+/* Estilo individual de cada Cartão de Métrica */
+.metric-card,
+.quant-kpi-card {
+  background: #12151e; /* Cor de fundo escura do seu tema */
+  border: 1px solid #232736;
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 90px;
+  box-sizing: border-box;
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--duration), border-color var(--duration);
+}
+
+.metric-card:hover,
+.quant-kpi-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.quant-kpi-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Textos dentro do cartão */
+.metric-card .label,
+.quant-kpi-card .label,
+.quant-kpi-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #8a8f9e;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.metric-card .value,
+.quant-kpi-card .value,
+.quant-kpi-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-top: 6px;
+  font-family: var(--mono);
+}
+
+.metric-card .sub-label,
+.quant-kpi-card .sub-label,
+.quant-kpi-sub {
+  font-size: 10px;
+  color: #5c6170;
+  margin-top: 4px;
+}
+
+.metric-card.border-danger,
+.quant-kpi-card.border-danger {
+  border-color: #ef4444 !important;
+}
+
+.metric-card .text-danger,
+.quant-kpi-card .text-danger {
+  color: #ef4444 !important;
+}
+
+.metric-card .badge.bg-danger,
+.quant-kpi-card .badge.bg-danger,
+.quant-badge-bear {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.metric-card .badge.bg-secondary,
+.quant-kpi-card .badge.bg-secondary {
+  background-color: rgba(100, 116, 139, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(100, 116, 139, 0.3);
+}
+
+.quant-kpi-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+
+/* Badges */
+.quant-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.quant-badge-bull {
+  background: var(--bull-soft);
+  color: var(--bull);
+  border: 1px solid var(--bull-glow);
+}
+
+.quant-badge-bear {
+  background: var(--bear-soft);
+  color: var(--bear);
+  border: 1px solid var(--bear-glow);
+}
+
+.quant-badge-neutral {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+/* Sub-nav */
+.quant-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.quant-subnav-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: all var(--duration);
+}
+
+.quant-subnav-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.quant-subnav-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  border-color: var(--accent);
+}
+
+/* Panels */
+.quant-views-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.quant-view-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.quant-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.quant-panel-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.phase-number-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.quant-panel-title h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 4px;
+}
+
+.quant-panel-title p {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0;
+}
+
+.quant-panel-meta {
+  font-size: 12px;
+  color: var(--text-mute);
+  font-family: var(--mono);
+  background: var(--surface-2);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+/* Tables */
+.quant-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.quant-table th {
+  text-align: left;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+}
+
+.quant-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.quant-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.headline-cell {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.score-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.score-high {
+  background: var(--bull-soft);
+  color: var(--bull);
+}
+
+.score-mid {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* Charts */
+.quant-chart-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .quant-chart-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.quant-chart-box {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.quant-chart-box h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin: 0;
+}
+
+.quant-chart-canvas-wrap {
+  height: 220px;
+  position: relative;
+}
+
+/* Metrics Grid */
+.quant-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.metric-highlight-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metric-h-lbl {
+  font-size: 11px;
+  color: var(--text-mute);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.metric-h-val {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.metric-h-sub {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* Decision Box */
+.cpcv-decision-box {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.cpcv-decision-box.decision-approved {
+  background: rgba(52, 211, 153, 0.08);
+  border-color: rgba(52, 211, 153, 0.25);
+}
+
+.cpcv-decision-box.decision-warning {
+  background: rgba(251, 113, 133, 0.08);
+  border-color: rgba(251, 113, 133, 0.25);
+}
+
+.cpcv-decision-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.cpcv-decision-body h4 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 4px;
+}
+
+.cpcv-decision-body p {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   UNIFORMIZAÇÃO DE DROPDOWNS E FORMATO PÍLULA (CUSTOM SELECT)
+   ═══════════════════════════════════════════════════════════ */
+
+/* Contentor principal do Menu Dropdown */
+.dropdown-menu, 
+.custom-select-dropdown {
+  background-color: #161922; /* Fundo escuro do menu */
+  border: 1px solid #2d3243;
+  border-radius: 16px;        /* Bordas arredondadas do menu */
+  padding: 8px;              /* Espaço interno para as pílulas respirarem */
+  box-shadow: 0px 10px 25px rgba(0, 0, 0, 0.5);
+  min-width: 260px;
+  box-sizing: border-box;
+}
+
+/* Estilo Base Uniforme para Todos os Itens/Botões do Menu */
+.dropdown-item, 
+.custom-select-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;                  /* Espaçamento uniforme entre ícone/check e texto */
+  width: calc(100% - 16px);   /* Largura ajustada ao padding interno */
+  margin: 4px 8px;            /* Afastamento das margens para destacar a pílula */
+  padding: 10px 16px;         /* Padding interno confortável */
+  border-radius: 9999px;      /* FORMATO PÍLULA PERFEITA */
+  font-size: 13px;
+  font-weight: 500;
+  color: #c5cad8;             /* Cor de texto base uniforme */
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  white-space: nowrap;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+/* Efeito Hover (ao passar o rato por cima) em formato Pílula suave */
+.dropdown-item:hover, 
+.custom-select-option:hover {
+  background-color: #232838;
+  color: #ffffff;
+}
+
+/* Item Selecionado (Azul em Formato Pílula) */
+.dropdown-item.active, 
+.dropdown-item.selected,
+.custom-select-option.active,
+.custom-select-option.selected {
+  background-color: #1d61e7 !important; /* Azul destacado */
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow: 0px 4px 12px rgba(29, 97, 231, 0.35); /* Brilho azul subtil */
+}
+
+/* Uniformização do ícone de Check (✓) e Emojis */
+.dropdown-item .check-icon,
+.custom-select-option .check-icon {
+  font-size: 12px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+
 
