@@ -53,3 +53,12 @@ tmp/
 
 # Electron-builder
 electron-builder-cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+ENV/
