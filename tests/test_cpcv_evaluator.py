@@ -10,7 +10,12 @@ from src.validation.cpcv_evaluator import (
     deflated_sharpe_ratio,
     compute_pbo,
     CPCVEvaluator,
+    compute_sharpe_ratio,
+    compute_deflated_sharpe_ratio,
+    CPCVSplitter,
+    compute_pbo_from_cpcv,
 )
+
 
 
 def test_combinatorial_purged_kfold_split_counts():
@@ -90,3 +95,43 @@ def test_cpcv_evaluator_end_to_end():
     assert "report_markdown" in res
     assert 0.0 <= res["pbo"] <= 1.0
     assert len(res["summary_df"]) == 2
+
+
+def test_cpcv_splitter_and_dsr_pbo():
+    np.random.seed(42)
+    n_samples = 500
+    n_strategies = 8
+
+    # Returns simulation
+    returns_matrix = np.random.normal(0.0004, 0.012, size=(n_samples, n_strategies))
+    returns_matrix[:, 2] += 0.0005  # Strategy 2 has higher mean return
+
+    # Test compute_sharpe_ratio
+    sr_val = compute_sharpe_ratio(returns_matrix[:, 2])
+    assert sr_val > 0.0
+
+    # Test compute_deflated_sharpe_ratio
+    dsr_val = compute_deflated_sharpe_ratio(returns_matrix[:, 2], n_trials=n_strategies)
+    assert 0.0 <= dsr_val <= 1.0
+
+    # Test CPCVSplitter
+    cpcv = CPCVSplitter(n_groups=5, k_test_groups=2, purge_window=5, embargo_window=5)
+    splits = list(cpcv.split(n_samples))
+    assert len(splits) == 10  # C(5, 2) = 10
+
+    is_sharpes = []
+    oos_sharpes = []
+    for train_idx, test_idx in splits:
+        assert len(train_idx) > 0
+        assert len(test_idx) > 0
+        assert len(set(train_idx).intersection(set(test_idx))) == 0
+
+        fold_is = [compute_sharpe_ratio(returns_matrix[train_idx, s]) for s in range(n_strategies)]
+        fold_oos = [compute_sharpe_ratio(returns_matrix[test_idx, s]) for s in range(n_strategies)]
+        is_sharpes.append(fold_is)
+        oos_sharpes.append(fold_oos)
+
+    # Test compute_pbo_from_cpcv
+    pbo_val = compute_pbo_from_cpcv(np.array(is_sharpes), np.array(oos_sharpes))
+    assert 0.0 <= pbo_val <= 1.0
+

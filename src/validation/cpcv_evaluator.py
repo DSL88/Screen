@@ -13,7 +13,123 @@ from typing import List, Tuple, Dict, Any, Optional, Union, Generator
 import numpy as np
 import pandas as pd
 from scipy.stats import norm, skew, kurtosis
+from itertools import combinations
 from sklearn.base import BaseEstimator
+
+
+def compute_sharpe_ratio(returns: np.ndarray, risk_free_rate: float = 0.0, annualization: float = 252.0) -> float:
+    """Calcula o Rácio de Sharpe anualizado de uma série de retornos."""
+    arr = np.asarray(returns, dtype=float)
+    if len(arr) < 2:
+        return 0.0
+    excess_returns = arr - (risk_free_rate / annualization)
+    std = np.std(excess_returns, ddof=1)
+    if std == 0 or np.isnan(std):
+        return 0.0
+    return float(np.mean(excess_returns) / std * np.sqrt(annualization))
+
+
+def compute_deflated_sharpe_ratio(
+    returns: np.ndarray,
+    n_trials: int = 10,
+    expected_sr: float = 0.0,
+    annualization: float = 252.0
+) -> float:
+    """
+    Calcula o Deflated Sharpe Ratio (DSR) ajustando para assimetria, curtose e múltiplos testes.
+    """
+    arr = np.asarray(returns, dtype=float)
+    T = len(arr)
+    if T < 2:
+        return 0.0
+
+    sr_hat = compute_sharpe_ratio(arr, annualization=annualization)
+    s_ret = pd.Series(arr)
+    sk = float(s_ret.skew()) if len(s_ret) > 2 else 0.0
+    kurt = float(s_ret.kurtosis() + 3) if len(s_ret) > 3 else 3.0  # Curtose total (não excedente)
+
+    # Erro padrão do Rácio de Sharpe ajustado à não-normalidade
+    denom_var = 1.0 - sk * sr_hat + ((kurt - 1.0) / 4.0) * (sr_hat ** 2)
+    if denom_var <= 0:
+        denom_var = 1e-8
+    sr_std = np.sqrt(denom_var / (T - 1))
+
+    # Ajuste para número de ensaios (múltiplos testes)
+    if n_trials > 1:
+        euler_mascheroni = 0.5772156649
+        z1 = norm.ppf(1.0 - 1.0 / n_trials)
+        z2 = norm.ppf(1.0 - 1.0 / (n_trials * np.e))
+        sr_benchmark = expected_sr + sr_std * ((1.0 - euler_mascheroni) * z1 + euler_mascheroni * z2)
+    else:
+        sr_benchmark = expected_sr
+
+    # Probabilidade (PSR / DSR)
+    z_stat = (sr_hat - sr_benchmark) / (sr_std + 1e-8)
+    dsr_p_value = float(norm.cdf(z_stat))
+    return float(np.clip(dsr_p_value, 0.0, 1.0))
+
+
+class CPCVSplitter:
+    """
+    Gerador de partições de Combinatorial Purged Cross-Validation (CPCV).
+    """
+
+    def __init__(self, n_groups: int = 5, k_test_groups: int = 2, purge_window: int = 5, embargo_window: int = 5):
+        self.n_groups = n_groups
+        self.k_test_groups = k_test_groups
+        self.purge_window = purge_window
+        self.embargo_window = embargo_window
+
+    def split(self, n_samples: int) -> Generator[Tuple[np.ndarray, np.ndarray], None, None]:
+        group_size = n_samples // self.n_groups
+        group_bounds = [(i * group_size, (i + 1) * group_size if i < self.n_groups - 1 else n_samples) for i in range(self.n_groups)]
+        all_group_indices = list(range(self.n_groups))
+
+        for test_groups in combinations(all_group_indices, self.k_test_groups):
+            test_mask = np.zeros(n_samples, dtype=bool)
+            train_mask = np.ones(n_samples, dtype=bool)
+
+            for g in test_groups:
+                start, end = group_bounds[g]
+                test_mask[start:end] = True
+
+                # Aplica Expurgo (Purging)
+                purge_start = max(0, start - self.purge_window)
+                purge_end = min(n_samples, end + self.purge_window)
+                train_mask[purge_start:purge_end] = False
+
+                # Aplica Embargo após o grupo de teste
+                embargo_end = min(n_samples, end + self.embargo_window)
+                train_mask[end:embargo_end] = False
+
+            train_indices = np.where(train_mask)[0]
+            test_indices = np.where(test_mask)[0]
+
+            yield train_indices, test_indices
+
+
+def compute_pbo_from_cpcv(path_returns_is: np.ndarray, path_returns_oos: np.ndarray) -> float:
+    """
+    Calcula a Probabilidade de Overfitting do Backtest (PBO) comparando resultados IS e OOS.
+    path_returns_is/oos: Matrizes de dimensão (n_combinações, n_estrategias)
+    """
+    path_returns_is = np.asarray(path_returns_is)
+    path_returns_oos = np.asarray(path_returns_oos)
+    n_combinations = path_returns_is.shape[0]
+    if n_combinations == 0:
+        return 0.0
+
+    underperformance_count = 0
+    for c in range(n_combinations):
+        best_is_idx = int(np.argmax(path_returns_is[c, :]))
+        oos_perf_best_is = path_returns_oos[c, best_is_idx]
+        median_oos_perf = np.median(path_returns_oos[c, :])
+
+        if oos_perf_best_is < median_oos_perf:
+            underperformance_count += 1
+
+    return float(underperformance_count / n_combinations)
+
 
 
 class CombinatorialPurgedKFold:

@@ -16,6 +16,113 @@ from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.linear_model import LinearRegression
+try:
+    from statsmodels.stats.outliers_influence import variance_inflation_factor
+except ImportError:
+    variance_inflation_factor = None
+
+
+def neutralize_feature_two_stage(
+    df: pd.DataFrame,
+    feature_col: str,
+    sector_col: str,
+    market_cap_col: str
+) -> pd.Series:
+    """
+    Executa a neutralização fatorial em duas etapas:
+    Etapa 1: Regressão Linear contra Dummies Setoriais -> Resíduo 1
+    Etapa 2: Regressão Log-Linear e Quadrática contra Market Cap -> Resíduo Final (Purificado)
+    """
+    clean_df = df[[feature_col, sector_col, market_cap_col]].dropna().copy()
+    if clean_df.empty:
+        return pd.Series(index=df.index, dtype=float)
+
+    # Prepara Dummies de Setor
+    sector_dummies = pd.get_dummies(clean_df[sector_col], drop_first=True, dtype=float)
+    if sector_dummies.empty:
+        sector_dummies = pd.DataFrame(np.ones((len(clean_df), 1)), index=clean_df.index)
+
+    # Etapa 1: Neutralização Setorial
+    model_sec = LinearRegression(fit_intercept=True)
+    model_sec.fit(sector_dummies, clean_df[feature_col])
+    res_sectoral = clean_df[feature_col] - model_sec.predict(sector_dummies)
+
+    # Prepara variáveis de Market Cap (Log e Log Quadrado)
+    log_mc = np.log(clean_df[market_cap_col].astype(float) + 1e-8)
+    log_mc_sq = log_mc ** 2
+    X_mc = np.column_stack((log_mc, log_mc_sq))
+
+    # Etapa 2: Neutralização de Tamanho (Size Bias)
+    model_mc = LinearRegression(fit_intercept=True)
+    model_mc.fit(X_mc, res_sectoral)
+    purified_signal = res_sectoral - model_mc.predict(X_mc)
+
+    purified_series = pd.Series(purified_signal, index=clean_df.index, name=f"{feature_col}_purified")
+    return purified_series.reindex(df.index)
+
+
+def compute_vif_dataframe(df_features: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcula o Variance Inflation Factor (VIF) para cada coluna do DataFrame de features.
+    """
+    clean_df = df_features.select_dtypes(include=[np.number]).dropna().copy()
+    if clean_df.empty or clean_df.shape[1] < 2:
+        return pd.DataFrame(columns=["feature", "VIF"])
+
+    vif_data = pd.DataFrame()
+    vif_data["feature"] = clean_df.columns
+
+    vif_values = []
+    values = clean_df.values
+    for i in range(clean_df.shape[1]):
+        val = np.nan
+        if variance_inflation_factor is not None:
+            try:
+                val = variance_inflation_factor(values, i)
+            except Exception:
+                val = np.nan
+        if np.isnan(val):
+            # Fallback robust calculation using linear regression R^2
+            try:
+                y = values[:, i]
+                X = np.delete(values, i, axis=1)
+                lr = LinearRegression(fit_intercept=True)
+                lr.fit(X, y)
+                r_sq = lr.score(X, y)
+                if r_sq >= 0.999999:
+                    val = 1000.0
+                else:
+                    val = float(1.0 / (1.0 - r_sq))
+            except Exception:
+                val = np.nan
+        vif_values.append(val)
+
+    vif_data["VIF"] = vif_values
+    return vif_data.sort_values(by="VIF", ascending=False).reset_index(drop=True)
+
+
+class FeaturePurifier:
+    """
+    Classe para purificar um conjunto de indicadores e selecionar variáveis não redundantes.
+    """
+
+    def __init__(self, df: pd.DataFrame, sector_col: str = "sector", market_cap_col: str = "market_cap"):
+        self.df = df.copy()
+        self.sector_col = sector_col
+        self.market_cap_col = market_cap_col
+
+    def neutralize_all_features(self, feature_cols: List[str]) -> pd.DataFrame:
+        """Aplica a neutralização em duas etapas para todas as features especificadas."""
+        purified_df = pd.DataFrame(index=self.df.index)
+
+        for col in feature_cols:
+            if col in self.df.columns:
+                purified_df[f"{col}_purified"] = neutralize_feature_two_stage(
+                    self.df, col, self.sector_col, self.market_cap_col
+                )
+
+        return purified_df
+
 
 
 def compute_vif(df: pd.DataFrame, fillna: bool = True) -> pd.DataFrame:

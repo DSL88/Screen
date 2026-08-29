@@ -382,6 +382,48 @@ function calculateRVOL(candles, period = 20) {
   return { rvol, isVolumeConfirmed, avgVolume };
 }
 
+// ═══════════════════════════════════════════════════════════
+//  McGinley Dynamic Indicator
+//
+//  Fórmula:
+//    M_t = M_{t-1} + (P_t - M_{t-1}) / (k * N * (P_t / M_{t-1})^4)
+// ═══════════════════════════════════════════════════════════
+function mcginleyDynamic(closes, period = 14, k = 0.6) {
+  const n = closes ? closes.length : 0;
+  const out = new Array(n).fill(null);
+  if (n === 0 || period <= 0) return out;
+
+  let startIdx = 0;
+  while (startIdx < n && (closes[startIdx] === null || closes[startIdx] === undefined || isNaN(closes[startIdx]) || Number(closes[startIdx]) <= 0)) {
+    startIdx++;
+  }
+
+  if (startIdx >= n) return out;
+
+  out[startIdx] = Number(closes[startIdx]);
+  let prev = out[startIdx];
+  const kAdj = k * period;
+
+  for (let t = startIdx + 1; t < n; t++) {
+    const pt = Number(closes[t]);
+    if (!Number.isFinite(pt) || pt <= 0 || !Number.isFinite(prev) || prev <= 0) {
+      out[t] = prev;
+      continue;
+    }
+
+    const ratio = pt / prev;
+    const denom = kAdj * (ratio * ratio * ratio * ratio);
+    if (denom === 0 || isNaN(denom)) {
+      out[t] = prev;
+    } else {
+      out[t] = prev + (pt - prev) / denom;
+    }
+    prev = out[t];
+  }
+
+  return out;
+}
+
 module.exports = {
   sma,
   ema,
@@ -393,5 +435,7 @@ module.exports = {
   bollingerBands,
   trueRange,
   calculateRollingVWAP,
-  calculateRVOL
+  calculateRVOL,
+  mcginleyDynamic
 };
+

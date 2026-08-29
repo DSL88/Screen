@@ -13,6 +13,10 @@ from src.validation.cpcv_evaluator import (
     deflated_sharpe_ratio,
     compute_pbo,
     CPCVEvaluator,
+    compute_sharpe_ratio,
+    compute_deflated_sharpe_ratio,
+    CPCVSplitter,
+    compute_pbo_from_cpcv,
 )
 
 __all__ = [
@@ -21,4 +25,9 @@ __all__ = [
     "deflated_sharpe_ratio",
     "compute_pbo",
     "CPCVEvaluator",
+    "compute_sharpe_ratio",
+    "compute_deflated_sharpe_ratio",
+    "CPCVSplitter",
+    "compute_pbo_from_cpcv",
 ]
+

@@ -4,9 +4,13 @@ import pandas as pd
 
 from src.features.purification import (
     compute_vif,
+    compute_vif_dataframe,
     select_informative_features,
     neutralize_factors,
+    neutralize_feature_two_stage,
+    FeaturePurifier,
 )
+
 
 
 def test_compute_vif_basic():
@@ -93,3 +97,44 @@ def test_neutralize_factors_two_stage():
     
     corr_size = np.corrcoef(purified_val, log_mcap)[0, 1]
     assert abs(corr_size) < 0.05  # Size bias neutralized!
+
+
+def test_neutralize_feature_two_stage_and_purifier():
+    np.random.seed(42)
+    n_assets = 100
+    sectors = np.random.choice(["Technology", "Financials", "Healthcare", "Energy"], size=n_assets)
+    market_caps = np.random.uniform(1e8, 5e11, size=n_assets)
+
+    tech_bias = np.where(sectors == "Technology", 2.5, 0.0)
+    size_bias = np.log(market_caps) * 0.4
+    raw_indicator = np.random.normal(0, 1, size=n_assets) + tech_bias + size_bias
+    correlated_indicator = raw_indicator * 0.85 + np.random.normal(0, 0.2, size=n_assets)
+
+    df_portfolio = pd.DataFrame({
+        "ticker": [f"STOCK_{i}" for i in range(n_assets)],
+        "sector": sectors,
+        "market_cap": market_caps,
+        "momentum_raw": raw_indicator,
+        "mcginley_raw": correlated_indicator,
+    })
+
+    # Test single feature two stage
+    s_purified = neutralize_feature_two_stage(df_portfolio, "momentum_raw", "sector", "market_cap")
+    assert len(s_purified) == n_assets
+    assert s_purified.name == "momentum_raw_purified"
+
+    # Test FeaturePurifier class
+    purifier = FeaturePurifier(df_portfolio, sector_col="sector", market_cap_col="market_cap")
+    purified_df = purifier.neutralize_all_features(["momentum_raw", "mcginley_raw"])
+    assert "momentum_raw_purified" in purified_df.columns
+    assert "mcginley_raw_purified" in purified_df.columns
+
+    # Test compute_vif_dataframe before & after
+    vif_before = compute_vif_dataframe(df_portfolio[["momentum_raw", "mcginley_raw"]])
+    assert not vif_before.empty
+    assert "VIF" in vif_before.columns
+
+    vif_after = compute_vif_dataframe(purified_df)
+    assert not vif_after.empty
+    assert vif_after["VIF"].iloc[0] < vif_before["VIF"].iloc[0]
+
