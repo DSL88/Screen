@@ -42,6 +42,34 @@ def test_compute_markov_transition_matrix_stochastic_property():
         assert sigma > 0.0
 
 
+def test_compute_markov_2nd_order_transition_matrix():
+    """Matriz de transição de 2ª ordem deve ter shape (9, 3), 27 combinações e soma por linha = 1.0."""
+    from src.features.markov_monte_carlo import compute_markov_2nd_order_transition_matrix
+
+    np.random.seed(42)
+    returns = np.random.normal(0.0005, 0.015, 250)
+    p_matrix_2nd, states, current_pair, state_params = compute_markov_2nd_order_transition_matrix(
+        returns, n_states=3, std_multiplier=0.5
+    )
+
+    assert p_matrix_2nd.shape == (9, 3)
+    assert len(current_pair) == 2
+    assert current_pair[0] in (0, 1, 2)
+    assert current_pair[1] in (0, 1, 2)
+
+    for row in p_matrix_2nd:
+        assert np.isclose(np.sum(row), 1.0, atol=1e-5)
+        assert np.all(row >= 0.0)
+        assert np.all(row <= 1.0)
+
+    # Teste de fallback uniforme em amostra pequena
+    small_returns = np.array([0.01, -0.02])
+    p_small, _, pair_small, _ = compute_markov_2nd_order_transition_matrix(small_returns)
+    assert p_small.shape == (9, 3)
+    for row in p_small:
+        assert np.allclose(row, 1.0 / 3.0)
+
+
 def test_regime_switching_monte_carlo_metrics():
     """Testa geração de 5000 trajetórias e cálculo de WinRate, VaR95, CVaR95."""
     transition_matrix = np.array([

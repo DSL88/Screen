@@ -326,6 +326,7 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         current_regime = mc_results["current_regime"]
+        current_pair = tuple(mc_results.get("current_regime_pair", [1, current_regime]))
         regime_counts[current_regime] = regime_counts.get(current_regime, 0) + 1
         markov_bullish_prob = mc_results["markov_bullish_prob"]
         mc_win_rate = mc_results["win_rate"]
@@ -333,13 +334,14 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
         mc_expected_return = mc_results["expected_return_pct"]
         mc_var_95 = mc_results["var_95_pct"]
 
-        # Ajuste Dinâmico dos Filtros de Graham por Regime de Mercado
-        if current_regime == 0 or mc_win_rate < 40.0:
+        # Regime-Switching Trigger (Markov de 2ª Ordem)
+        # Se o regime recente for Bearish (0, 0 ou 1, 0 ou s_T=0), elevar o rigor do Filtro de Graham e reduzir peso de Momentum
+        if current_pair in [(0, 0), (1, 0)] or current_regime == 0 or mc_win_rate < 40.0:
             min_cr_adjusted = max(2.0, min_cr)
             max_de_adjusted = min(1.0, max_de)
             solvency_weight = 0.50
             momentum_weight = 0.15
-        elif current_regime == 2 or markov_bullish_prob >= 60.0:
+        elif current_pair in [(2, 2), (1, 2)] or current_regime == 2 or markov_bullish_prob >= 60.0:
             min_cr_adjusted = min_cr
             max_de_adjusted = max_de
             solvency_weight = 0.25
@@ -453,7 +455,7 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
     #  FASE 5: PURIFICAÇÃO FATORIAL EM DUAS ETAPAS (VIF < 5.0)
     # ═══════════════════════════════════════════════════════════
     df_assets = pd.DataFrame(asset_features_list)
-    target_cols = ["momentum_raw", "mcginley_ratio", "sentiment_raw", "markov_bullish_prob", "mc_cvar_95"]
+    target_cols = ["momentum_raw", "mcginley_ratio", "sentiment_raw", "markov_bullish_prob", "mc_win_rate", "mc_cvar_95"]
     
     vif_after = pd.DataFrame()
     with warnings.catch_warnings():
@@ -495,6 +497,16 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
         ey_disp = f"{row['earnings_yield'] * 100:.1f}%" if (row['earnings_yield'] is not None and not np.isnan(row['earnings_yield'])) else "N/A"
         fcf_disp = f"{row['fcf_yield'] * 100:.1f}%" if (row['fcf_yield'] is not None and not np.isnan(row['fcf_yield'])) else "N/A"
 
+        mc_res_item = row.get("mc_results", {})
+        tier_info = classify_win_rate_tier(row["mc_win_rate"])
+        
+        # Target Price (+2.8% or median MC return) and Stop Loss (-1.4% or CVaR95)
+        curr_p = float(row["latest_price"])
+        exp_ret_val = float(mc_res_item.get("expected_return_pct", 2.8))
+        target_p = round(curr_p * (1.0 + max(0.028, exp_ret_val / 100.0)), 2)
+        cvar_val = float(row["mc_cvar_95"])
+        stop_l = round(curr_p * (1.0 - max(0.014, cvar_val / 100.0)), 2)
+
         analyzed_assets.append({
             "ticker": t,
             "sector": row["sector"],
@@ -502,23 +514,36 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
             "market_cap_raw": row["market_cap_raw"],
             "graham_score": row["graham_score"],
             "quality_score": row["graham_score"],
-            "current_price": round(float(row["latest_price"]), 2),
-            "latest_price": round(float(row["latest_price"]), 2),
+            "current_price": round(curr_p, 2),
+            "latest_price": round(curr_p, 2),
+            "target_price": target_p,
+            "stop_loss": stop_l,
+            "target_return_pct": "+2.8%",
+            "stop_loss_pct": "-1.4%",
             "mcginley_status": row["mcginley_status"],
             "markov_bullish_prob": round(float(row["markov_bullish_prob"]), 1),
             "mc_win_rate": round(float(row["mc_win_rate"]), 1),
             "mc_cvar_95": round(float(row["mc_cvar_95"]), 1),
             "cvar_95": round(float(row["mc_cvar_95"]), 1),
-            "mc_expected_return": round(float(row["mc_results"]["expected_return_pct"]), 1),
-            "expected_return": round(float(row["mc_results"]["expected_return_pct"]), 1),
+            "mc_expected_return": round(float(mc_res_item.get("expected_return_pct", 0.0)), 1),
+            "expected_return": round(float(mc_res_item.get("expected_return_pct", 0.0)), 1),
             "purified_alpha_score": purified_alpha_score,
             "status": status_label,
             "approved": is_approved,
+            "tier": tier_info,
             "roa": roa_disp,
             "debt_to_equity": de_disp,
             "current_ratio": cr_disp,
             "earnings_yield": ey_disp,
             "fcf_yield": fcf_disp,
+            "headline": row.get("headline", ""),
+            "divergence": row.get("divergence", "NEUTRAL"),
+            "sentiment_score": round(row.get("sentiment_raw", 0.0), 3),
+            "current_regime_pair": mc_res_item.get("current_regime_pair", [1, 1]),
+            "current_regime_pair_label": mc_res_item.get("current_regime_pair_label", "Neutral / Neutral"),
+            "paths_sample": mc_res_item.get("paths_sample", []),
+            "transition_matrix_2nd_order": mc_res_item.get("transition_matrix_2nd_order", []),
+            "matrix_breakdown": mc_res_item.get("matrix_breakdown", []),
         })
 
     # ═══════════════════════════════════════════════════════════
@@ -766,14 +791,30 @@ def generate_top_investment_recommendations(
             "win_rate_mc": f"{win_rate:.1f}%",
             "win_rate_numeric": round(win_rate, 2),
             "cvar_risk": f"-{cvar_95:.1f}%",
+            "cvar_95": round(cvar_95, 1),
+            "graham_score": quality_score,
+            "quality_score": quality_score,
+            "purified_alpha_score": round(float(asset.get("purified_alpha_score", alpha_score)), 1),
             "alpha_score": round(alpha_score, 1),
             "horizon_days": horizon_days,
             "tier": tier,
-            "action": "BUY / LONG"
+            "action": "BUY / LONG",
+            "headline": asset.get("headline", ""),
+            "divergence": asset.get("divergence", "NEUTRAL"),
+            "sentiment_score": asset.get("sentiment_score", 0.0),
+            "current_regime_pair": asset.get("current_regime_pair", [1, 1]),
+            "current_regime_pair_label": asset.get("current_regime_pair_label", "Neutral / Neutral"),
+            "paths_sample": asset.get("paths_sample", []),
+            "transition_matrix_2nd_order": asset.get("transition_matrix_2nd_order", []),
+            "matrix_breakdown": asset.get("matrix_breakdown", []),
         })
 
-    # Ordenar pelos ativos com maior Alpha Score
-    recommended_sorted = sorted(eligible_assets, key=lambda x: x['alpha_score'], reverse=True)
+    # Ordenar pelos ativos de maior patamar de convicção estocástica (tier_id desc) e maior Alpha Score
+    recommended_sorted = sorted(
+        eligible_assets,
+        key=lambda x: (x['tier'].get('tier_id', 0), x['alpha_score']),
+        reverse=True
+    )
     
     return recommended_sorted[:top_n]
 

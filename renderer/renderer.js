@@ -2,7 +2,7 @@
   const btn = document.getElementById('btn-scan');
   const btnCancelScan = document.getElementById('btn-cancel-scan');
   const spinner = document.getElementById('spinner');
-  const btnLabel = btn.querySelector('.btn-label');
+  const btnLabel = btn ? btn.querySelector('.btn-label') : null;
   const status = document.getElementById('status-line');
   const body = document.getElementById('results-body');
   const progressWrap = document.getElementById('progress-wrap');
@@ -2520,12 +2520,13 @@
     sortDirectionHeader.style.cursor = 'pointer';
   }
 
-  btn.addEventListener('click', async () => {
-    if (running) return;
-    if (watchlist.length === 0) {
-      status.textContent = 'Adiciona pelo menos um ticker à watchlist.';
-      return;
-    }
+  if (btn) {
+    btn.addEventListener('click', async () => {
+      if (running) return;
+      if (watchlist.length === 0) {
+        status.textContent = 'Adiciona pelo menos um ticker à watchlist.';
+        return;
+      }
 
     // Freshness check before scan
     if (freshnessOverride) {
@@ -2672,11 +2673,12 @@
     }
 
     status.textContent = summaryMsg;
-    footerSummary.textContent = `${d.totalSignals || 0} sinais emitidos · ${totalProcessed}/${total} tickers processados`;
-    if ((d.totalSignals || 0) === 0) {
+    if (footerSummary) footerSummary.textContent = `${d.totalSignals || 0} sinais emitidos · ${totalProcessed}/${total} tickers processados`;
+    if (body && (d.totalSignals || 0) === 0) {
       body.innerHTML = emptyStateRowHtml(12, 'search', 'Sem sinais', 'Nenhum ativo cumpriu os critérios (Edge ≥ 15%, Volume ≥ 1.2× SMA20, direção válida).');
     }
   });
+}
 
   function registerParamChangeListeners() {
     if (inputEdge) {
