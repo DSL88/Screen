@@ -654,6 +654,51 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('quant:save-tracked-asset', async (_event, payload) => {
+      try {
+        const result = await PythonBridge.runPipeline('save_tracked_asset', payload);
+        return { ok: true, data: result };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('quant:evaluate-tracked', async (_event, payload) => {
+      try {
+        const result = await PythonBridge.runPipeline('evaluate_tracked_assets', payload || {});
+        return { ok: true, data: result };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('quant:get-tracker-metrics', async (_event, payload) => {
+      try {
+        const result = await PythonBridge.runPipeline('get_tracker_metrics', payload || {});
+        return { ok: true, data: result };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('quant:get-tracked-assets', async (_event, payload) => {
+      try {
+        const result = await PythonBridge.runPipeline('get_tracked_assets', payload || {});
+        return { ok: true, data: result };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('quant:get-tracker-dashboard', async (_event, payload) => {
+      try {
+        const result = await PythonBridge.runPipeline('get_tracker_dashboard', payload || {});
+        return { ok: true, data: result };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
 
     // ═══════════════════════════════════════════════════════
     //  SCAN — Execução via Worker Thread

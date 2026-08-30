@@ -176,6 +176,11 @@ const apiBridge = {
   runQuantFullPipeline: (payload) => ipcRenderer.invoke('quant:run-full-pipeline', payload),
   runQuantPhase: (phase, params) => ipcRenderer.invoke('quant:run-phase', { phase, params }),
   executeScreener: (payload) => ipcRenderer.invoke('execute-screener', payload),
+  saveTrackedAsset: (data) => ipcRenderer.invoke('quant:save-tracked-asset', data),
+  evaluateTrackedAssets: (payload) => ipcRenderer.invoke('quant:evaluate-tracked', payload),
+  getTrackerMetrics: (payload) => ipcRenderer.invoke('quant:get-tracker-metrics', payload),
+  getTrackedAssets: (payload) => ipcRenderer.invoke('quant:get-tracked-assets', payload),
+  getTrackerDashboard: (payload) => ipcRenderer.invoke('quant:get-tracker-dashboard', payload),
   on: (channel, callback) => {
     if (!ALLOWED_EVENTS.has(channel)) {
       throw new Error(`Channel "${channel}" is not allowed`);
@@ -190,6 +195,11 @@ const quantApiBridge = {
   runScreener: (payload) => ipcRenderer.invoke('execute-screener', payload),
   runFullPipeline: (payload) => ipcRenderer.invoke('quant:run-full-pipeline', payload),
   runPhase: (phase, params) => ipcRenderer.invoke('quant:run-phase', { phase, params }),
+  saveTrackedAsset: (data) => ipcRenderer.invoke('quant:save-tracked-asset', data),
+  evaluateTrackedAssets: (payload) => ipcRenderer.invoke('quant:evaluate-tracked', payload),
+  getTrackerMetrics: (payload) => ipcRenderer.invoke('quant:get-tracker-metrics', payload),
+  getTrackedAssets: (payload) => ipcRenderer.invoke('quant:get-tracked-assets', payload),
+  getTrackerDashboard: (payload) => ipcRenderer.invoke('quant:get-tracker-dashboard', payload),
 };
 
 contextBridge.exposeInMainWorld('api', apiBridge);

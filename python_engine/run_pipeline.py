@@ -697,6 +697,22 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
     return output_payload
 
 
+def classify_win_rate_tier(win_rate: float) -> dict:
+    """Classifica a taxa de vitória de Monte Carlo em patamares de 5% em 5% com cores direcionadas."""
+    if win_rate >= 70.0:
+        return {"level": "Extrema (70%+)", "color": "#0d6efd", "badge": "bg-primary", "tier_id": 5}
+    elif win_rate >= 65.0:
+        return {"level": "Muito Forte (65-69%)", "color": "#0dcaf0", "badge": "bg-info text-dark", "tier_id": 4}
+    elif win_rate >= 60.0:
+        return {"level": "Forte (60-64%)", "color": "#198754", "badge": "bg-success", "tier_id": 3}
+    elif win_rate >= 55.0:
+        return {"level": "Favorável (55-59%)", "color": "#20c997", "badge": "bg-teal text-white", "tier_id": 2}
+    elif win_rate >= 50.0:
+        return {"level": "Moderada (50-54%)", "color": "#ffc107", "badge": "bg-warning text-dark", "tier_id": 1}
+    else:
+        return {"level": "Fraca (<50%)", "color": "#dc3545", "badge": "bg-danger", "tier_id": 0}
+
+
 def generate_top_investment_recommendations(
     processed_assets: List[Dict[str, Any]],
     top_n: int = 5,
@@ -706,7 +722,7 @@ def generate_top_investment_recommendations(
     Filtra e ordena os ativos analisados para gerar a lista de recomendações finais.
     Critérios:
     1. Filtro de Solvência (Fase 1): status == 'Aprovado' ou approved == True
-    2. Convicção Estocástica (Markov + Monte Carlo): Win Rate MC >= 60% e Retorno Esperado > 0
+    2. Convicção Estocástica Gradual (Markov + Monte Carlo): Win Rate MC >= 50.0% e Retorno Esperado > 0
     3. Score de Alpha Purificado e Rácio de Eficiência Estocástica (Retorno / CVaR95)
     """
     eligible_assets = []
@@ -722,8 +738,8 @@ def generate_top_investment_recommendations(
         cvar_95 = float(asset.get('mc_cvar_95', asset.get('cvar_95', 5.0)) or 5.0)
         exp_return = float(asset.get('mc_expected_return', asset.get('expected_return', 0.0)) or 0.0)
         
-        # O ativo deve ter pelo menos 60% de probabilidade de alta no Monte Carlo e retorno positivo
-        if win_rate < 60.0 or exp_return <= 0:
+        # O ativo deve ter pelo menos 50% de probabilidade de alta no Monte Carlo e retorno positivo
+        if win_rate < 50.0 or exp_return <= 0:
             continue
 
         # 2. Cálculo do Rácio de Eficiência Estocástica (Retorno / Risk-at-Tail)
@@ -738,6 +754,8 @@ def generate_top_investment_recommendations(
         target_price = current_price * (1.0 + (exp_return / 100.0))
         stop_loss_price = current_price * (1.0 - (cvar_95 / 100.0))
 
+        tier = classify_win_rate_tier(win_rate)
+
         eligible_assets.append({
             "ticker": asset.get('ticker', ''),
             "sector": asset.get('sector', 'Outros'),
@@ -746,9 +764,11 @@ def generate_top_investment_recommendations(
             "stop_loss": round(stop_loss_price, 2),
             "expected_return_pct": f"+{exp_return:.1f}%",
             "win_rate_mc": f"{win_rate:.1f}%",
+            "win_rate_numeric": round(win_rate, 2),
             "cvar_risk": f"-{cvar_95:.1f}%",
             "alpha_score": round(alpha_score, 1),
             "horizon_days": horizon_days,
+            "tier": tier,
             "action": "BUY / LONG"
         })
 

@@ -107,6 +107,7 @@
         <button class="tab-btn" data-tab="history">Histórico de Trades</button>
         <button class="tab-btn" data-tab="simulation">Simulação de Estratégias</button>
         <button class="tab-btn" data-tab="quant-pipeline">Alpha Quant Engine (Fases 1-6)</button>
+        <button class="tab-btn" data-tab="quant-tracker">AlphaQuant Tracker &amp; Performance</button>
       </nav>
 
 
@@ -970,11 +971,12 @@
                     <th>RETORNO ESPERADO</th>
                     <th>PROB. VITÓRIA (MC)</th>
                     <th>SCORE ALPHA</th>
+                    <th class="text-center">RASTREIO</th>
                   </tr>
                 </thead>
                 <tbody id="recommendations-table-body">
                   <tr>
-                    <td colspan="9" class="text-center text-muted py-4">
+                    <td colspan="10" class="text-center text-muted py-4">
                       Execute o motor quantitativo para gerar as recomendações...
                     </td>
                   </tr>
@@ -982,6 +984,160 @@
               </table>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════════ -->
+      <!--  ABA: ALPHAQUANT TRACKER & PERFORMANCE (AUDIT TRAIL)        -->
+      <!-- ═══════════════════════════════════════════════════════════ -->
+      <div class="tab-content" id="tab-quant-tracker">
+        <div class="quant-container">
+          <!-- Título e Descrição -->
+          <div style="margin-bottom: 8px;">
+            <h2 style="color: #6366f1; font-weight: 700; font-size: 1.5rem; margin-bottom: 4px;">AlphaQuant Tracker &amp; Performance</h2>
+            <p class="text-secondary" style="font-size: 0.9rem; margin-bottom: 0;">Auditoria Histórica, Diário de Bordo de Sugestões e Validação Empírica dos Patamares de Monte Carlo</p>
+          </div>
+
+          <!-- Barra de Ações com Botões Simétricos -->
+          <div class="action-bar">
+            <button class="btn-quant" id="btn-refresh-tracker" type="button">
+              <span>🔄</span> <span>Recarregar</span>
+            </button>
+            <button class="btn-quant btn-quant-primary" id="btn-update-tracker-prices" type="button">
+              <span>⚡</span> <span id="lbl-update-tracker">Atualizar Cotações &amp; Avaliar Saídas</span>
+              <span class="spinner-border spinner-border-sm ms-1" id="spinner-update-tracker" hidden></span>
+            </button>
+          </div>
+
+          <!-- Grid de Cartões de Métricas (KPIs) -->
+          <div class="kpi-cards-grid">
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span>Taxa de Acerto Real (Hit Rate)</span>
+                <span>🎯</span>
+              </div>
+              <div class="kpi-value text-success" id="tracker-kpi-hit-rate">--%</div>
+              <div class="kpi-subtext" id="tracker-kpi-hit-meta">0 Targets / 0 Encerrados (0 Pendentes)</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span>Profit Factor</span>
+                <span>⚖️</span>
+              </div>
+              <div class="kpi-value text-primary" id="tracker-kpi-profit-factor">--</div>
+              <div class="kpi-subtext" id="tracker-kpi-pf-meta">Rácio Ganhos / Perdas</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span>Retorno Médio por Trade</span>
+                <span>📈</span>
+              </div>
+              <div class="kpi-value text-info" id="tracker-kpi-avg-return">--%</div>
+              <div class="kpi-subtext" id="tracker-kpi-ret-meta">Média de todas as sugestões</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span>Tempo Médio Até ao Alvo</span>
+                <span>⏱️</span>
+              </div>
+              <div class="kpi-value text-warning" id="tracker-kpi-avg-days">-- d</div>
+              <div class="kpi-subtext" id="tracker-kpi-days-meta">Dias úteis para atingir Target</div>
+            </div>
+          </div>
+
+          <!-- Barra de Filtros Simétrica -->
+          <div class="filter-bar">
+            <div>
+              <label for="tracker-filter-date">Coorte / Data:</label>
+              <select id="tracker-filter-date" class="filter-control" style="min-width: 170px;">
+                <option value="all">Todas as Datas</option>
+                <option value="today">Hoje</option>
+                <option value="7d">Últimos 7 Dias</option>
+                <option value="30d">Últimos 30 Dias</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="tracker-filter-status">Estado:</label>
+              <select id="tracker-filter-status" class="filter-control" style="min-width: 190px;">
+                <option value="all">Todos os Estados</option>
+                <option value="PENDENTE">Pendentes</option>
+                <option value="TARGET_ATINGIDO">Target Atingido</option>
+                <option value="STOP_LOSS_ATINGIDO">Stop Loss Atingido</option>
+                <option value="EXPIRADO">Expirado</option>
+              </select>
+            </div>
+
+            <div style="margin-left: auto;">
+              <input type="text" id="tracker-search-ticker" class="filter-control" placeholder="Pesquisar Ticker..." style="width: 220px;" />
+            </div>
+          </div>
+
+          <!-- Tabela 1: Diário de Bordo -->
+          <div class="mb-5">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <div>
+                <h4 style="color: #fff; margin-bottom: 2px;">📋 Diário de Bordo &amp; Auditoria de Recomendações</h4>
+                <p class="text-secondary small" style="margin-bottom: 0;">Fotografia inicial no momento da sugestão vs. Evolução real no mercado</p>
+              </div>
+              <div id="tracker-rows-count" class="badge bg-secondary fs-6">0 registos</div>
+            </div>
+
+            <table class="quant-table">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Ticker</th>
+                  <th>Setor</th>
+                  <th class="num-col">Entrada</th>
+                  <th class="num-col">Atual / Saída</th>
+                  <th class="num-col">Target</th>
+                  <th class="num-col">Stop Loss</th>
+                  <th>Win Rate MC</th>
+                  <th class="num-col">PNL (%)</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody id="tracker-table-body">
+                <tr>
+                  <td colspan="10" class="text-center text-muted py-4">
+                    A carregar histórico de recomendações...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Tabela 2: Matriz de Validação -->
+          <div>
+            <h4 style="color: #fff; margin-bottom: 2px;">🎯 Matriz de Validação e Calibração dos Patamares de Monte Carlo</h4>
+            <p class="text-secondary small" style="margin-bottom: 0;">Comparação empírica entre a probabilidade estocástica teórica e a taxa de acerto real verificada</p>
+
+            <table class="quant-table">
+              <thead>
+                <tr>
+                  <th>Patamar de Vitória Simulada</th>
+                  <th class="num-col">Sugestões Emitidas</th>
+                  <th class="num-col">Targets Atingidos</th>
+                  <th class="num-col">Stops Atingidos</th>
+                  <th class="num-col">Taxa de Acerto Real</th>
+                  <th class="num-col">Retorno Médio</th>
+                  <th>Diagnóstico de Calibração</th>
+                </tr>
+              </thead>
+              <tbody id="tracker-matrix-body">
+                <tr>
+                  <td colspan="7" class="text-center text-muted py-4">
+                    A calcular calibração por patamares...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
         </div>
       </div>
     </main>
@@ -1396,6 +1552,7 @@
     <script src="renderer.js"></script>
     <script src="simulationRenderer.js"></script>
     <script src="quantRenderer.js"></script>
+    <script src="quantTrackerRenderer.js"></script>
 
 </body>
 </html>

@@ -527,14 +527,25 @@
     if (!recommendations || recommendations.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="9" class="text-center text-warning py-4" style="text-align: center; color: var(--warn); padding: 2rem;">
-            Nenhum ativo cumpriu os requisitos estritos de convicção estocástica (Win Rate >= 60%) e solvência neste momento.
+          <td colspan="10" class="text-center text-warning py-4" style="text-align: center; color: var(--warn); padding: 2rem;">
+            Nenhum ativo cumpriu os requisitos de convicção estocástica (Win Rate >= 50%) e solvência neste momento.
           </td>
         </tr>`;
       return;
     }
 
     recommendations.forEach((rec) => {
+      const tier = rec.tier || {
+        level: 'Forte (60-64%)',
+        color: '#198754',
+        badge: 'bg-success',
+        tier_id: 3
+      };
+      
+      const badgeClass = tier.badge || 'bg-success';
+      const levelText = tier.level ? `(${tier.level})` : '';
+      const assetJson = JSON.stringify(rec).replace(/'/g, '&apos;');
+
       const row = `
         <tr class="border-bottom border-dark">
           <td><span class="badge bg-success rounded-pill px-3 py-2" style="background: rgba(52, 211, 153, 0.15); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.3); padding: 4px 10px; border-radius: 9999px; font-weight: 600;">🟢 ${rec.action || 'BUY / LONG'}</span></td>
@@ -544,11 +555,50 @@
           <td class="text-success fw-bold" style="color: #34d399; font-weight: 700; font-family: var(--mono);">${rec.target_price} €</td>
           <td class="text-danger" style="color: #fb7185; font-family: var(--mono);">${rec.stop_loss} €</td>
           <td><span class="text-success fw-bold" style="color: #34d399; font-weight: 700;">${rec.expected_return_pct}</span></td>
-          <td><span class="badge bg-info text-dark" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 4px 8px; border-radius: 6px; font-weight: 600;">${rec.win_rate_mc}</span></td>
+          <td>
+            <span class="badge ${badgeClass} px-3 py-2" style="font-weight: 600; font-size: 0.85rem; border-radius: 6px;">
+              ${rec.win_rate_mc} ${levelText}
+            </span>
+          </td>
           <td><span class="badge bg-primary fs-6" style="background: #6366f1; color: #fff; padding: 4px 10px; border-radius: 6px; font-weight: 700;">${rec.alpha_score}</span></td>
+          <td class="text-center">
+            <button class="btn btn-sm btn-save-track" data-asset='${assetJson}'>
+              📌 Guardar &amp; Rastrear
+            </button>
+          </td>
         </tr>
       `;
       tbody.innerHTML += row;
+    });
+
+    // Event Listener para guardar o ativo quando o utilizador clica no botão
+    tbody.querySelectorAll('.btn-save-track').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const button = e.currentTarget || e.target;
+        try {
+          const rawData = button.getAttribute('data-asset');
+          const assetData = JSON.parse(rawData.replace(/&apos;/g, "'"));
+          button.disabled = true;
+          button.innerText = '⏳ A guardar...';
+
+          let response;
+          if (window.quantAPI && typeof window.quantAPI.saveTrackedAsset === 'function') {
+            response = await window.quantAPI.saveTrackedAsset(assetData);
+          } else if (window.api && typeof window.api.saveTrackedAsset === 'function') {
+            response = await window.api.saveTrackedAsset(assetData);
+          } else if (window.electronAPI && typeof window.electronAPI.saveTrackedAsset === 'function') {
+            response = await window.electronAPI.saveTrackedAsset(assetData);
+          }
+
+          button.innerText = '✓ Guardado';
+          button.classList.add('btn-saved');
+          button.disabled = true;
+        } catch (err) {
+          console.error('Erro ao guardar ativo para rastreio:', err);
+          button.disabled = false;
+          button.innerText = '❌ Erro';
+        }
+      });
     });
   }
 

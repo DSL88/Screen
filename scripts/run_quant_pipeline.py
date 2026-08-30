@@ -54,6 +54,14 @@ from src.features.markov_monte_carlo import (
 )
 from python_engine.run_pipeline import (
     execute_alpha_quant_engine,
+    classify_win_rate_tier,
+)
+from python_engine.tracker_db import (
+    save_recommendation,
+    evaluate_tracked_assets,
+    get_model_accuracy_metrics,
+    get_all_tracked_recommendations,
+    get_tracker_dashboard_data,
 )
 from src.features.fracdiff import (
     find_optimal_d,
@@ -560,6 +568,12 @@ def main():
         "run_sentiment": run_phase_4_sentiment,
         "run_purification": run_phase_5_purification,
         "run_cpcv": run_phase_6_cpcv,
+        "save_tracked_asset": save_recommendation,
+        "save_recommendation": save_recommendation,
+        "evaluate_tracked_assets": lambda _: evaluate_tracked_assets(),
+        "get_tracker_metrics": lambda _: get_model_accuracy_metrics(),
+        "get_tracked_assets": lambda p: {"recommendations": get_all_tracked_recommendations(status=p.get("status") if isinstance(p, dict) else None)},
+        "get_tracker_dashboard": lambda p: get_tracker_dashboard_data(params=p if isinstance(p, dict) else None),
     }
 
 
