@@ -663,9 +663,27 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('save-tracked-recommendation', async (_event, payload) => {
+      try {
+        const result = await PythonBridge.runPipeline('save_tracked_recommendation', payload);
+        return { ok: true, data: result };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
     ipcMain.handle('quant:evaluate-tracked', async (_event, payload) => {
       try {
         const result = await PythonBridge.runPipeline('evaluate_tracked_assets', payload || {});
+        return { ok: true, data: result };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('update-tracker-prices', async (_event, payload) => {
+      try {
+        const result = await PythonBridge.runPipeline('update_tracker_prices', payload || {});
         return { ok: true, data: result };
       } catch (err) {
         return { ok: false, error: err.message };
@@ -693,6 +711,15 @@ app.whenReady().then(async () => {
     ipcMain.handle('quant:get-tracker-dashboard', async (_event, payload) => {
       try {
         const result = await PythonBridge.runPipeline('get_tracker_dashboard', payload || {});
+        return { ok: true, data: result };
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('fetch-tracker-data', async (_event, payload) => {
+      try {
+        const result = await PythonBridge.runPipeline('fetch_tracker_data', payload || {});
         return { ok: true, data: result };
       } catch (err) {
         return { ok: false, error: err.message };

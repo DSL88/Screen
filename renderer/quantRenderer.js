@@ -582,10 +582,16 @@
           button.innerText = '⏳ A guardar...';
 
           let response;
-          if (window.quantAPI && typeof window.quantAPI.saveTrackedAsset === 'function') {
+          if (window.quantAPI && typeof window.quantAPI.saveTrackedRecommendation === 'function') {
+            response = await window.quantAPI.saveTrackedRecommendation(assetData);
+          } else if (window.quantAPI && typeof window.quantAPI.saveTrackedAsset === 'function') {
             response = await window.quantAPI.saveTrackedAsset(assetData);
+          } else if (window.api && typeof window.api.saveTrackedRecommendation === 'function') {
+            response = await window.api.saveTrackedRecommendation(assetData);
           } else if (window.api && typeof window.api.saveTrackedAsset === 'function') {
             response = await window.api.saveTrackedAsset(assetData);
+          } else if (window.electronAPI && typeof window.electronAPI.saveTrackedRecommendation === 'function') {
+            response = await window.electronAPI.saveTrackedRecommendation(assetData);
           } else if (window.electronAPI && typeof window.electronAPI.saveTrackedAsset === 'function') {
             response = await window.electronAPI.saveTrackedAsset(assetData);
           }

@@ -63,10 +63,16 @@
   async function fetchTrackerDashboardData() {
     try {
       let res;
-      if (window.quantAPI && typeof window.quantAPI.getTrackerDashboard === 'function') {
+      if (window.quantAPI && typeof window.quantAPI.fetchTrackerData === 'function') {
+        res = await window.quantAPI.fetchTrackerData({});
+      } else if (window.quantAPI && typeof window.quantAPI.getTrackerDashboard === 'function') {
         res = await window.quantAPI.getTrackerDashboard({});
+      } else if (window.api && typeof window.api.fetchTrackerData === 'function') {
+        res = await window.api.fetchTrackerData({});
       } else if (window.api && typeof window.api.getTrackerDashboard === 'function') {
         res = await window.api.getTrackerDashboard({});
+      } else if (window.electronAPI && typeof window.electronAPI.fetchTrackerData === 'function') {
+        res = await window.electronAPI.fetchTrackerData({});
       } else if (window.electronAPI && typeof window.electronAPI.getTrackerDashboard === 'function') {
         res = await window.electronAPI.getTrackerDashboard({});
       }
@@ -343,10 +349,16 @@
 
     try {
       let res;
-      if (window.quantAPI && typeof window.quantAPI.evaluateTrackedAssets === 'function') {
+      if (window.quantAPI && typeof window.quantAPI.updateTrackerPrices === 'function') {
+        res = await window.quantAPI.updateTrackerPrices({});
+      } else if (window.quantAPI && typeof window.quantAPI.evaluateTrackedAssets === 'function') {
         res = await window.quantAPI.evaluateTrackedAssets({});
+      } else if (window.api && typeof window.api.updateTrackerPrices === 'function') {
+        res = await window.api.updateTrackerPrices({});
       } else if (window.api && typeof window.api.evaluateTrackedAssets === 'function') {
         res = await window.api.evaluateTrackedAssets({});
+      } else if (window.electronAPI && typeof window.electronAPI.updateTrackerPrices === 'function') {
+        res = await window.electronAPI.updateTrackerPrices({});
       }
 
       await loadTrackerDashboard();

@@ -176,11 +176,14 @@ const apiBridge = {
   runQuantFullPipeline: (payload) => ipcRenderer.invoke('quant:run-full-pipeline', payload),
   runQuantPhase: (phase, params) => ipcRenderer.invoke('quant:run-phase', { phase, params }),
   executeScreener: (payload) => ipcRenderer.invoke('execute-screener', payload),
-  saveTrackedAsset: (data) => ipcRenderer.invoke('quant:save-tracked-asset', data),
-  evaluateTrackedAssets: (payload) => ipcRenderer.invoke('quant:evaluate-tracked', payload),
+  saveTrackedAsset: (data) => ipcRenderer.invoke('save-tracked-recommendation', data),
+  saveTrackedRecommendation: (data) => ipcRenderer.invoke('save-tracked-recommendation', data),
+  evaluateTrackedAssets: (payload) => ipcRenderer.invoke('update-tracker-prices', payload),
+  updateTrackerPrices: (payload) => ipcRenderer.invoke('update-tracker-prices', payload),
   getTrackerMetrics: (payload) => ipcRenderer.invoke('quant:get-tracker-metrics', payload),
   getTrackedAssets: (payload) => ipcRenderer.invoke('quant:get-tracked-assets', payload),
-  getTrackerDashboard: (payload) => ipcRenderer.invoke('quant:get-tracker-dashboard', payload),
+  getTrackerDashboard: (payload) => ipcRenderer.invoke('fetch-tracker-data', payload),
+  fetchTrackerData: (payload) => ipcRenderer.invoke('fetch-tracker-data', payload),
   on: (channel, callback) => {
     if (!ALLOWED_EVENTS.has(channel)) {
       throw new Error(`Channel "${channel}" is not allowed`);
@@ -193,13 +196,17 @@ const apiBridge = {
 
 const quantApiBridge = {
   runScreener: (payload) => ipcRenderer.invoke('execute-screener', payload),
+  executeScreener: (payload) => ipcRenderer.invoke('execute-screener', payload),
   runFullPipeline: (payload) => ipcRenderer.invoke('quant:run-full-pipeline', payload),
   runPhase: (phase, params) => ipcRenderer.invoke('quant:run-phase', { phase, params }),
-  saveTrackedAsset: (data) => ipcRenderer.invoke('quant:save-tracked-asset', data),
-  evaluateTrackedAssets: (payload) => ipcRenderer.invoke('quant:evaluate-tracked', payload),
+  saveTrackedAsset: (data) => ipcRenderer.invoke('save-tracked-recommendation', data),
+  saveTrackedRecommendation: (data) => ipcRenderer.invoke('save-tracked-recommendation', data),
+  evaluateTrackedAssets: (payload) => ipcRenderer.invoke('update-tracker-prices', payload),
+  updateTrackerPrices: (payload) => ipcRenderer.invoke('update-tracker-prices', payload),
   getTrackerMetrics: (payload) => ipcRenderer.invoke('quant:get-tracker-metrics', payload),
   getTrackedAssets: (payload) => ipcRenderer.invoke('quant:get-tracked-assets', payload),
-  getTrackerDashboard: (payload) => ipcRenderer.invoke('quant:get-tracker-dashboard', payload),
+  getTrackerDashboard: (payload) => ipcRenderer.invoke('fetch-tracker-data', payload),
+  fetchTrackerData: (payload) => ipcRenderer.invoke('fetch-tracker-data', payload),
 };
 
 contextBridge.exposeInMainWorld('api', apiBridge);

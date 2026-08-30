@@ -21,11 +21,41 @@ def get_db_path() -> str:
 
 
 def init_tracker_db(db_path: Optional[str] = None):
-    """Inicializa e migra a tabela de recomendações rastreadas se necessário."""
+    """Inicializa e migra as tabelas de recomendações rastreadas se necessário."""
     path = db_path or get_db_path()
     conn = sqlite3.connect(path)
     cursor = conn.cursor()
     
+    # Tabela canónica alphaquant_history_tracker
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS alphaquant_history_tracker (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            sector TEXT,
+            entry_date TEXT NOT NULL,
+            recommendation_date TEXT,
+            entry_price REAL NOT NULL,
+            current_price REAL,
+            target_price REAL NOT NULL,
+            stop_loss REAL NOT NULL,
+            stop_loss_price REAL,
+            horizon_days INTEGER NOT NULL,
+            predicted_win_rate REAL NOT NULL,
+            mc_win_rate REAL,
+            mc_tier_label TEXT,
+            alpha_score REAL NOT NULL,
+            status TEXT DEFAULT 'PENDENTE', -- 'PENDENTE', 'TARGET_ATINGIDO', 'STOP_LOSS_ATINGIDO', 'EXPIRADO'
+            exit_price REAL,
+            exit_date TEXT,
+            realized_return_pct REAL,
+            realized_pnl_pct REAL,
+            max_favorable_excursion REAL DEFAULT 0.0,
+            max_adverse_excursion REAL DEFAULT 0.0,
+            days_to_exit INTEGER
+        )
+    ''')
+
+    # Tabela de compatibilidade tracked_recommendations
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS tracked_recommendations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,7 +68,7 @@ def init_tracker_db(db_path: Optional[str] = None):
             horizon_days INTEGER NOT NULL,
             predicted_win_rate REAL NOT NULL,
             alpha_score REAL NOT NULL,
-            status TEXT DEFAULT 'PENDENTE', -- 'PENDENTE', 'TARGET_ATINGIDO', 'STOP_LOSS_ATINGIDO', 'EXPIRADO'
+            status TEXT DEFAULT 'PENDENTE',
             exit_price REAL,
             exit_date TEXT,
             realized_return_pct REAL
@@ -73,7 +103,7 @@ def init_tracker_db(db_path: Optional[str] = None):
 
 
 def save_recommendation(data: dict, db_path: Optional[str] = None) -> Dict[str, Any]:
-    """Guarda uma nova sugestão para acompanhamento e auditoria futura."""
+    """Guarda uma nova sugestão com snapshot completo para acompanhamento e auditoria."""
     path = db_path or get_db_path()
     init_tracker_db(path)
     conn = sqlite3.connect(path)
@@ -116,6 +146,7 @@ def save_recommendation(data: dict, db_path: Optional[str] = None) -> Dict[str, 
     alpha_score = float(data.get('alpha_score', 0.0))
     rec_date = data.get('recommendation_date') or data.get('entry_date') or pd.Timestamp.now().strftime('%Y-%m-%d')
 
+    # Inserir em tracked_recommendations e alphaquant_history_tracker
     cursor.execute('''
         INSERT INTO tracked_recommendations (
             ticker, sector, entry_date, recommendation_date, entry_price, target_price,
@@ -127,8 +158,23 @@ def save_recommendation(data: dict, db_path: Optional[str] = None) -> Dict[str, 
         stop_loss, stop_loss, horizon_days, win_rate, win_rate,
         tier_label, alpha_score, entry_price
     ))
-        
     rec_id = cursor.lastrowid
+
+    try:
+        cursor.execute('''
+            INSERT INTO alphaquant_history_tracker (
+                id, ticker, sector, entry_date, recommendation_date, entry_price, current_price,
+                target_price, stop_loss, stop_loss_price, horizon_days, predicted_win_rate,
+                mc_win_rate, mc_tier_label, alpha_score, status, max_favorable_excursion, max_adverse_excursion
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDENTE', 0.0, 0.0)
+        ''', (
+            rec_id, ticker, sector, rec_date, rec_date, entry_price, entry_price,
+            target_price, stop_loss, stop_loss, horizon_days, win_rate,
+            win_rate, tier_label, alpha_score
+        ))
+    except Exception:
+        pass
+        
     conn.commit()
     conn.close()
     
@@ -139,6 +185,28 @@ def save_recommendation(data: dict, db_path: Optional[str] = None) -> Dict[str, 
         "status": "PENDENTE",
         "entry_date": rec_date
     }
+
+
+def update_pending_recommendations(db_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Verifica diariamente as cotações via API para atualizar ativos pendentes:
+    - Testa se atingiu Target Price
+    - Testa se atingiu Stop Loss
+    - Testa se expirou o limite do horizonte temporal (H)
+    - Calcula MFE (Max Favorable Excursion) e MAE (Max Adverse Excursion)
+    """
+    return evaluate_tracked_assets(db_path=db_path)
+
+
+def get_tracker_kpis(db_path: Optional[str] = None) -> Dict[str, Any]:
+    """Retorna os KPIs de desempenho real e a matriz de calibração por patamar de Monte Carlo."""
+    dash = get_tracker_dashboard_data(db_path=db_path)
+    return {
+        "kpis": dash.get("kpis", {}),
+        "tier_matrix": dash.get("tier_matrix", []),
+        "accuracy_metrics": get_model_accuracy_metrics(db_path=db_path)
+    }
+
 
 
 def evaluate_tracked_assets(db_path: Optional[str] = None) -> Dict[str, Any]:

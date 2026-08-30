@@ -562,18 +562,29 @@ def main():
 
     action_map = {
         "run_full_pipeline": run_full_pipeline,
+        "execute_screener": run_full_pipeline,
+        "execute-screener": run_full_pipeline,
+        "run_screener": run_full_pipeline,
         "run_fundamentals": run_phase_1_fundamentals,
         "run_technical": run_phase_2_technical,
         "run_fracdiff": run_phase_3_fracdiff,
         "run_sentiment": run_phase_4_sentiment,
         "run_purification": run_phase_5_purification,
         "run_cpcv": run_phase_6_cpcv,
+        "save_tracked_recommendation": save_recommendation,
+        "save-tracked-recommendation": save_recommendation,
         "save_tracked_asset": save_recommendation,
         "save_recommendation": save_recommendation,
+        "update_tracker_prices": lambda _: evaluate_tracked_assets(),
+        "update-tracker-prices": lambda _: evaluate_tracked_assets(),
+        "update_pending_recommendations": lambda _: evaluate_tracked_assets(),
         "evaluate_tracked_assets": lambda _: evaluate_tracked_assets(),
+        "fetch_tracker_data": lambda p: get_tracker_dashboard_data(params=p if isinstance(p, dict) else None),
+        "fetch-tracker-data": lambda p: get_tracker_dashboard_data(params=p if isinstance(p, dict) else None),
+        "get_tracker_dashboard": lambda p: get_tracker_dashboard_data(params=p if isinstance(p, dict) else None),
+        "get_tracker_kpis": lambda _: get_tracker_kpis(),
         "get_tracker_metrics": lambda _: get_model_accuracy_metrics(),
         "get_tracked_assets": lambda p: {"recommendations": get_all_tracked_recommendations(status=p.get("status") if isinstance(p, dict) else None)},
-        "get_tracker_dashboard": lambda p: get_tracker_dashboard_data(params=p if isinstance(p, dict) else None),
     }
 
 
