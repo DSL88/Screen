@@ -37,6 +37,13 @@ from src.features.markov_monte_carlo import (
     compute_markov_transition_matrix,
     run_regime_switching_monte_carlo,
 )
+from python_engine.api_data_loader import (
+    fetch_all_assets_parallel,
+    fetch_single_asset_api,
+    get_cached_data,
+    save_to_cache,
+    init_db,
+)
 from src.features.fundamentals import (
     FundamentalScreener,
     calculate_current_ratio,
@@ -240,35 +247,13 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
     horizon_markov = int(params.get("horizonte") or params.get("horizon") or 21)
     n_mc_sims = int(params.get("n_simulations", 2000 if len(tickers) > 100 else 5000))
 
-    # 1. Extração concorrente de dados via ThreadPoolExecutor
+    # 1. Extração concorrente de dados via ThreadPoolExecutor com Cache SQLite local
     max_workers = min(32, max(4, len(tickers)))
-    raw_assets_dict: Dict[str, Dict[str, Any]] = {}
-    
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_ticker = {executor.submit(fetch_yahoo_asset_data, symbol): symbol for symbol in tickers}
-        for future in as_completed(future_to_ticker):
-            sym = future_to_ticker[future]
-            try:
-                raw_assets_dict[sym] = future.result()
-            except Exception:
-                raw_assets_dict[sym] = {
-                    "ticker": sym,
-                    "sector": "Outros",
-                    "market_cap_raw": 5e10,
-                    "market_cap_str": "50.0 B€",
-                    "current_ratio": 1.6,
-                    "debt_to_equity": 0.45,
-                    "roa": 0.08,
-                    "earnings_yield": 0.06,
-                    "fcf_yield": 0.05,
-                    "price_series": _build_synthetic_price_series(sym, n_bars=252),
-                    "valid": True,
-                    "is_yahoo_live": False
-                }
+    raw_assets_dict: Dict[str, Dict[str, Any]] = fetch_all_assets_parallel(tickers, max_workers=max_workers)
 
     # 2. Processamento em lote de Sentimento FinBERT
     sentiment_analyzer = FinBERTSentimentAnalyzer()
-    sentiment_headlines = {
+    sentiment_fallback_headlines = {
         "NVDA": "Nvidia breaks all-time quarterly revenue record with soaring AI data center demand",
         "MSFT": "Microsoft Cloud Azure gains market share with enterprise GenAI adoption",
         "AAPL": "Apple services division hits new high despite regulatory challenges in Europe",
@@ -281,10 +266,14 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
         "PFE": "Pfizer maintains solid dividend yield while restructuring commercial pipeline",
     }
 
-    all_headlines = [
-        sentiment_headlines.get(sym, f"{sym} demonstrates operational performance and market positioning.")
-        for sym in tickers
-    ]
+    all_headlines = []
+    for sym in tickers:
+        asset_info = raw_assets_dict.get(sym, {})
+        hl_list = asset_info.get("headlines", [])
+        if hl_list and len(hl_list) > 0 and len(hl_list[0].strip()) > 5:
+            all_headlines.append(hl_list[0])
+        else:
+            all_headlines.append(sentiment_fallback_headlines.get(sym, f"{sym} demonstrates operational performance and market positioning."))
     
     # Processamento em lote do sentimento para todos os ativos
     try:
@@ -299,11 +288,33 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
 
     for idx, symbol in enumerate(tickers):
         asset = raw_assets_dict.get(symbol) or fetch_yahoo_asset_data(symbol)
-        price_series = asset["price_series"]
-        if not asset["valid"] or len(price_series) < 10:
+        
+        # Obter série de preços
+        if "price_series" in asset and isinstance(asset["price_series"], pd.Series):
+            price_series = asset["price_series"]
+        elif "price_history" in asset and asset["price_history"]:
+            price_series = pd.Series(asset["price_history"])
+        else:
+            price_series = _build_synthetic_price_series(symbol, n_bars=max(window_markov, 252))
+
+        if not asset.get("valid") or len(price_series) < 10:
             price_series = _build_synthetic_price_series(symbol, n_bars=max(window_markov, 252))
 
         latest_price = float(price_series.iloc[-1]) if len(price_series) > 0 else 100.0
+
+        # Market Cap
+        mcap_val = asset.get("market_cap") or asset.get("market_cap_raw")
+        if mcap_val is not None and not np.isnan(mcap_val) and mcap_val > 0:
+            market_cap_raw = float(mcap_val)
+            if market_cap_raw >= 1e9:
+                market_cap_str = f"{market_cap_raw / 1e9:.1f} B€"
+            else:
+                market_cap_str = f"{market_cap_raw / 1e6:.1f} M€"
+        else:
+            seed_val = abs(hash(symbol)) % 1000
+            pseudo_mcap = 1e9 + (seed_val * 1e9)
+            market_cap_str = f"{pseudo_mcap / 1e9:.1f} B€"
+            market_cap_raw = pseudo_mcap
 
         # Executar Simulação Markov + Monte Carlo
         mc_results = run_markov_monte_carlo(
@@ -340,11 +351,24 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
             momentum_weight = 0.30
 
         # Avaliação Fundamentalista Real (Fase 1)
-        cr = asset["current_ratio"]
-        de = asset["debt_to_equity"]
-        roa = asset["roa"]
-        ey = asset["earnings_yield"]
-        fcf_y = asset["fcf_yield"]
+        cr = asset.get("current_ratio")
+        de = asset.get("debt_to_equity")
+        if de is not None and de > 10:
+            de = de / 100.0
+        roa = asset.get("roa")
+        
+        eps = asset.get("eps")
+        price_val = asset.get("price") or latest_price
+        fcf = asset.get("free_cash_flow")
+        ev = asset.get("enterprise_value")
+
+        ey = asset.get("earnings_yield")
+        if ey is None or (isinstance(ey, float) and np.isnan(ey)):
+            ey = (float(eps) / float(price_val)) if (eps and price_val and float(price_val) > 0) else np.nan
+
+        fcf_y = asset.get("fcf_yield")
+        if fcf_y is None or (isinstance(fcf_y, float) and np.isnan(fcf_y)):
+            fcf_y = (float(fcf) / float(ev)) if (fcf and ev and float(ev) > 0) else np.nan
 
         cr_valid = cr is not None and not np.isnan(cr)
         de_valid = de is not None and not np.isnan(de)
@@ -395,9 +419,9 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
 
         asset_features_list.append({
             "ticker": symbol,
-            "sector": asset["sector"],
-            "market_cap_raw": asset["market_cap_raw"],
-            "market_cap_str": asset["market_cap_str"],
+            "sector": asset.get("sector", "Outros"),
+            "market_cap_raw": market_cap_raw,
+            "market_cap_str": market_cap_str,
             "momentum_raw": vol_mom,
             "mcginley_ratio": (latest_price / latest_mcginley) - 1.0 if latest_mcginley > 0 else 0.0,
             "sentiment_raw": sentiment_score,
@@ -477,11 +501,16 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
             "market_cap": row["market_cap_str"],
             "market_cap_raw": row["market_cap_raw"],
             "graham_score": row["graham_score"],
+            "quality_score": row["graham_score"],
+            "current_price": round(float(row["latest_price"]), 2),
+            "latest_price": round(float(row["latest_price"]), 2),
             "mcginley_status": row["mcginley_status"],
             "markov_bullish_prob": round(float(row["markov_bullish_prob"]), 1),
             "mc_win_rate": round(float(row["mc_win_rate"]), 1),
             "mc_cvar_95": round(float(row["mc_cvar_95"]), 1),
+            "cvar_95": round(float(row["mc_cvar_95"]), 1),
             "mc_expected_return": round(float(row["mc_results"]["expected_return_pct"]), 1),
+            "expected_return": round(float(row["mc_results"]["expected_return_pct"]), 1),
             "purified_alpha_score": purified_alpha_score,
             "status": status_label,
             "approved": is_approved,
@@ -578,12 +607,15 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
     first_series = first_asset.get("price_series", pd.Series(dtype=float))
     chart_close = [round(float(p), 2) for p in first_series.tail(60).tolist()] if len(first_series) >= 10 else [100.0] * 60
 
+    recommendations = generate_top_investment_recommendations(analyzed_assets, top_n=5, horizon_days=horizon_markov)
+
     output_payload = {
         "success": True,
         "pipeline_name": "Alpha Quant Engine (Yahoo Finance + Markov + Monte Carlo + Fases 1-6)",
         "timestamp": pd.Timestamp.now().isoformat(),
         "summary": summary,
         "assets": analyzed_assets,
+        "top_recommendations": recommendations,
         "phases": {
             "phase_1_fundamentals": {
                 "phase": 1,
@@ -665,7 +697,69 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
     return output_payload
 
 
+def generate_top_investment_recommendations(
+    processed_assets: List[Dict[str, Any]],
+    top_n: int = 5,
+    horizon_days: int = 21
+) -> List[Dict[str, Any]]:
+    """
+    Filtra e ordena os ativos analisados para gerar a lista de recomendações finais.
+    Critérios:
+    1. Filtro de Solvência (Fase 1): status == 'Aprovado' ou approved == True
+    2. Convicção Estocástica (Markov + Monte Carlo): Win Rate MC >= 60% e Retorno Esperado > 0
+    3. Score de Alpha Purificado e Rácio de Eficiência Estocástica (Retorno / CVaR95)
+    """
+    eligible_assets = []
+
+    for asset in processed_assets:
+        # 1. Filtro de Elegibilidade Estrita
+        status = asset.get('status')
+        approved = asset.get('approved', False)
+        if status != 'Aprovado' and not approved:
+            continue
+            
+        win_rate = float(asset.get('mc_win_rate', 0.0) or 0.0)
+        cvar_95 = float(asset.get('mc_cvar_95', asset.get('cvar_95', 5.0)) or 5.0)
+        exp_return = float(asset.get('mc_expected_return', asset.get('expected_return', 0.0)) or 0.0)
+        
+        # O ativo deve ter pelo menos 60% de probabilidade de alta no Monte Carlo e retorno positivo
+        if win_rate < 60.0 or exp_return <= 0:
+            continue
+
+        # 2. Cálculo do Rácio de Eficiência Estocástica (Retorno / Risk-at-Tail)
+        efficiency_ratio = exp_return / cvar_95 if cvar_95 > 0 else 1.0
+
+        # 3. Score Final de Recomendação
+        quality_score = float(asset.get('quality_score', asset.get('graham_score', 50.0)) or 50.0)
+        alpha_score = (quality_score * 0.3) + (win_rate * 0.4) + (efficiency_ratio * 30.0)
+
+        # Projeção de Target Price e Stop Loss
+        current_price = float(asset.get('current_price', asset.get('latest_price', 100.0)) or 100.0)
+        target_price = current_price * (1.0 + (exp_return / 100.0))
+        stop_loss_price = current_price * (1.0 - (cvar_95 / 100.0))
+
+        eligible_assets.append({
+            "ticker": asset.get('ticker', ''),
+            "sector": asset.get('sector', 'Outros'),
+            "current_price": round(current_price, 2),
+            "target_price": round(target_price, 2),
+            "stop_loss": round(stop_loss_price, 2),
+            "expected_return_pct": f"+{exp_return:.1f}%",
+            "win_rate_mc": f"{win_rate:.1f}%",
+            "cvar_risk": f"-{cvar_95:.1f}%",
+            "alpha_score": round(alpha_score, 1),
+            "horizon_days": horizon_days,
+            "action": "BUY / LONG"
+        })
+
+    # Ordenar pelos ativos com maior Alpha Score
+    recommended_sorted = sorted(eligible_assets, key=lambda x: x['alpha_score'], reverse=True)
+    
+    return recommended_sorted[:top_n]
+
+
 run_full_quant_pipeline = execute_alpha_quant_engine
+execute_pipeline = execute_alpha_quant_engine
 
 
 def main():

@@ -946,6 +946,42 @@
               </div>
             </section>
           </div>
+
+          <!-- Bloco de Destaque: Recomendações de Investimento -->
+          <div class="card bg-dark border-primary mt-4 p-4 shadow-lg rounded-4 quant-recommendations-card">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <div>
+                <h3 class="text-primary m-0">🎯 Carteira Recomendada AlphaQuant</h3>
+                <small class="text-muted">Sugestões de investimento ordenadas por Markov-Monte Carlo &amp; Alpha Fatorial</small>
+              </div>
+              <span class="badge bg-primary fs-6 padding-pill">Horizonte: Próximos 21 Dias Úteis</span>
+            </div>
+
+            <div class="table-responsive">
+              <table class="table table-dark table-hover align-middle quant-table">
+                <thead>
+                  <tr class="text-secondary border-bottom border-secondary">
+                    <th>AÇÃO</th>
+                    <th>TICKER</th>
+                    <th>SETOR</th>
+                    <th>PREÇO ATUAL</th>
+                    <th>PREÇO ALVO (TARGET)</th>
+                    <th>STOP LOSS</th>
+                    <th>RETORNO ESPERADO</th>
+                    <th>PROB. VITÓRIA (MC)</th>
+                    <th>SCORE ALPHA</th>
+                  </tr>
+                </thead>
+                <tbody id="recommendations-table-body">
+                  <tr>
+                    <td colspan="9" class="text-center text-muted py-4">
+                      Execute o motor quantitativo para gerar as recomendações...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     </main>

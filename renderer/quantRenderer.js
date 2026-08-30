@@ -250,6 +250,10 @@
     if (phases.phase_6_cpcv) {
       renderPhase6CPCV(phases.phase_6_cpcv);
     }
+
+    // 8. Renderizar Carteira Recomendada (Top-N Buy List)
+    const recs = data.top_recommendations || (summary && summary.top_recommendations);
+    renderTopRecommendations(recs);
   }
 
   function renderIndividualPhase(phase, data) {
@@ -510,6 +514,46 @@
       decBox.className = `cpcv-decision-box ${approved ? 'decision-approved' : 'decision-warning'}`;
     }
   }
+
+  // ═══════════════════════════════════════════════════════════
+  //  CARTEIRA RECOMENDADA (TOP-N BUY LIST)
+  // ═══════════════════════════════════════════════════════════
+
+  function renderTopRecommendations(recommendations) {
+    const tbody = document.getElementById('recommendations-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    if (!recommendations || recommendations.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="9" class="text-center text-warning py-4" style="text-align: center; color: var(--warn); padding: 2rem;">
+            Nenhum ativo cumpriu os requisitos estritos de convicção estocástica (Win Rate >= 60%) e solvência neste momento.
+          </td>
+        </tr>`;
+      return;
+    }
+
+    recommendations.forEach((rec) => {
+      const row = `
+        <tr class="border-bottom border-dark">
+          <td><span class="badge bg-success rounded-pill px-3 py-2" style="background: rgba(52, 211, 153, 0.15); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.3); padding: 4px 10px; border-radius: 9999px; font-weight: 600;">🟢 ${rec.action || 'BUY / LONG'}</span></td>
+          <td><strong class="fs-5 text-white" style="font-size: 1.05rem; color: #fff;">${rec.ticker}</strong></td>
+          <td><span class="text-secondary" style="color: #94a3b8;">${rec.sector}</span></td>
+          <td style="font-family: var(--mono);">${rec.current_price} €</td>
+          <td class="text-success fw-bold" style="color: #34d399; font-weight: 700; font-family: var(--mono);">${rec.target_price} €</td>
+          <td class="text-danger" style="color: #fb7185; font-family: var(--mono);">${rec.stop_loss} €</td>
+          <td><span class="text-success fw-bold" style="color: #34d399; font-weight: 700;">${rec.expected_return_pct}</span></td>
+          <td><span class="badge bg-info text-dark" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 4px 8px; border-radius: 6px; font-weight: 600;">${rec.win_rate_mc}</span></td>
+          <td><span class="badge bg-primary fs-6" style="background: #6366f1; color: #fff; padding: 4px 10px; border-radius: 6px; font-weight: 700;">${rec.alpha_score}</span></td>
+        </tr>
+      `;
+      tbody.innerHTML += row;
+    });
+  }
+
+  // Exportar para escopo global caso outros scripts queiram invocar
+  window.renderTopRecommendations = renderTopRecommendations;
 
   // Inicializar quando o DOM estiver pronto
   if (document.readyState === 'loading') {

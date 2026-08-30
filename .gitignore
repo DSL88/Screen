@@ -62,3 +62,5 @@ __pycache__/
 .venv/
 venv/
 ENV/
+*.db
+
