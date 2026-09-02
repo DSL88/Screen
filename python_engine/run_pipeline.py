@@ -244,7 +244,7 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
     min_cr = float(params.get("minCurrentRatio", 1.5))
     max_de = float(params.get("maxDebtEquity", 1.5))
     window_markov = int(params.get("janelaMarkov") or params.get("window") or 252)
-    horizon_markov = int(params.get("horizonte") or params.get("horizon") or 21)
+    horizon_markov = int(params.get("horizonte") or params.get("horizon") or 35)
     n_mc_sims = int(params.get("n_simulations", 2000 if len(tickers) > 100 else 5000))
 
     # 1. Extração concorrente de dados via ThreadPoolExecutor com Cache SQLite local
@@ -409,7 +409,7 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
         sentiment_score = float(sent_scores[idx]) if idx < len(sent_scores) else 0.10
         headline = all_headlines[idx] if idx < len(all_headlines) else ""
 
-        p_ref = float(price_series.iloc[-21]) if len(price_series) >= 21 else float(price_series.iloc[0])
+        p_ref = float(price_series.iloc[-35]) if len(price_series) >= 35 else float(price_series.iloc[0])
         price_mom_pct = ((latest_price - p_ref) / p_ref) * 100.0 if p_ref > 0 else 0.0
 
         if sentiment_score > 0.15 and price_mom_pct < -2.0:
@@ -500,12 +500,11 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
         mc_res_item = row.get("mc_results", {})
         tier_info = classify_win_rate_tier(row["mc_win_rate"])
         
-        # Target Price (+2.8% or median MC return) and Stop Loss (-1.4% or CVaR95)
+        # Target Price (+4.8%) and Stop Loss (-2.4%)
         curr_p = float(row["latest_price"])
-        exp_ret_val = float(mc_res_item.get("expected_return_pct", 2.8))
-        target_p = round(curr_p * (1.0 + max(0.028, exp_ret_val / 100.0)), 2)
+        target_p = round(curr_p * (1.0 + 0.048), 2)
         cvar_val = float(row["mc_cvar_95"])
-        stop_l = round(curr_p * (1.0 - max(0.014, cvar_val / 100.0)), 2)
+        stop_l = round(curr_p * (1.0 - 0.024), 2)
 
         analyzed_assets.append({
             "ticker": t,
@@ -518,8 +517,8 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
             "latest_price": round(curr_p, 2),
             "target_price": target_p,
             "stop_loss": stop_l,
-            "target_return_pct": "+2.8%",
-            "stop_loss_pct": "-1.4%",
+            "target_return_pct": "+4.8%",
+            "stop_loss_pct": "-2.4%",
             "mcginley_status": row["mcginley_status"],
             "markov_bullish_prob": round(float(row["markov_bullish_prob"]), 1),
             "mc_win_rate": round(float(row["mc_win_rate"]), 1),
@@ -741,7 +740,7 @@ def classify_win_rate_tier(win_rate: float) -> dict:
 def generate_top_investment_recommendations(
     processed_assets: List[Dict[str, Any]],
     top_n: int = 5,
-    horizon_days: int = 21
+    horizon_days: int = 35
 ) -> List[Dict[str, Any]]:
     """
     Filtra e ordena os ativos analisados para gerar a lista de recomendações finais.
@@ -759,9 +758,9 @@ def generate_top_investment_recommendations(
         if status != 'Aprovado' and not approved:
             continue
             
-        win_rate = float(asset.get('mc_win_rate', 0.0) or 0.0)
-        cvar_95 = float(asset.get('mc_cvar_95', asset.get('cvar_95', 5.0)) or 5.0)
-        exp_return = float(asset.get('mc_expected_return', asset.get('expected_return', 0.0)) or 0.0)
+        win_rate = float(asset.get('mc_win_rate', asset.get('win_rate_numeric', 50.0)) or 50.0)
+        cvar_95 = float(asset.get('mc_cvar_95', asset.get('cvar_95', 3.5)) or 3.5)
+        exp_return = float(asset.get('mc_expected_return', asset.get('expected_return', 4.8)) or 4.8)
         
         # O ativo deve ter pelo menos 50% de probabilidade de alta no Monte Carlo e retorno positivo
         if win_rate < 50.0 or exp_return <= 0:
@@ -774,10 +773,10 @@ def generate_top_investment_recommendations(
         quality_score = float(asset.get('quality_score', asset.get('graham_score', 50.0)) or 50.0)
         alpha_score = (quality_score * 0.3) + (win_rate * 0.4) + (efficiency_ratio * 30.0)
 
-        # Projeção de Target Price e Stop Loss
+        # Projeção exata de Target Price (+4.8%) e Stop Loss (-2.4%)
         current_price = float(asset.get('current_price', asset.get('latest_price', 100.0)) or 100.0)
-        target_price = current_price * (1.0 + (exp_return / 100.0))
-        stop_loss_price = current_price * (1.0 - (cvar_95 / 100.0))
+        target_price = current_price * (1.0 + 0.048)
+        stop_loss_price = current_price * (1.0 - 0.024)
 
         tier = classify_win_rate_tier(win_rate)
 

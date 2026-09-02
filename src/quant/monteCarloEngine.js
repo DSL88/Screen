@@ -9,7 +9,7 @@ try {
 } catch (_) {}
 
 const MC_ITERATIONS = 1000;
-const MC_DAYS_AHEAD = 20;
+const MC_DAYS_AHEAD = 35;
 const MC_THRESHOLD = 50;
 
 const MC_TIERS = {
@@ -216,9 +216,9 @@ function _runOrder2Loop(transitionMatrix, returnsByState, prevState, currentStat
 function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, currentPrice, options) {
   const opts = options || {};
   const iterations = opts.iterations || MC_ITERATIONS;
-  const daysAhead = opts.daysAhead || MC_DAYS_AHEAD;
-  const slPct = opts.slPct != null ? opts.slPct : SL_PCT;
-  const tpPct = opts.tpPct != null ? opts.tpPct : TP_PCT;
+  const daysAhead = opts.daysAhead || opts.horizon || MC_DAYS_AHEAD;
+  const slPct = opts.slPct != null ? opts.slPct : (opts.sl != null ? opts.sl : SL_PCT);
+  const tpPct = opts.tpPct != null ? opts.tpPct : (opts.tp != null ? opts.tp : TP_PCT);
   const isShort = String(opts.side || 'LONG').toUpperCase() === 'SHORT';
   const stateSpace = opts.stateSpace || '9';
   const isOrder2 = opts.order === 2;

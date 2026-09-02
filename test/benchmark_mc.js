@@ -26,7 +26,7 @@ const RUNS = 500;
 const WARMUP_RUNS = 5;
 
 // Parâmetros de produção do motor (paridade com src/native/index.js)
-const BENCH_OPTS = { iterations: 1000, daysAhead: 20, slPct: 0.014, tpPct: 0.028 };
+const BENCH_OPTS = { iterations: 1000, daysAhead: 35, slPct: 0.024, tpPct: 0.048 };
 const CURRENT_STATE = 4;
 const START_PRICE = 150;
 const EMPTY_STATE = 7;
@@ -104,7 +104,7 @@ function main() {
     for (let r = 0; r < RUNS; r++) {
       runMonteCarlo(matrix, returnsByState, CURRENT_STATE, START_PRICE, BENCH_OPTS);
     }
-    console.timeEnd(`MC Nativo      (${RUNS} sims × 1000 iter × 20 dias)`);
+    console.timeEnd(`MC Nativo      (${RUNS} sims × 1000 iter × 35 dias)`);
     nativeMs = hrMs(t0);
   } else {
     console.warn('[Aviso] Binário nativo não compilado — corre "npm run build:native".');
@@ -113,11 +113,11 @@ function main() {
 
   // ── Benchmark FALLBACK (mesmos inputs, mesmas runs) ─────────
   const t1 = process.hrtime.bigint();
-  console.time(`MC Fallback JS (${RUNS} sims × 1000 iter × 20 dias)`);
+  console.time(`MC Fallback JS (${RUNS} sims × 1000 iter × 35 dias)`);
   for (let r = 0; r < RUNS; r++) {
     _runMonteCarloJSFallback(matrix, returnsByState, CURRENT_STATE, START_PRICE, BENCH_OPTS);
   }
-  console.timeEnd(`MC Fallback JS (${RUNS} sims × 1000 iter × 20 dias)`);
+  console.timeEnd(`MC Fallback JS (${RUNS} sims × 1000 iter × 35 dias)`);
   const fallbackMs = hrMs(t1);
 
   // ── Resultado amostra (seed fixa → determinístico) ──────────
@@ -180,10 +180,10 @@ if (require.main === module) {
     const RUNS_SPEC = 500;
     console.time(`Tempo Total para ${RUNS_SPEC} Simulações Monte Carlo (1.000 trajetórias cada)`);
     for (let i = 0; i < RUNS_SPEC; i++) {
-      quantEngineSpec.runMonteCarlo(testMatrix, testReturns, 0, 100.0, 1000, 20, 0.014, 0.028);
+      quantEngineSpec.runMonteCarlo(testMatrix, testReturns, 0, 100.0, 1000, 35, 0.024, 0.048);
     }
     console.timeEnd(`Tempo Total para ${RUNS_SPEC} Simulações Monte Carlo (1.000 trajetórias cada)`);
-    const sampleResult = quantEngineSpec.runMonteCarlo(testMatrix, testReturns, 0, 100.0, 1000, 20, 0.014, 0.028);
+    const sampleResult = quantEngineSpec.runMonteCarlo(testMatrix, testReturns, 0, 100.0, 1000, 35, 0.024, 0.048);
     console.log('\n--- Amostra de Validação Numérica ---');
     console.log(sampleResult);
   } catch (_) { /* ignora se já correu */ }

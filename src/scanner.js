@@ -1,7 +1,7 @@
 'use strict';
 // src/scanner.js – Motor offline 100% SQLite (Passo 2)
 // NÃO importa yahooClient – extração exclusivamente via db.getHistoricalPricesForScan
-// Pipeline: 200 velas min -> VWAP20 -> Markov -> Monte Carlo 1000x 1.4%/2.8%
+// Pipeline: 200 velas min -> VWAP20 -> Markov -> Monte Carlo 1000x 2.4%/4.8% (35d)
 // SQL offline (spec Passo 2): SELECT date, open, high, low, close, volume FROM historical_prices WHERE UPPER(TRIM(ticker)) = ? ORDER BY date DESC LIMIT 300; + .reverse() ASC
 
 const { calculateRVOL } = require('./quant/indicators');
@@ -97,23 +97,36 @@ async function scanStock(ticker, db, quantEngine, opts = {}) {
     return { ticker, approved: false, reason: 'MARKOV_INVALIDO' };
   }
 
-  // Gatekeeper 2: Monte Carlo 1000 trajetórias 20d SL1.4% TP2.8%
+  // Gatekeeper 2: Monte Carlo 1000 trajetórias 35d SL2.4% TP4.8%
   let mc = null;
   try {
     const engine = quantEngine || require('./native');
     if (typeof engine.runMonteCarlo === 'function') {
-      // native/index.js espera (matrix, returns, state, price, opts)
-      mc = engine.runMonteCarlo(
-        markov.transitionMatrix,
-        markov.stateReturns,
-        markov.currentState,
-        lastClose,
-        { iterations: 1000, daysAhead: 20, slPct: 0.014, tpPct: 0.028 }
-      );
+      // native/index.js espera (matrix, returns, state, price, opts) ou posicionais
+      if (engine.runMonteCarlo.length >= 8) {
+        mc = engine.runMonteCarlo(
+          markov.transitionMatrix,
+          markov.stateReturns,
+          markov.currentState,
+          lastClose,
+          1000,
+          35,
+          0.024,
+          0.048
+        );
+      } else {
+        mc = engine.runMonteCarlo(
+          markov.transitionMatrix,
+          markov.stateReturns,
+          markov.currentState,
+          lastClose,
+          { iterations: 1000, daysAhead: 35, horizon: 35, slPct: 0.024, sl: 0.024, tpPct: 0.048, tp: 0.048 }
+        );
+      }
       // normaliza para spec naming
       if (mc && mc.winRate != null && mc.winRateMC == null) mc.winRateMC = mc.winRate;
     } else if (typeof engine.runMarkovMonteCarloSimulation === 'function') {
-      const r = engine.runMarkovMonteCarloSimulation(markov.transitionMatrix, markov.currentState, candles, lastClose, { slPct: 0.014, tpPct: 0.028, iterations: 1000, daysAhead: 20 });
+      const r = engine.runMarkovMonteCarloSimulation(markov.transitionMatrix, markov.currentState, candles, lastClose, { slPct: 0.024, tpPct: 0.048, iterations: 1000, daysAhead: 35 });
       mc = { winRateMC: r.winRate, mcTier: r.mcTier, mcLabel: r.mcLabel, expectedValue: r.expectedValue, tpHits: r.tpHits, slHits: r.slHits, expired: r.expired };
     }
   } catch (_) { mc = null; }
@@ -135,7 +148,10 @@ async function scanStock(ticker, db, quantEngine, opts = {}) {
     rollingVWAP,
     rvol,
     rvolApproved,
-    lastDate: lastCandle.date
+    lastDate: lastCandle.date,
+    slTarget: 2.4,
+    tpTarget: 4.8,
+    horizonDays: 35
   };
 }
 

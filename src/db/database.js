@@ -312,8 +312,8 @@ class DB {
   }
 
   _migrateRecalculateSLTP() {
-    const SL_PCT = 0.014;
-    const TP_PCT = 0.028;
+    const SL_PCT = 0.024;
+    const TP_PCT = 0.048;
 
     const tx = this.db.transaction(() => {
       this.db.exec(`

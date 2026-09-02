@@ -1962,14 +1962,14 @@
         const sl = r.mcSlHits ?? 0;
         const exp = r.mcExpired ?? 0;
         const wr = Math.round(r.mcWinRate * 10) / 10;
-        const expectation = ((wr / 100) * 2.8 - (1 - wr / 100) * 1.4).toFixed(2);
+        const expectation = ((wr / 100) * 4.8 - (1 - wr / 100) * 2.4).toFixed(2);
         const tooltipLines = [
           'Classificação: ' + (r.mcLabel || tierLabel),
           'Taxa de Sucesso: ' + wr + '%',
-          'Simulações: 1.000 trajetórias (20 dias úteis)',
-          '  Sucessos (TP 2,8%): ' + tp,
-          '  Derrotas (SL 1,4%): ' + sl,
-          '  Expirados: ' + exp,
+          'Simulações: 1.000 trajetórias (35 dias úteis)',
+          '  Sucessos (TP 4,8%): ' + tp,
+          '  Derrotas (SL 2,4%): ' + sl,
+          '  Expirados (Sem atingir alvo): ' + exp,
           'Expectativa Matemática: +' + expectation + '% por trade'
         ];
         return '<span class="mc-pill ' + tierClass + '" data-mc-tooltip="' + escapeHtml(tooltipLines.join('\\n')) + '" style="cursor:default">MC: ' + Math.round(wr) + '% (' + tierLabel + ')</span>';

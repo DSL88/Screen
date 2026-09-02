@@ -216,6 +216,8 @@ test('Simulation Unified Dashboard & Modal logic lifecycle in simulationRenderer
   const resetHandlers = listeners.get('btn-reset-params:click') || [];
   assert.ok(resetHandlers.length > 0, 'Deve existir listener no botão restaurar padrões');
   elements.get('sim-stop-loss').value = '5.0';
+  elements.get('sim-take-profit').value = '10.0';
   resetHandlers[0]();
-  assert.equal(elements.get('sim-stop-loss').value, '1.4', 'Restaurar padrões deve repor SL para 1.4');
+  assert.equal(elements.get('sim-stop-loss').value, '2.4', 'Restaurar padrões deve repor SL para 2.4');
+  assert.equal(elements.get('sim-take-profit').value, '4.8', 'Restaurar padrões deve repor TP para 4.8');
 });

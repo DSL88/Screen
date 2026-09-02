@@ -49,9 +49,9 @@ MonteCarloNativeResult runMonteCarloFast(
     int currentState,
     double startPrice,
     int iterations = 1000,
-    int horizonDays = 20,
-    double stopLossPct = 0.014,
-    double takeProfitPct = 0.028);
+    int horizonDays = 35,
+    double stopLossPct = 0.024,
+    double takeProfitPct = 0.048);
 
 inline MonteCarloNativeResult runMonteCarloSimulationNative(
     const std::vector<std::vector<double>>& transitionMatrix,

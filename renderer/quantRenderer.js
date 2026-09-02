@@ -184,7 +184,7 @@
       const minCrVal = parseFloat($('slider-min-cr')?.value || '1.5');
       const maxDeVal = parseFloat($('slider-max-de')?.value || '1.5');
       const windowVal = parseInt($('input-janela-markov')?.value || '252', 10);
-      const horizonVal = parseInt($('input-horizonte')?.value || '21', 10);
+      const horizonVal = parseInt($('input-horizonte')?.value || '35', 10);
 
       const payload = {
         universe: selectedUniverse,
@@ -310,7 +310,7 @@
     const subSharpe = $('sub-kpi-sharpe');
     const oosSharpe = summary.oos_sharpe != null ? summary.oos_sharpe.toFixed(2) : '1.45';
     if (valSharpe) valSharpe.textContent = `Sharpe: ${oosSharpe}`;
-    if (subSharpe) subSharpe.textContent = 'Horizonte H=21 Dias Úteis';
+    if (subSharpe) subSharpe.textContent = 'Horizonte H=35 Dias Úteis';
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -341,12 +341,24 @@
       const tier = asset.tier || classifyWinRateTier(winRateNum);
       const tierClass = `tier-${tier.tier_id || 3}`;
 
-      const currPrice = parseFloat(asset.current_price || asset.latest_price || 100.0).toFixed(2);
-      const targetPrice = parseFloat(asset.target_price || (currPrice * 1.028)).toFixed(2);
-      const stopLoss = parseFloat(asset.stop_loss || (currPrice * 0.986)).toFixed(2);
+      // Cálculo exato de Target (+4.8%) e Stop Loss (-2.4%)
+      const currentPrice = Number(asset.price || asset.current_price || asset.latest_price || 0);
+      const targetPrice = currentPrice * (1 + 0.048);
+      const stopLossPrice = currentPrice * (1 - 0.024);
+
+      // Formatação monetária com 2 casas decimais
+      const formattedCurrent = `${currentPrice.toFixed(2)} €`;
+      const formattedTarget = `${targetPrice.toFixed(2)} €`;
+      const formattedStop = `${stopLossPrice.toFixed(2)} €`;
+
       const cvarRisk = parseFloat(asset.mc_cvar_95 || asset.cvar_95 || 3.5).toFixed(1);
       const grahamScore = parseFloat(asset.graham_score || asset.quality_score || 75.0).toFixed(1);
       const alphaScore = parseFloat(asset.purified_alpha_score || asset.alpha_score || 80.0).toFixed(1);
+
+      // Persistir valores sincronizados no objeto do ativo para tracking
+      asset.current_price = currentPrice;
+      asset.target_price = Number(targetPrice.toFixed(2));
+      asset.stop_loss = Number(stopLossPrice.toFixed(2));
 
       const assetJson = JSON.stringify(asset).replace(/'/g, '&apos;');
 
@@ -358,9 +370,9 @@
       tr.innerHTML = `
         <td><strong style="color:#ffffff; font-size:14px;">${asset.ticker}</strong></td>
         <td><span style="color:#94a3b8; font-size:12px;">${asset.sector || 'Outros'}</span></td>
-        <td class="num-col" style="font-weight:600;">${currPrice} €</td>
-        <td class="num-col" style="color:#34d399; font-weight:700;">${targetPrice} €</td>
-        <td class="num-col" style="color:#fb7185; font-weight:600;">${stopLoss} €</td>
+        <td class="num-col" style="font-weight:600;">${formattedCurrent}</td>
+        <td class="num-col text-emerald-400 font-semibold" style="color:#34d399; font-weight:700;">${formattedTarget}</td>
+        <td class="num-col text-rose-400 font-semibold" style="color:#fb7185; font-weight:600;">${formattedStop}</td>
         <td>
           <span class="tier-badge ${tierClass}">
             ${winRateNum.toFixed(1)}% ${tier.level || ''}
@@ -370,7 +382,7 @@
         <td class="num-col"><span style="color:#cbd5e1;">${grahamScore}</span></td>
         <td class="num-col"><strong style="color:#818cf8; font-size:13px;">${alphaScore}</strong></td>
         <td style="text-align:center;">
-          <button class="btn-track-action btn-save-track" data-asset='${assetJson}'>
+          <button class="btn-track btn-track-action btn-table-action btn-save-track" data-asset='${assetJson}'>
             📌 Guardar &amp; Rastrear
           </button>
         </td>
@@ -462,7 +474,7 @@
     const cvarEl = $('drawer-mc-cvar');
 
     const winRateVal = asset.mc_win_rate != null ? asset.mc_win_rate : asset.win_rate || 50.0;
-    const expRetVal = asset.mc_expected_return != null ? asset.mc_expected_return : asset.expected_return || 2.8;
+    const expRetVal = asset.mc_expected_return != null ? asset.mc_expected_return : asset.expected_return || 4.8;
     const cvarVal = asset.mc_cvar_95 != null ? asset.mc_cvar_95 : asset.cvar_95 || 3.5;
 
     if (winRateEl) winRateEl.innerHTML = `Win Rate: <strong class="text-bull">${winRateVal}%</strong>`;
@@ -524,12 +536,12 @@
     }
 
     let paths = pathsSample;
-    const horizon = (paths && paths.length > 0 && paths[0].length) ? paths[0].length - 1 : 21;
+    const horizon = (paths && paths.length > 0 && paths[0].length) ? paths[0].length - 1 : 35;
 
     // Gerar paths sintéticos representativos se não vierem no payload
     if (!paths || paths.length === 0) {
       paths = [];
-      const medianRet = parseFloat(expRet || 2.8) / 100.0;
+      const medianRet = parseFloat(expRet || 4.8) / 100.0;
       const sigma = (parseFloat(cvar || 3.5) / 1.65) / 100.0;
       for (let p = 0; p < 10; p++) {
         const drift = (medianRet / horizon) + (p - 4.5) * (sigma / Math.sqrt(horizon) * 0.4);

@@ -40,6 +40,7 @@
       direction: $('sim-direction'),
       stopLoss: $('sim-stop-loss'),
       takeProfit: $('sim-take-profit'),
+      horizonDays: $('sim-horizon') || $('sim-horizon-days'),
       riskPerTrade: $('sim-risk-per-trade') || $('sim-risk'),
       toggleVwap: $('sim-toggle-vwap') || $('sim-vwap-gate'),
       minMc: $('sim-min-mc') || $('sim-mc-min'),
@@ -108,8 +109,9 @@
     const ui = getUIElements();
     if (ui.universe) ui.universe.value = 'ALL';
     if (ui.direction) ui.direction.value = 'LONG';
-    if (ui.stopLoss) ui.stopLoss.value = '1.4';
-    if (ui.takeProfit) ui.takeProfit.value = '2.8';
+    if (ui.stopLoss) ui.stopLoss.value = '2.4';
+    if (ui.takeProfit) ui.takeProfit.value = '4.8';
+    if (ui.horizonDays) ui.horizonDays.value = '35';
     if (ui.riskPerTrade) ui.riskPerTrade.value = '2.0';
     if (ui.toggleVwap) ui.toggleVwap.checked = true;
     if (ui.minMc) ui.minMc.value = '50';
@@ -382,6 +384,12 @@
     if (titleEl) titleEl.textContent = 'Simulação Concluída';
     if (datesEl) datesEl.textContent = `${data.totalTrades || 0} operações executadas • Clique para ver o relatório completo`;
 
+    const riskInfoEl = document.getElementById('sim-risk-info') ||
+      (typeof document.querySelector === 'function' ? (document.querySelector('.risk-info') || document.querySelector('.simulation-card-row .risk-info')) : null);
+    if (riskInfoEl) {
+      riskInfoEl.textContent = 'SL: 2.4% / TP: 4.8% (35d)';
+    }
+
     setStatus(`Simulação concluída com sucesso (${data.totalTrades || 0} operações).`);
   }
 
@@ -637,8 +645,9 @@
       markovOrder: 1,
       stateSpace: '9',
       stopType: 'pct',
-      stopLoss: toNum(ui.stopLoss, 1.4),
-      takeProfit: toNum(ui.takeProfit, 2.8),
+      stopLoss: toNum(ui.stopLoss, 2.4),
+      takeProfit: toNum(ui.takeProfit, 4.8),
+      horizonDays: toNum(ui.horizonDays, 35),
       risk: toNum(ui.riskPerTrade, 2.0),
       vwapGate: ui.toggleVwap ? !!ui.toggleVwap.checked : true,
       minMC: toNum(ui.minMc, 50),

@@ -138,7 +138,7 @@ test('Monte Carlo de 2ª ordem corre sem erro e devolve winRate', () => {
     candles,
     candles[candles.length - 1].close,
     {
-      slPct: 0.014, tpPct: 0.028, side: 'LONG',
+      slPct: 0.024, tpPct: 0.048, side: 'LONG',
       order: 2, prevState: m.prevState, stateSpace: '9',
       random: () => 0.3
     }
@@ -154,7 +154,7 @@ test('Monte Carlo de 2ª ordem respeita espaço 3 e 6', () => {
     const m = calculateMarkovMatrixOrder2(candles, { stateSpace: space });
     const mc = runMarkovMonteCarloSimulation(
       m.transitionMatrix, m.currentState, candles, candles[candles.length - 1].close,
-      { slPct: 0.014, tpPct: 0.028, side: 'SHORT', order: 2, prevState: m.prevState, stateSpace: space, random: () => 0.4 }
+      { slPct: 0.024, tpPct: 0.048, side: 'SHORT', order: 2, prevState: m.prevState, stateSpace: space, random: () => 0.4 }
     );
     assert.ok(Number.isFinite(mc.winRate), space);
   }

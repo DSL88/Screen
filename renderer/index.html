@@ -112,22 +112,22 @@
        <!-- ═══════════════════════════════════════════════════════════ -->
       <!--  ABA UNIFICADA: WORKSTATION QUANTITATIVO                   -->
       <!-- ═══════════════════════════════════════════════════════════ -->
-      <div class="tab-content active" id="tab-alpha-quant-engine" data-alias-tab="quant-pipeline">
+      <div class="tab-content active workstation-container" id="tab-alpha-quant-engine" data-alias-tab="quant-pipeline">
         <header class="topbar">
           <div class="topbar-info">
             <h1>Workstation Quantitativo Alpha Quant</h1>
-            <p id="quant-status-line">Pipeline estocástico de passagem única (Single-Pass): Markov de 2ª Ordem (27 combinações), Monte Carlo (5.000 trajetórias, H=21d), Solvência Graham, FinBERT e Purificação Fatorial (VIF &lt; 5.0).</p>
+            <p id="quant-status-line">Pipeline estocástico de passagem única (Single-Pass): Markov de 2ª Ordem (27 combinações), Monte Carlo (5.000 trajetórias, H=35d), Solvência Graham, FinBERT e Purificação Fatorial (VIF &lt; 5.0).</p>
           </div>
           <div class="topbar-actions">
             <div class="progress" id="progress-wrap" hidden>
               <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
               <div class="progress-text" id="progress-text">0 / 0</div>
             </div>
-            <button class="btn-unified-quant" id="btn-run-unified-quant">
+            <button class="btn btn-primary btn-run-engine btn-unified-quant" id="btn-run-unified-quant">
               <span class="btn-label" id="btn-quant-label">⚡ Executar Motor Quantitativo Unificado</span>
               <span class="spinner" id="quant-spinner" hidden></span>
             </button>
-            <button class="btn-secondary btn-cancel-operation" id="btn-cancel-scan" type="button" hidden>Cancelar</button>
+            <button class="btn btn-secondary btn-cancel btn-cancel-operation" id="btn-cancel-scan" type="button" hidden>Cancelar</button>
           </div>
         </header>
 
@@ -167,7 +167,7 @@
 
           <div class="quant-control-item">
             <label class="quant-control-label" for="input-horizonte">Horizonte:</label>
-            <input type="number" id="input-horizonte" class="quant-input-sm" value="21" min="1" max="120" />
+            <input type="number" id="input-horizonte" class="quant-input-sm" value="35" min="1" max="120" />
             <span style="font-size:11px; color:#8a8f9e;">dias</span>
           </div>
 
@@ -218,13 +218,13 @@
           </div>
 
           <!-- Cartão 4: Sharpe Médio Out-of-Sample -->
-          <div class="quant-kpi-symmetric-card">
+          <div class="quant-kpi-symmetric-card" id="card-sharpe-oos">
             <div class="quant-kpi-title-row">
               <span class="quant-kpi-caption">Sharpe Médio Out-of-Sample</span>
-              <span class="quant-badge badge bg-secondary">H=21d</span>
+              <span class="quant-badge badge bg-secondary badge-pill" id="badge-sharpe-oos">H=35d</span>
             </div>
             <div class="quant-kpi-val-primary text-accent" id="val-kpi-sharpe">--</div>
-            <div class="quant-kpi-desc" id="sub-kpi-sharpe">Desempenho Fora de Amostra</div>
+            <div class="quant-kpi-desc" id="sub-kpi-sharpe">Horizonte H=35 Dias Úteis</div>
           </div>
         </div>
 
@@ -246,8 +246,8 @@
                   <th>Ticker</th>
                   <th>Setor</th>
                   <th style="text-align:right;">Preço Atual</th>
-                  <th style="text-align:right;">Target (+2.8%)</th>
-                  <th style="text-align:right;">Stop Loss (-1.4%)</th>
+                  <th style="text-align:right;">Target (+4.8%)</th>
+                  <th style="text-align:right;">Stop Loss (-2.4%)</th>
                   <th>Win Rate MC</th>
                   <th style="text-align:right;">CVaR 95%</th>
                   <th style="text-align:right;">Graham Score</th>
@@ -759,11 +759,11 @@
               <div class="form-row-dual">
                 <div class="form-group">
                   <label for="sim-stop-loss">Stop Loss (SL %)</label>
-                  <input type="number" id="sim-stop-loss" class="form-control" value="1.4" step="0.1" min="0.1">
+                  <input type="number" id="sim-stop-loss" class="form-control" value="2.4" placeholder="2.4" step="0.1" min="0.1">
                 </div>
                 <div class="form-group">
                   <label for="sim-take-profit">Take Profit (TP %)</label>
-                  <input type="number" id="sim-take-profit" class="form-control" value="2.8" step="0.1" min="0.1">
+                  <input type="number" id="sim-take-profit" class="form-control" value="4.8" placeholder="4.8" step="0.1" min="0.1">
                 </div>
               </div>
               <div class="form-group">
@@ -782,6 +782,10 @@
               <div class="form-group">
                 <label for="sim-min-mc">Mínimo Monte Carlo (%)</label>
                 <input type="number" id="sim-min-mc" class="form-control" value="50" min="0" max="100">
+              </div>
+              <div class="form-group">
+                <label for="sim-horizon">Horizonte (dias)</label>
+                <input type="number" id="sim-horizon" class="form-control" value="35" placeholder="35" min="1" max="120">
               </div>
               <div class="form-group">
                 <label for="sim-markov-window">Janela de Markov (Velas)</label>
@@ -819,11 +823,12 @@
 
         <!-- CARD ÚNICO DE RESUMO (Exibido após o fim do cálculo) -->
         <div id="simulation-summary-card-container" class="summary-card-wrapper hidden">
-          <div class="simulation-day-card" id="btn-open-simulation-modal">
+          <div class="simulation-day-card simulation-card-row" id="btn-open-simulation-modal">
             <div class="day-card-left">
               <div class="day-badge-status">RESULTADO DA SIMULAÇÃO</div>
               <h3 id="summary-card-title">Simulação Concluída</h3>
               <span id="summary-card-dates" class="text-muted">Clique para ver o relatório completo</span>
+              <div class="risk-info" id="sim-risk-info" style="font-size:11px; color:#8a99ad; margin-top:4px;">SL: 2.4% / TP: 4.8% (35d)</div>
             </div>
 
             <div class="day-card-metrics">

@@ -26,9 +26,9 @@
 namespace {
 
 constexpr int kDefaultIterations = 1000;
-constexpr int kDefaultDaysAhead = 20;
-constexpr double kDefaultSlPct = 0.014;
-constexpr double kDefaultTpPct = 0.028;
+constexpr int kDefaultDaysAhead = 35;
+constexpr double kDefaultSlPct = 0.024;
+constexpr double kDefaultTpPct = 0.048;
 
 std::vector<double> ArrayToStatesVector(const Napi::Array& arr) {
   std::vector<double> out;
@@ -129,8 +129,8 @@ Napi::Value RunMonteCarlo(const Napi::CallbackInfo& info) {
   const int currentState = info[2].As<Napi::Number>().Int32Value();
   const double startPrice = info[3].As<Napi::Number>().DoubleValue();
 
-  // Compatibilidade com chamada de 8 argumentos posicionais
-  bool isSpecCall = info.Length() >= 8 && info[4].IsNumber() && info[5].IsNumber() && info[6].IsNumber() && info[7].IsNumber();
+  // Compatibilidade com chamada de argumentos posicionais (5 a 8 argumentos)
+  bool isPosCall = info.Length() >= 5 && info[4].IsNumber();
   double iterationsD = kDefaultIterations;
   double daysAheadD = kDefaultDaysAhead;
   double slPct = kDefaultSlPct;
@@ -139,11 +139,11 @@ Napi::Value RunMonteCarlo(const Napi::CallbackInfo& info) {
   bool useSeed = false;
   uint32_t seed = 0;
 
-  if (isSpecCall) {
+  if (isPosCall) {
     iterationsD = info[4].As<Napi::Number>().DoubleValue();
-    daysAheadD = info[5].As<Napi::Number>().DoubleValue();
-    slPct = info[6].As<Napi::Number>().DoubleValue();
-    tpPct = info[7].As<Napi::Number>().DoubleValue();
+    if (info.Length() > 5 && info[5].IsNumber()) daysAheadD = info[5].As<Napi::Number>().DoubleValue();
+    if (info.Length() > 6 && info[6].IsNumber()) slPct = info[6].As<Napi::Number>().DoubleValue();
+    if (info.Length() > 7 && info[7].IsNumber()) tpPct = info[7].As<Napi::Number>().DoubleValue();
     if (iterationsD < 1.0) iterationsD = kDefaultIterations;
     if (daysAheadD < 1.0) daysAheadD = kDefaultDaysAhead;
     if (!std::isfinite(slPct)) slPct = kDefaultSlPct;
@@ -160,14 +160,16 @@ Napi::Value RunMonteCarlo(const Napi::CallbackInfo& info) {
       }
     }
     {
-      const Napi::Value v = opts.Get("daysAhead");
+      const Napi::Value v = opts.Has("daysAhead") ? opts.Get("daysAhead") : opts.Get("horizon");
       if (v.IsNumber()) {
         const double d = v.As<Napi::Number>().DoubleValue();
         if (d >= 1.0) daysAheadD = d;
       }
     }
-    slPct = GetFiniteNumberOr(opts, "slPct", kDefaultSlPct);
-    tpPct = GetFiniteNumberOr(opts, "tpPct", kDefaultTpPct);
+    slPct = opts.Has("slPct") ? GetFiniteNumberOr(opts, "slPct", kDefaultSlPct)
+                              : GetFiniteNumberOr(opts, "sl", kDefaultSlPct);
+    tpPct = opts.Has("tpPct") ? GetFiniteNumberOr(opts, "tpPct", kDefaultTpPct)
+                              : GetFiniteNumberOr(opts, "tp", kDefaultTpPct);
     {
       const Napi::Value v = opts.Get("side");
       if (v.IsString()) side = v.As<Napi::String>().Utf8Value();

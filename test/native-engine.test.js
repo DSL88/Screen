@@ -115,14 +115,14 @@ function returnsOnly(values) {
   return Array.from({ length: NUM_STATES }, (_, i) => (i === 0 ? values.slice() : []));
 }
 
-const PARITY_OPTS = { iterations: 300, daysAhead: 20, slPct: 0.014, tpPct: 0.028 };
+const PARITY_OPTS = { iterations: 300, daysAhead: 35, slPct: 0.024, tpPct: 0.048 };
 
 // Procura determinística (scan fixo de seeds) de um seed cujo nº
 // de TPs caia num intervalo — usado para calibrar o escalão MODERATE.
 function findSeedWithTpInRange(engineRun, cfg, minTp, maxTp, maxSeeds = 600) {
   for (let seed = 1; seed <= maxSeeds; seed++) {
     const res = engineRun(cfg.matrix, cfg.returnsByState, cfg.state, cfg.price,
-      { iterations: cfg.iterations, daysAhead: 20, slPct: 0.014, tpPct: 0.028, side: 'LONG', seed });
+      { iterations: cfg.iterations, daysAhead: 35, slPct: 0.024, tpPct: 0.048, side: 'LONG', seed });
     if (res.tpHits >= minTp && res.tpHits <= maxTp) return seed;
   }
   return null;
@@ -251,7 +251,7 @@ test('MC: seeds diferentes produzem resultados distintos (caso estável)', () =>
 // ═══════════════════════════════════════════════════════════
 test('Escalões: retornos só-positivos → ELITE / "Alta Probabilidade" / aprovado', () => {
   const matrix = UNIT_MATRIX;
-  const returnsByState = returnsOnly([0.05]); // +5%/dia → TP (+2.8%) no 1º dia
+  const returnsByState = returnsOnly([0.05]); // +5%/dia → TP (+4.8%) no 1º dia
 
   for (const engine of ENGINES) {
     const res = engine.run(matrix, returnsByState, 0, 50, { ...PARITY_OPTS, seed: 7 });
@@ -264,9 +264,9 @@ test('Escalões: retornos só-positivos → ELITE / "Alta Probabilidade" / aprov
 
 test('Escalões: retornos mistos calibrados → MODERATE / "Probabilidade Moderada"', () => {
   const matrix = UNIT_MATRIX;
-  // p(TP no dia 1)=1/3; senão 0.99 sobrevive ao SL (0.986) e decide no dia 2
-  // → taxa teórica de TP ≈ 55.6%, confortavelmente dentro de [50, 65).
-  const returnsByState = returnsOnly([0.04, -0.01, -0.01]);
+  // p(TP no dia 1)=1/3; senão 0.985 sobrevive ao SL (0.976) e decide nos dias seguintes
+  // → taxa teórica de TP dentro de [50, 65).
+  const returnsByState = returnsOnly([0.06, -0.015, -0.015]);
   const cfg = { matrix, returnsByState, state: 0, price: 50, iterations: 1000 };
 
   // Seed procurada deterministicamente (scan fixo): tpHits ∈ [520, 630]
@@ -276,7 +276,7 @@ test('Escalões: retornos mistos calibrados → MODERATE / "Probabilidade Modera
 
   for (const engine of ENGINES) {
     const res = engine.run(matrix, returnsByState, 0, 50,
-      { iterations: 1000, daysAhead: 20, slPct: 0.014, tpPct: 0.028, side: 'LONG', seed });
+      { iterations: 1000, daysAhead: 35, slPct: 0.024, tpPct: 0.048, side: 'LONG', seed });
     assert.equal(res.mcTier, 'MODERATE', `motor ${engine.nome} (seed=${seed})`);
     assert.equal(res.mcLabel, 'Probabilidade Moderada', `motor ${engine.nome}`);
     assert.equal(res.isApproved, true, `motor ${engine.nome}`);
@@ -286,7 +286,7 @@ test('Escalões: retornos mistos calibrados → MODERATE / "Probabilidade Modera
 
 test('Escalões: retornos só-negativos → REJECTED false / "Rejeitado"', () => {
   const matrix = UNIT_MATRIX;
-  const returnsByState = returnsOnly([-0.02]); // −2%/dia → SL (−1.4%) no 1º dia
+  const returnsByState = returnsOnly([-0.03]); // −3%/dia → SL (−2.4%) no 1º dia
 
   for (const engine of ENGINES) {
     const res = engine.run(matrix, returnsByState, 0, 50, { ...PARITY_OPTS, seed: 7 });
@@ -295,10 +295,10 @@ test('Escalões: retornos só-negativos → REJECTED false / "Rejeitado"', () =>
     assert.equal(res.isApproved, false, `motor ${engine.nome}`);
     assert.equal(res.winRate, 0, `motor ${engine.nome}`);
     assert.equal(res.slHits, PARITY_OPTS.iterations, `motor ${engine.nome}`);
-    // EV com winRate 0 = (0·tp − 1·sl)·100 = −1.4. O nativo diverge
+    // EV com winRate 0 = (0·tp − 1·sl)·100 = −2.4. O nativo diverge
     // do fallback por ≤1 ULP (contração FMA — ver nota em cima),
     // pelo que se afirma com tolerância de 1e-9 e não igualdade.
-    assert.ok(Math.abs(res.expectedValue - (-1.4)) <= 1e-9,
+    assert.ok(Math.abs(res.expectedValue - (-2.4)) <= 1e-9,
       `motor ${engine.nome}: expectedValue=${res.expectedValue}`);
   }
 });
@@ -349,8 +349,8 @@ test('Guards: estado inválido, preço inválido ou matriz vazia zeram o resulta
 // ═══════════════════════════════════════════════════════════
 //  5. SIMETRIA LONG ↔ SHORT
 //
-//  Leitura prévia do código: com slPct ≠ tpPct (defaults 0.014/
-//  0.028) o espelho exato NÃO se verifica (LONG.tp conta toques
+//  Leitura prévia do código: com slPct ≠ tpPct (defaults 0.024/
+//  0.048) o espelho exato NÃO se verifica (LONG.tp conta toques
 //  em +tp, SHORT.sl conta toques em +sl). Com slPct === tpPct os
 //  limiares espelham-se ao dígito sobre caminhos de preço
 //  idênticos (mesma seed, mesma ordem de draws) → propriedade
@@ -478,7 +478,7 @@ test('Delegação: runMarkovMonteCarloSimulation === motor direto com os mesmos 
   assert.ok(returnsByState.reduce((a, r) => a + r.length, 0) >= 100);
 
   const currentPrice = candles[candles.length - 1].close;
-  const opts = { iterations: 800, daysAhead: 20, slPct: 0.014, tpPct: 0.028, side: 'LONG', seed: 777 };
+  const opts = { iterations: 800, daysAhead: 35, slPct: 0.024, tpPct: 0.048, side: 'LONG', seed: 777 };
 
   const delegated = runMarkovMonteCarloSimulation(matrix, currentState, candles, currentPrice, opts);
   const direct = directEngineRun(matrix, returnsByState, currentState, currentPrice, opts);

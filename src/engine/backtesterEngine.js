@@ -705,8 +705,9 @@ class BacktesterEngine {
     this.initialCapital = Number(config.initialCapital) || 10000;
     this.capital = this.initialCapital;
     this.riskPerTrade = Number(config.riskPerTradePct || 2) / 100;
-    this.stopLossPct = Number(config.stopLoss || 1.4) / 100;
-    this.takeProfitPct = Number(config.takeProfit || 2.8) / 100;
+    this.stopLossPct = Number(config.stopLoss || 2.4) / 100;
+    this.takeProfitPct = Number(config.takeProfit || 4.8) / 100;
+    this.horizonDays = Number(config.horizonDays || 35);
     this.direction = config.direction || 'BOTH';
     this.minMCWinRate = Number(config.minMCWinRate || 50);
     this.minRVOL = (config.minRVOL ?? config.rvolMin) != null ? Number(config.minRVOL ?? config.rvolMin) : 1.0;
@@ -836,7 +837,8 @@ class BacktesterEngine {
       try {
         mc = runMarkovMonteCarloSimulation(markov.transitionMatrix, markov.currentState, slice, lastClose, {
           slPct: this.stopLossPct, tpPct: this.takeProfitPct, side: targetDirection,
-          order: 2, prevState: markov.prevState, stateSpace: markov.stateSpace
+          order: 2, prevState: markov.prevState, stateSpace: markov.stateSpace,
+          daysAhead: this.horizonDays
         });
         if (mc && mc.winRate != null && mc.winRateMC == null) mc.winRateMC = mc.winRate;
       } catch (_) { mc = null; }
@@ -845,9 +847,9 @@ class BacktesterEngine {
       if (!qe || typeof qe.runMonteCarlo !== 'function') return null;
       try {
         if (qe.runMonteCarlo.length >= 8) {
-          mc = qe.runMonteCarlo(markov.transitionMatrix, markov.stateReturns, markov.currentState, lastClose, 1000, 20, this.stopLossPct, this.takeProfitPct);
+          mc = qe.runMonteCarlo(markov.transitionMatrix, markov.stateReturns, markov.currentState, lastClose, 1000, this.horizonDays, this.stopLossPct, this.takeProfitPct);
         } else {
-          mc = qe.runMonteCarlo(markov.transitionMatrix, markov.stateReturns, markov.currentState, lastClose, { iterations: 1000, daysAhead: 20, slPct: this.stopLossPct, tpPct: this.takeProfitPct });
+          mc = qe.runMonteCarlo(markov.transitionMatrix, markov.stateReturns, markov.currentState, lastClose, { iterations: 1000, daysAhead: this.horizonDays, slPct: this.stopLossPct, tpPct: this.takeProfitPct });
           if (mc && mc.winRate != null && mc.winRateMC == null) mc.winRateMC = mc.winRate;
         }
       } catch (_) { mc = null; }

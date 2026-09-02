@@ -6123,8 +6123,8 @@ tr.empty td .empty-state {
   font-size: 13px !important;
   letter-spacing: 0.2px !important;
   border: none !important;
-  border-radius: 8px !important;
-  padding: 0 18px !important;
+  border-radius: 9999px !important;
+  padding: 0 20px !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -6405,20 +6405,25 @@ tr.empty td .empty-state {
   border: 1px solid rgba(255, 193, 7, 0.4);
 }
 
-.btn-track-action {
-  height: 28px;
-  padding: 0 10px;
-  font-size: 11px;
-  font-weight: 600;
-  background: #1e2333;
-  color: #a5b4fc;
-  border: 1px solid #2d3348;
-  border-radius: 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  transition: all 0.15s ease;
+.btn-track-action,
+.btn-track,
+.btn-table-action,
+.btn-save-track {
+  height: 30px !important;
+  padding: 0 14px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  background: #1e2538 !important;
+  color: #cbd5e1 !important;
+  border: 1px solid #333d59 !important;
+  border-radius: 9999px !important;
+  cursor: pointer !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  transition: all 0.2s ease-in-out !important;
+  white-space: nowrap !important;
 }
 
 .btn-track-action:hover {
@@ -6611,8 +6616,117 @@ tr.empty td .empty-state {
   gap: 12px;
 }
 
+/* ================================================================================
+   CORREÇÃO DE DADOS (HORIZONTE 35D, SL/TP) E UNIFORMIZAÇÃO DE UI (MARGENS E BOTÕES PÍLULA)
+   ================================================================================ */
 
+/* 1.1 Contentor Principal e Espaçamento Periférico (Descolar das Laterais) */
+.workstation-container,
+.main-content,
+#tab-workstation,
+#tab-alpha-quant-engine,
+.tab-pane,
+.tab-content {
+  padding: 24px 32px 40px 32px !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
 
+/* 1.2 Grelha dos Cartões Superiores */
+.metrics-cards-row,
+.kpi-cards-grid,
+.quant-4kpi-grid {
+  display: grid !important;
+  grid-template-columns: repeat(4, 1fr) !important;
+  gap: 16px !important;
+  margin: 16px 0 24px 0 !important;
+  width: 100% !important;
+}
 
+/* 1.3 Uniformização Absoluta de Botões no Formato PÍLULA */
+.workstation-container button:not(.tab-btn),
+#tab-workstation button:not(.tab-btn),
+#tab-alpha-quant-engine button:not(.tab-btn),
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-quant,
+.btn-action,
+.btn-run-engine,
+.btn-cancel,
+.btn-track,
+.btn-unified-quant,
+.btn-cancel-operation {
+  border-radius: 9999px !important;
+  height: 38px !important;
+  padding: 0 20px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  border: none !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease-in-out !important;
+  white-space: nowrap !important;
+}
 
+/* Preservar abas da barra superior */
+.tab-btn {
+  border-radius: 0 !important;
+  height: auto !important;
+}
 
+/* Botão Primário (Executar Motor Quantitativo) */
+.btn-primary,
+.btn-run-engine,
+.btn-unified-quant {
+  background: #2563eb !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35) !important;
+  border-radius: 9999px !important;
+}
+.btn-primary:hover,
+.btn-run-engine:hover,
+.btn-unified-quant:hover {
+  background: #1d4ed8 !important;
+}
+
+/* Botão Cancelar */
+.btn-cancel,
+.btn-cancel-operation {
+  background: #1e2230 !important;
+  border: 1px solid #2d3243 !important;
+  color: #94a3b8 !important;
+  border-radius: 9999px !important;
+}
+.btn-cancel:hover,
+.btn-cancel-operation:hover {
+  background: #2b3042 !important;
+  color: #ffffff !important;
+}
+
+/* Botão da Tabela (Guardar & Rastrear) */
+.btn-track,
+.btn-table-action,
+.btn-track-action,
+.btn-save-track {
+  height: 30px !important;
+  padding: 0 14px !important;
+  font-size: 11px !important;
+  border-radius: 9999px !important;
+  background: #1e2538 !important;
+  border: 1px solid #333d59 !important;
+  color: #cbd5e1 !important;
+}
+.btn-track:hover,
+.btn-table-action:hover,
+.btn-track-action:hover,
+.btn-save-track:hover {
+  background: #28324d !important;
+  border-color: #4f5f8a !important;
+  color: #ffffff !important;
+}

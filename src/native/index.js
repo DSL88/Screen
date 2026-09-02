@@ -3,7 +3,7 @@
 const { SL_PCT, TP_PCT } = require('../quant/markovEngine');
 
 const MC_ITERATIONS = 1000;
-const MC_DAYS_AHEAD = 20;
+const MC_DAYS_AHEAD = 35;
 
 let nativeModule = null;
 if (process.env.QUANT_FORCE_FALLBACK !== '1') {
@@ -63,9 +63,9 @@ function zeroedResult(iterations, tpPct, slPct) {
 
 function runMonteCarloJSFallback(matrix, returnsByState, currentState, startPrice, opts = {}) {
   const iterations = opts.iterations || MC_ITERATIONS;
-  const daysAhead = opts.daysAhead || MC_DAYS_AHEAD;
-  const slPct = opts.slPct != null ? opts.slPct : SL_PCT;
-  const tpPct = opts.tpPct != null ? opts.tpPct : TP_PCT;
+  const daysAhead = opts.daysAhead || opts.horizon || MC_DAYS_AHEAD;
+  const slPct = opts.slPct != null ? opts.slPct : (opts.sl != null ? opts.sl : SL_PCT);
+  const tpPct = opts.tpPct != null ? opts.tpPct : (opts.tp != null ? opts.tp : TP_PCT);
   const rng = opts.seed != null ? mulberry32(opts.seed >>> 0) : Math.random;
   const isShort = String(opts.side || 'LONG').toUpperCase() === 'SHORT';
 
@@ -169,6 +169,14 @@ module.exports = {
       return nativeModule.computeMarkovModel(bbPctArr, adxArr, window);
     }
     return null;
+  },
+  runMonteCarloJS(matrix, returns, currentState, startPrice, iterations = 1000, horizon = 35, sl = 0.024, tp = 0.048) {
+    return runMonteCarloJSFallback(matrix, returns, currentState, startPrice, {
+      iterations,
+      daysAhead: horizon,
+      slPct: sl,
+      tpPct: tp
+    });
   },
   _runMonteCarloJSFallback: runMonteCarloJSFallback
 };

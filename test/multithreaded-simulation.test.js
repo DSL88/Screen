@@ -32,7 +32,7 @@ test('Multithreading & C++ Quant Engine: verificação de módulos e componentes
   const currentState = 0;
   const startPrice = 100.0;
 
-  const res8Args = quant.runMonteCarlo(matrix, returns, currentState, startPrice, 500, 20, 0.014, 0.028);
+  const res8Args = quant.runMonteCarlo(matrix, returns, currentState, startPrice, 500, 35, 0.024, 0.048);
   assert.ok(res8Args, 'runMonteCarlo com 8 args deve retornar resultado válido');
   assert.ok(typeof res8Args.winRateMC === 'number', 'res.winRateMC deve ser numérico');
   assert.ok(typeof res8Args.mcApproved === 'boolean', 'res.mcApproved deve ser boolean');

@@ -53,7 +53,8 @@ test('migra schema legado, preserva metadata e é idempotente', { skip: !SQLITE_
   assert.ok(customColumns.includes('index_name'));
   assert.ok(db.db.prepare('PRAGMA table_info(stocks)').all().some(c => c.name === 'first_date'));
   assert.equal(db.getStockByTicker('ABC.LS').name, 'Nome antigo');
-  assert.equal(db.getActiveTrades()[0].stop_loss, 98.6);
+  assert.equal(db.getActiveTrades()[0].stop_loss, 97.6);
+  assert.ok(Math.abs(db.getActiveTrades()[0].take_profit - 104.8) < 1e-6);
 
   db.upsertStock({ ticker: 'ABC.LS', name: 'Nome novo', country: 'Portugal', indexName: 'PSI' });
   db.upsertStock({ ticker: 'ABC.LS', name: 'Nome novo 2', country: 'Portugal', indexName: 'PSI' });
