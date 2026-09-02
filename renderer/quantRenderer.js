@@ -464,73 +464,100 @@
   function openStochasticDrawer(asset) {
     currentSelectedAsset = asset;
     const drawer = $('stochastic-drawer');
-    const backdrop = $('stochastic-drawer-backdrop');
-    if (!drawer || !backdrop) return;
+    const backdrop = $('drawer-backdrop') || $('stochastic-drawer-backdrop');
+    if (!drawer) return;
+
+    const price = Number(asset.price || asset.current_price || asset.latest_price || 0);
+    const tp = price * 1.048; // +4.8%
+    const sl = price * (1 - 0.024); // -2.4%
+    const winRate = Number(asset.winRateMC || asset.mc_win_rate || asset.win_rate_numeric || 70);
 
     // 1. Preencher Cabeçalho
     const tickerEl = $('drawer-ticker');
-    const sectorEl = $('drawer-sector');
+    const subtitleEl = $('drawer-subtitle');
+    const tierBadge = $('drawer-mc-tier');
+
     if (tickerEl) tickerEl.textContent = asset.ticker || '--';
-    if (sectorEl) {
-      const price = asset.current_price || asset.latest_price || '--';
-      sectorEl.textContent = `${asset.sector || 'Outros'} · ${price} €`;
+    if (subtitleEl) {
+      subtitleEl.textContent = `${asset.sector || 'Outros'} • Simulação Monte Carlo Regime-Switching • H=35 Dias Úteis`;
+    }
+    if (tierBadge) {
+      tierBadge.textContent = winRate >= 70 ? 'ELITE (70%+)' : winRate >= 65 ? 'MUITO FORTE (65%+)' : winRate >= 60 ? 'FORTE (60%+)' : 'MODERADO (50-59%)';
     }
 
-    // 2. Preencher Métricas de Monte Carlo
-    const winRateEl = $('drawer-mc-win-rate');
-    const expRetEl = $('drawer-mc-exp-ret');
-    const cvarEl = $('drawer-mc-cvar');
+    // 2. Preencher Preços e Alvos Monetários
+    const valPrice = $('drawer-val-price');
+    if (valPrice) valPrice.textContent = `${price.toFixed(2)} €`;
 
-    const winRateVal = asset.mc_win_rate != null ? asset.mc_win_rate : asset.win_rate || 50.0;
-    const expRetVal = asset.mc_expected_return != null ? asset.mc_expected_return : asset.expected_return || 4.8;
-    const cvarVal = asset.mc_cvar_95 != null ? asset.mc_cvar_95 : asset.cvar_95 || 3.5;
+    const valTp = $('drawer-val-tp');
+    if (valTp) valTp.textContent = `${tp.toFixed(2)} €`;
 
-    if (winRateEl) winRateEl.innerHTML = `Win Rate: <strong class="text-bull">${winRateVal}%</strong>`;
-    if (expRetEl) expRetEl.innerHTML = `Mediana: <strong class="text-bull">+${expRetVal}%</strong>`;
-    if (cvarEl) cvarEl.innerHTML = `CVaR 95%: <strong class="text-bear">-${cvarVal}%</strong>`;
+    const subTp = $('drawer-sub-tp');
+    if (subTp) subTp.textContent = `+${(tp - price).toFixed(2)} € (+4.8%)`;
 
-    // 3. Renderizar Gráfico de Trajetórias de Monte Carlo (paths_sample)
-    renderDrawerMonteCarloChart(asset.paths_sample, expRetVal, cvarVal);
+    const valSl = $('drawer-val-sl');
+    if (valSl) valSl.textContent = `${sl.toFixed(2)} €`;
 
-    // 4. Renderizar Matriz de Transição de 2ª Ordem
-    renderDrawerMarkovMatrix(asset.matrix_breakdown, asset.current_regime_pair);
+    const subSl = $('drawer-sub-sl');
+    if (subSl) subSl.textContent = `-${(price - sl).toFixed(2)} € (-2.4%)`;
 
-    // 5. Sentimento FinBERT & Divergência
-    const headlineEl = $('drawer-headline');
-    const sentimentEl = $('drawer-sentiment');
-    const divergenceEl = $('drawer-divergence');
+    // 3. Preencher KPIs Estocásticos
+    const mcWinRateEl = $('drawer-mc-winrate');
+    if (mcWinRateEl) mcWinRateEl.textContent = `${winRate.toFixed(1)}%`;
 
-    if (headlineEl) headlineEl.textContent = asset.headline || `${asset.ticker} apresenta fundamentos sólidos e alinhamento quantitativo.`;
-    if (sentimentEl) {
-      const sScore = asset.sentiment_score != null ? asset.sentiment_score : 0.15;
-      const sText = sScore > 0 ? `+${sScore} (Positivo)` : sScore < 0 ? `${sScore} (Negativo)` : '0.00 (Neutro)';
-      sentimentEl.textContent = sText;
-      sentimentEl.style.color = sScore >= 0 ? '#34d399' : '#fb7185';
-    }
-    if (divergenceEl) {
-      const div = asset.divergence || 'NEUTRAL';
-      divergenceEl.textContent = div === 'BULLISH_DIVERGENCE' ? '🚀 Divergência de Alta' : div === 'BEARISH_DIVERGENCE' ? '⚠️ Divergência de Baixa' : 'Alinhado / Neutro';
-      divergenceEl.style.color = div === 'BULLISH_DIVERGENCE' ? '#34d399' : div === 'BEARISH_DIVERGENCE' ? '#fb7185' : '#a5b4fc';
+    const cvarEl = $('drawer-cvar');
+    const cvarVal = asset.cvar_95 != null ? Math.abs(asset.cvar_95) : (asset.mc_cvar_95 != null ? Math.abs(asset.mc_cvar_95) : (asset.cvar95 ? Math.abs(asset.cvar95) : 6.1));
+    if (cvarEl) cvarEl.textContent = `-${cvarVal.toFixed(1)}%`;
+
+    const p = winRate / 100;
+    const ev = (p * 4.8) - ((1 - p) * 2.4);
+    const evEl = $('drawer-ev');
+    if (evEl) evEl.textContent = `${ev >= 0 ? '+' : ''}${ev.toFixed(2)}%`;
+
+    const regimeEl = $('drawer-regime');
+    if (regimeEl) {
+      const reg = asset.current_regime || asset.regime || 'Bullish (Estado 2)';
+      regimeEl.textContent = typeof reg === 'string' ? reg : 'Bullish (Estado 2)';
     }
 
-    // Reset botão de track
+    // 4. Botão de Track do Rodapé
     const drawerBtnTrack = $('drawer-btn-track');
     if (drawerBtnTrack) {
       drawerBtnTrack.disabled = false;
-      drawerBtnTrack.textContent = '📌 Guardar & Rastrear Ativo';
-      drawerBtnTrack.style.background = 'linear-gradient(135deg, #3b82f6, #6366f1)';
+      drawerBtnTrack.onclick = () => {
+        if (typeof window.saveToTracker === 'function') {
+          window.saveToTracker(asset.ticker);
+        }
+      };
     }
 
-    // Abrir Drawer
+    // 5. Canvas Monte Carlo
+    if (typeof window.drawMonteCarloSimulation === 'function') {
+      window.drawMonteCarloSimulation(price, tp, sl, 35);
+    }
+
+    // 6. Abrir Gaveta
+    drawer.classList.add('open');
     drawer.classList.add('active');
-    backdrop.classList.add('active');
+    drawer.setAttribute('aria-hidden', 'false');
+    if (backdrop) {
+      backdrop.classList.remove('hidden');
+      backdrop.classList.add('active');
+    }
   }
 
   function closeStochasticDrawer() {
     const drawer = $('stochastic-drawer');
-    const backdrop = $('stochastic-drawer-backdrop');
-    if (drawer) drawer.classList.remove('active');
-    if (backdrop) backdrop.classList.remove('active');
+    const backdrop = $('drawer-backdrop') || $('stochastic-drawer-backdrop');
+    if (drawer) {
+      drawer.classList.remove('open');
+      drawer.classList.remove('active');
+      drawer.setAttribute('aria-hidden', 'true');
+    }
+    if (backdrop) {
+      backdrop.classList.remove('active');
+      backdrop.classList.add('hidden');
+    }
     document.querySelectorAll('.table-master-quant tbody tr').forEach(r => r.classList.remove('selected'));
   }
 

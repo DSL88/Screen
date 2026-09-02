@@ -76,3 +76,32 @@ test('Workstation CSS: desbloqueio de altura da Tabela Mestra de Recomendações
   assert.match(css, /#container-top-recommendations \.table-responsive[\s\S]*?min-height:\s*220px !important;/);
 });
 
+test('Stochastic Drawer: elementos, estilização e renderizador Canvas presentes', () => {
+  const html = fs.readFileSync(path.resolve('renderer/index.html'), 'utf8');
+  assert.match(html, /id=["']stochastic-drawer["']/);
+  assert.match(html, /id=["']drawer-backdrop["']/);
+  assert.match(html, /id=["']drawer-ticker["']/);
+  assert.match(html, /id=["']drawer-val-price["']/);
+  assert.match(html, /id=["']drawer-val-tp["']/);
+  assert.match(html, /id=["']drawer-val-sl["']/);
+  assert.match(html, /id=["']drawer-mc-winrate["']/);
+  assert.match(html, /id=["']drawer-cvar["']/);
+  assert.match(html, /id=["']drawer-ev["']/);
+  assert.match(html, /id=["']drawer-regime["']/);
+  assert.match(html, /id=["']drawer-montecarlo-canvas["']/);
+  assert.match(html, /id=["']drawer-btn-track["']/);
+
+  const css = fs.readFileSync(path.resolve('renderer/styles.css'), 'utf8');
+  assert.match(css, /\.stochastic-drawer/);
+  assert.match(css, /\.stochastic-drawer\.open/);
+  assert.match(css, /\.targets-grid/);
+  assert.match(css, /\.chart-canvas-wrapper/);
+
+  const js = fs.readFileSync(path.resolve('renderer/renderer.js'), 'utf8');
+  assert.match(js, /function openStochasticDrawer/);
+  assert.match(js, /function closeStochasticDrawer/);
+  assert.match(js, /function drawMonteCarloSimulation/);
+  assert.match(js, /window\.openStochasticDrawer = openStochasticDrawer/);
+});
+
+

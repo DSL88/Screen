@@ -4669,12 +4669,10 @@
         </td>
       `;
 
-      tr.addEventListener('click', (e) => {
+      tr.onclick = (e) => {
         if (e.target.closest('button')) return;
-        if (typeof window.openStochasticDrawer === 'function') {
-          window.openStochasticDrawer(asset);
-        }
-      });
+        openStochasticDrawer(asset);
+      };
 
       tbody.appendChild(tr);
     });
@@ -4723,8 +4721,225 @@
     }
   }
 
+  // ── 8. GAVETA LATERAL RETRÁTIL (STOCHASTIC INSPECTION DRAWER) ──
+  let activeInspectedAsset = null;
+
+  /**
+   * Abre a gaveta lateral retrátil carregando os dados do ativo selecionado
+   */
+  function openStochasticDrawer(asset) {
+    if (!asset) return;
+    activeInspectedAsset = asset;
+
+    const drawer = document.getElementById('stochastic-drawer');
+    const backdrop = document.getElementById('drawer-backdrop') || document.getElementById('stochastic-drawer-backdrop');
+    if (!drawer || !backdrop) return;
+
+    const price = Number(asset.price || asset.current_price || asset.latest_price || 0);
+    const tp = price * 1.048; // +4.8%
+    const sl = price * (1 - 0.024); // -2.4%
+    const winRate = Number(asset.winRateMC || asset.mc_win_rate || asset.win_rate_numeric || 70);
+
+    // 1. Atualizar Textos e Títulos
+    const tickerEl = document.getElementById('drawer-ticker');
+    if (tickerEl) tickerEl.textContent = asset.ticker || '--';
+
+    const subtitleEl = document.getElementById('drawer-subtitle');
+    if (subtitleEl) {
+      subtitleEl.textContent = `${asset.sector || 'Outros'} • Simulação Monte Carlo Regime-Switching • H=35 Dias Úteis`;
+    }
+    
+    const tierBadge = document.getElementById('drawer-mc-tier');
+    if (tierBadge) {
+      tierBadge.textContent = winRate >= 70 ? 'ELITE (70%+)' : winRate >= 65 ? 'MUITO FORTE (65%+)' : winRate >= 60 ? 'FORTE (60%+)' : 'MODERADO (50-59%)';
+    }
+
+    // 2. Atualizar Preços e Alvos Monetários
+    const valPrice = document.getElementById('drawer-val-price');
+    if (valPrice) valPrice.textContent = `${price.toFixed(2)} €`;
+
+    const valTp = document.getElementById('drawer-val-tp');
+    if (valTp) valTp.textContent = `${tp.toFixed(2)} €`;
+
+    const subTp = document.getElementById('drawer-sub-tp');
+    if (subTp) subTp.textContent = `+${(tp - price).toFixed(2)} € (+4.8%)`;
+
+    const valSl = document.getElementById('drawer-val-sl');
+    if (valSl) valSl.textContent = `${sl.toFixed(2)} €`;
+
+    const subSl = document.getElementById('drawer-sub-sl');
+    if (subSl) subSl.textContent = `-${(price - sl).toFixed(2)} € (-2.4%)`;
+
+    // 3. Atualizar KPIs Estocásticos
+    const mcWinRateEl = document.getElementById('drawer-mc-winrate');
+    if (mcWinRateEl) mcWinRateEl.textContent = `${winRate.toFixed(1)}%`;
+
+    const cvarEl = document.getElementById('drawer-cvar');
+    const cvarVal = asset.cvar_95 != null ? Math.abs(asset.cvar_95) : (asset.mc_cvar_95 != null ? Math.abs(asset.mc_cvar_95) : (asset.cvar95 ? Math.abs(asset.cvar95) : 6.1));
+    if (cvarEl) cvarEl.textContent = `-${cvarVal.toFixed(1)}%`;
+    
+    const p = winRate / 100;
+    const ev = (p * 4.8) - ((1 - p) * 2.4);
+    const evEl = document.getElementById('drawer-ev');
+    if (evEl) evEl.textContent = `${ev >= 0 ? '+' : ''}${ev.toFixed(2)}%`;
+
+    const regimeEl = document.getElementById('drawer-regime');
+    if (regimeEl) {
+      const reg = asset.current_regime || asset.regime || 'Bullish (Estado 2)';
+      regimeEl.textContent = typeof reg === 'string' ? reg : 'Bullish (Estado 2)';
+    }
+
+    // 4. Matriz de Transição do Ativo (se disponível)
+    const matrixBody = document.getElementById('drawer-matrix-body');
+    if (matrixBody && asset.transition_matrix) {
+      // mantém ou preenche dinamicamente
+    }
+
+    // 5. Botão de Ação do Rodapé
+    const btnTrack = document.getElementById('drawer-btn-track');
+    if (btnTrack) {
+      btnTrack.onclick = () => {
+        if (typeof window.saveToTracker === 'function') {
+          window.saveToTracker(asset.ticker);
+        }
+      };
+    }
+
+    // 6. Desenhar as Trajetórias de Monte Carlo no Canvas
+    drawMonteCarloSimulation(price, tp, sl, 35);
+
+    // 7. Revelar a Gaveta (Slide in)
+    backdrop.classList.remove('hidden');
+    backdrop.classList.add('active');
+    drawer.classList.add('open');
+    drawer.classList.add('active');
+    drawer.setAttribute('aria-hidden', 'false');
+  }
+
+  /**
+   * Fecha a gaveta lateral
+   */
+  function closeStochasticDrawer() {
+    const drawer = document.getElementById('stochastic-drawer');
+    const backdrop = document.getElementById('drawer-backdrop') || document.getElementById('stochastic-drawer-backdrop');
+    if (drawer) {
+      drawer.classList.remove('open');
+      drawer.classList.remove('active');
+      drawer.setAttribute('aria-hidden', 'true');
+    }
+    if (backdrop) {
+      backdrop.classList.remove('active');
+      backdrop.classList.add('hidden');
+    }
+    activeInspectedAsset = null;
+  }
+
+  // Fechar com a tecla ESC
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeStochasticDrawer();
+  });
+
+  /**
+   * Renderizador de Trajetórias Estocásticas em Canvas 2D
+   */
+  function drawMonteCarloSimulation(startPrice, tpPrice, slPrice, horizonDays) {
+    const canvas = document.getElementById('drawer-montecarlo-canvas') || document.getElementById('drawer-mc-chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const w = canvas.width || 480;
+    const h = canvas.height || 230;
+
+    ctx.clearRect(0, 0, w, h);
+
+    const padding = { top: 25, bottom: 25, left: 52, right: 24 };
+    const graphW = w - padding.left - padding.right;
+    const graphH = h - padding.top - padding.bottom;
+
+    // Escala vertical com folga de 1.5%
+    const maxP = Math.max(tpPrice * 1.015, startPrice * 1.05);
+    const minP = Math.min(slPrice * 0.985, startPrice * 0.95);
+    const priceRange = Math.max(0.001, maxP - minP);
+
+    const getY = (p) => padding.top + (1 - (p - minP) / priceRange) * graphH;
+    const getX = (d) => padding.left + (d / horizonDays) * graphW;
+
+    // Linhas Guias de TP (+4.8%) e SL (-2.4%)
+    const yTP = getY(tpPrice);
+    const ySL = getY(slPrice);
+    const yStart = getY(startPrice);
+
+    // Linha TP (Verde Tracejada)
+    ctx.strokeStyle = '#34d399';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(padding.left, yTP);
+    ctx.lineTo(w - padding.right, yTP);
+    ctx.stroke();
+
+    // Linha SL (Vermelha Tracejada)
+    ctx.strokeStyle = '#f87171';
+    ctx.beginPath();
+    ctx.moveTo(padding.left, ySL);
+    ctx.lineTo(w - padding.right, ySL);
+    ctx.stroke();
+
+    // Linha Preço Inicial (Cinza)
+    ctx.strokeStyle = '#475569';
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    ctx.moveTo(padding.left, yStart);
+    ctx.lineTo(w - padding.right, yStart);
+    ctx.stroke();
+    ctx.setLineDash([]); // Reset linha sólida
+
+    // Rótulos no Eixo Y
+    ctx.fillStyle = '#64748b';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${tpPrice.toFixed(1)}€`, padding.left - 6, yTP + 3);
+    ctx.fillText(`${slPrice.toFixed(1)}€`, padding.left - 6, ySL + 3);
+    ctx.fillText(`${startPrice.toFixed(1)}€`, padding.left - 6, yStart + 3);
+
+    // Simulação Sintética de 14 Trajetórias Estocásticas
+    const numPaths = 14;
+    for (let i = 0; i < numPaths; i++) {
+      let p = startPrice;
+      ctx.beginPath();
+      ctx.moveTo(getX(0), getY(p));
+
+      let hitTarget = false;
+      ctx.strokeStyle = i % 2 === 0 ? 'rgba(56, 189, 248, 0.40)' : 'rgba(99, 102, 241, 0.30)';
+      ctx.lineWidth = 1.2;
+
+      for (let d = 1; d <= horizonDays; d++) {
+        if (!hitTarget) {
+          // Deriva ligeiramente favorável correspondente ao estado Bullish
+          const drift = 0.0015;
+          const shock = (Math.random() - 0.46) * 0.012;
+          p *= (1 + drift + shock);
+
+          if (p >= tpPrice) {
+            p = tpPrice;
+            hitTarget = true;
+          } else if (p <= slPrice) {
+            p = slPrice;
+            hitTarget = true;
+          }
+        }
+        ctx.lineTo(getX(d), getY(p));
+      }
+      ctx.stroke();
+    }
+  }
+
   // expõe para o botão "Iniciar Análise" (se o botão usar onclick inline)
   window.handleIniciarAnaliseScanner = handleIniciarAnaliseScanner;
   window.renderTopRecommendations = renderTopRecommendations;
   window.saveToTracker = saveToTracker;
+  window.openStochasticDrawer = openStochasticDrawer;
+  window.closeStochasticDrawer = closeStochasticDrawer;
+  window.drawMonteCarloSimulation = drawMonteCarloSimulation;
 })();

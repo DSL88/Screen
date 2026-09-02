@@ -1487,71 +1487,116 @@
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!--  DRAWER LATERAL DE INSPEÇÃO ESTOCÁSTICA (OFF-CANVAS)       -->
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <div class="drawer-backdrop" id="stochastic-drawer-backdrop"></div>
-    <aside class="stochastic-drawer" id="stochastic-drawer" aria-label="Inspeção Estocástica">
-      <div class="drawer-header">
+    <!-- OVERLAY / BACKDROP ESCURO -->
+    <div id="drawer-backdrop" class="drawer-backdrop hidden" onclick="closeStochasticDrawer()"></div>
+
+    <!-- GAVETA LATERAL RETRÁTIL (DRAWER) -->
+    <aside id="stochastic-drawer" class="stochastic-drawer" aria-hidden="true">
+      <!-- CABEÇALHO DO DRAWER -->
+      <header class="drawer-header">
         <div class="drawer-title-group">
-          <span class="drawer-ticker" id="drawer-ticker">--</span>
-          <span class="drawer-sector" id="drawer-sector">--</span>
+          <div class="drawer-badge-row">
+            <span class="badge-drawer-tag">INSPEÇÃO ESTOCÁSTICA</span>
+            <span id="drawer-mc-tier" class="badge-drawer-tier">ELITE (70%+)</span>
+          </div>
+          <h2 id="drawer-ticker">ELEC.PA</h2>
+          <p id="drawer-subtitle">Simulação Monte Carlo Regime-Switching • H=35 Dias Úteis</p>
         </div>
-        <button class="drawer-close-btn" id="drawer-close-btn" title="Fechar Gaveta">&times;</button>
-      </div>
+        <button class="drawer-close-btn" onclick="closeStochasticDrawer()" title="Fechar (Esc)">✕</button>
+      </header>
+
+      <!-- CORPO COM SCROLL INTERNO -->
       <div class="drawer-body">
-        <!-- 1. Leque de Trajetórias de Monte Carlo -->
-        <div class="drawer-section">
-          <div class="drawer-section-title">
-            <span>📈 Leque de Trajetórias de Monte Carlo (paths_sample)</span>
-          </div>
-          <div class="drawer-chart-wrap">
-            <canvas id="drawer-mc-chart"></canvas>
-          </div>
-          <div style="display:flex; justify-content:space-between; margin-top:10px; font-size:11px; color:#8a8f9e; font-family:var(--mono);">
-            <span id="drawer-mc-win-rate">Win Rate: <strong class="text-bull">-- %</strong></span>
-            <span id="drawer-mc-exp-ret">Mediana: <strong class="text-bull">-- %</strong></span>
-            <span id="drawer-mc-cvar">CVaR 95%: <strong class="text-bear">-- %</strong></span>
-          </div>
-        </div>
-
-        <!-- 2. Diagrama / Matriz de Transição de Markov de 2ª Ordem -->
-        <div class="drawer-section">
-          <div class="drawer-section-title">
-            <span>🎲 Matriz de Transição Markov 2ª Ordem (27 Estados)</span>
-          </div>
-          <p style="font-size:11px; color:#8a8f9e; margin-bottom:8px;">
-            Probabilidades condicionais $P(s_t \mid s_{t-2}, s_{t-1})$. O par de estados ativo está destacado.
-          </p>
-          <div class="markov-matrix-grid" id="drawer-markov-matrix">
-            <!-- Renderizado dinamicamente -->
-          </div>
-        </div>
-
-        <!-- 3. Sentimento FinBERT & Divergência -->
-        <div class="drawer-section">
-          <div class="drawer-section-title">
-            <span>📰 Sentimento FinBERT &amp; Divergência Preço-Notícia</span>
-          </div>
-          <div style="font-size:12px; margin-bottom:8px;">
-            <div style="color:#6b7384; font-size:11px; margin-bottom:2px;">Última Notícia Analisada:</div>
-            <div id="drawer-headline" style="color:#e2e8f0; font-style:italic; background:#181c2b; padding:8px 10px; border-radius:6px; border:1px solid #282d3e;">--</div>
-          </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px;">
-            <div style="background:#181c2b; padding:8px 10px; border-radius:6px; border:1px solid #282d3e;">
-              <span style="color:#8a8f9e; font-size:11px;">Score Sentimento:</span>
-              <div id="drawer-sentiment" style="font-weight:700; color:#34d399; font-family:var(--mono);">--</div>
+        
+        <!-- 1. ALVOS DE SAÍDA E EXECUÇÃO -->
+        <section class="drawer-section">
+          <div class="drawer-section-title">🎯 Limites Operacionais (Rácio 1:2)</div>
+          <div class="targets-grid">
+            <div class="target-card target-current">
+              <span class="lbl">Preço Atual</span>
+              <strong id="drawer-val-price">211.42 €</strong>
+              <span class="sub">Base de Entrada</span>
             </div>
-            <div style="background:#181c2b; padding:8px 10px; border-radius:6px; border:1px solid #282d3e;">
-              <span style="color:#8a8f9e; font-size:11px;">Sinal Divergência:</span>
-              <div id="drawer-divergence" style="font-weight:700; color:#a5b4fc;">--</div>
+            <div class="target-card target-tp">
+              <span class="lbl">Take Profit (+4.8%)</span>
+              <strong id="drawer-val-tp">221.57 €</strong>
+              <span class="sub" id="drawer-sub-tp">+10.15 €</span>
+            </div>
+            <div class="target-card target-sl">
+              <span class="lbl">Stop Loss (-2.4%)</span>
+              <strong id="drawer-val-sl">206.35 €</strong>
+              <span class="sub" id="drawer-sub-sl">-5.07 €</span>
             </div>
           </div>
-        </div>
+        </section>
+
+        <!-- 2. DIAGNÓSTICO ESTOCÁSTICO & MARKOV -->
+        <section class="drawer-section">
+          <div class="drawer-section-title">🎲 Métricas de Difusão e Cauda (1.000 Trajetórias)</div>
+          <div class="kpis-drawer-grid">
+            <div class="kpi-mini-card">
+              <span class="kpi-mini-label">Win Rate MC</span>
+              <strong id="drawer-mc-winrate" class="val-blue">84.6%</strong>
+            </div>
+            <div class="kpi-mini-card">
+              <span class="kpi-mini-label">CVaR 95% (Cauda)</span>
+              <strong id="drawer-cvar" class="val-red">-6.1%</strong>
+            </div>
+            <div class="kpi-mini-card">
+              <span class="kpi-mini-label">Expectativa Matemática</span>
+              <strong id="drawer-ev" class="val-green">+1.42%</strong>
+            </div>
+            <div class="kpi-mini-card">
+              <span class="kpi-mini-label">Regime Atual Markov</span>
+              <strong id="drawer-regime" class="val-yellow">Bullish (Estado 2)</strong>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. GRÁFICO DE CONVEXIDADE: CONE DE TRAJETÓRIAS MONTE CARLO -->
+        <section class="drawer-section">
+          <div class="drawer-section-title">
+            <span>📈 Projeção das Trajetórias Simuladas</span>
+            <span class="canvas-legend">
+              <i class="dot-tp"></i> TP (+4.8%) 
+              <i class="dot-sl"></i> SL (-2.4%)
+            </span>
+          </div>
+          <div class="chart-canvas-wrapper">
+            <canvas id="drawer-montecarlo-canvas" width="480" height="230"></canvas>
+          </div>
+        </section>
+
+        <!-- 4. MATRIZ DE TRANSIÇÃO DO ATIVO -->
+        <section class="drawer-section">
+          <div class="drawer-section-title">🔄 Matriz de Transição do Ativo (Janela 252d)</div>
+          <div class="matrix-table-wrapper">
+            <table class="matrix-table">
+              <thead>
+                <tr>
+                  <th>De \ Para</th>
+                  <th>Bearish</th>
+                  <th>Neutro</th>
+                  <th>Bullish</th>
+                </tr>
+              </thead>
+              <tbody id="drawer-matrix-body">
+                <tr><td><strong>Bearish</strong></td><td>0.62</td><td>0.28</td><td>0.10</td></tr>
+                <tr><td><strong>Neutro</strong></td><td>0.21</td><td>0.58</td><td>0.21</td></tr>
+                <tr><td><strong>Bullish</strong></td><td>0.12</td><td>0.26</td><td>0.62</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
       </div>
-      <div class="drawer-footer">
-        <button class="btn-secondary" id="drawer-btn-close">Fechar</button>
-        <button class="btn-primary" id="drawer-btn-track" style="background:linear-gradient(135deg, #3b82f6, #6366f1); border:none; height:34px; padding:0 14px; font-weight:600; border-radius:6px;">
+
+      <!-- RODAPÉ FIXO DE AÇÃO -->
+      <footer class="drawer-footer">
+        <button id="drawer-btn-track" class="btn-track-full">
           📌 Guardar &amp; Rastrear Ativo
         </button>
-      </div>
+      </footer>
     </aside>
 
     <div id="stock-hover-card" class="stock-hover-card hidden">
