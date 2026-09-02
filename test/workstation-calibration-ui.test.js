@@ -70,3 +70,9 @@ test('Workstation HTML & JS: Tabela Mestra de Recomendações presente e renderi
   assert.match(quantJs, /renderTopRecommendations\(recList\)/);
 });
 
+test('Workstation CSS: desbloqueio de altura da Tabela Mestra de Recomendações', () => {
+  const css = fs.readFileSync(path.resolve('renderer/styles.css'), 'utf8');
+  assert.match(css, /#container-top-recommendations[\s\S]*?min-height:\s*320px !important;/);
+  assert.match(css, /#container-top-recommendations \.table-responsive[\s\S]*?min-height:\s*220px !important;/);
+});
+

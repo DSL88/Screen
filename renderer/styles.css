@@ -6730,3 +6730,54 @@ tr.empty td .empty-state {
   border-color: #4f5f8a !important;
   color: #ffffff !important;
 }
+
+/* ================================================================================
+   DESBLOQUEIO DE ALTURA DA TABELA MESTRA DE RECOMENDAÇÕES
+   ================================================================================ */
+
+/* Desbloqueio e Expansão da Tabela Mestra */
+#container-top-recommendations,
+.card-recommendations-master {
+  display: block !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 320px !important;
+  max-height: none !important;
+  flex: none !important;
+  flex-shrink: 0 !important;
+  overflow: visible !important;
+  background: #11151f !important;
+  border: 1px solid #232b3e !important;
+  border-radius: 12px !important;
+  padding: 20px 24px !important;
+  margin-bottom: 28px !important;
+  box-sizing: border-box !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
+}
+
+/* Área de Rolagem Horizontal Segura para a Tabela */
+#container-top-recommendations .table-responsive {
+  width: 100% !important;
+  height: auto !important;
+  min-height: 220px !important;
+  max-height: none !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  display: block !important;
+}
+
+/* Tabela e Linhas */
+.table-master-recommendations {
+  width: 100% !important;
+  border-collapse: collapse !important;
+}
+
+.table-master-recommendations thead tr {
+  height: 38px !important;
+  border-bottom: 1px solid #1e2538 !important;
+}
+
+.table-master-recommendations tbody tr {
+  height: 48px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
