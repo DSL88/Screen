@@ -229,36 +229,43 @@
         </div>
 
         <!-- TABELA MESTRA DE RECOMENDAÇÕES (TOP BUY LIST) -->
-        <div class="master-table-card">
-          <div class="master-table-header">
-            <div class="master-table-title">
-              <h3>🎯 Tabela Mestra de Recomendações (Top Buy List)</h3>
-              <span class="master-table-count-badge" id="master-table-count">0 Ativos Selecionados</span>
+        <div class="card-recommendations-master master-table-card" id="container-top-recommendations" style="background: #11151f; border: 1px solid #232b3e; border-radius: 12px; padding: 18px 24px; margin-bottom: 24px; box-shadow: 0 8px 24px rgba(0,0,0,0.35);">
+          
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span style="font-size: 15px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+                📌 Tabela Mestra de Recomendações (Top Buy List)
+              </span>
+              <span class="badge-count-pill master-table-count-badge" id="badge-top-count" style="background: #1e293b; color: #38bdf8; font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 9999px; border: 1px solid #334155;">
+                5 Ativos Ordenados por Convicção
+              </span>
+              <span class="master-table-count-badge" id="master-table-count" style="display: none;"></span>
             </div>
-            <div class="master-table-actions">
-              <span style="font-size: 11px; color: #8a8f9e;">💡 Clica numa linha para abrir a inspeção estocástica lateral</span>
-            </div>
+            <span style="font-size: 11px; color: #64748b;">
+              💡 Clica numa linha para abrir a inspeção estocástica lateral
+            </span>
           </div>
-          <div class="table-responsive" style="max-height: 480px; overflow-y: auto;">
-            <table class="table-master-quant" id="table-master-recommendations">
+
+          <div class="table-responsive" style="overflow-x: auto; max-height: 480px; overflow-y: auto;">
+            <table class="table-master-recommendations table-master-quant" id="table-master-recommendations" style="width: 100%; border-collapse: collapse; font-size: 12px;">
               <thead>
-                <tr>
-                  <th>Ticker</th>
-                  <th>Setor</th>
-                  <th style="text-align:right;">Preço Atual</th>
-                  <th style="text-align:right;">Target (+4.8%)</th>
-                  <th style="text-align:right;">Stop Loss (-2.4%)</th>
-                  <th>Win Rate MC</th>
-                  <th style="text-align:right;">CVaR 95%</th>
-                  <th style="text-align:right;">Graham Score</th>
-                  <th style="text-align:right;">Alpha Purificado</th>
-                  <th style="text-align:center;">Ação</th>
+                <tr style="border-bottom: 1px solid #1e2538; color: #64748b; text-align: left; height: 36px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">
+                  <th style="padding: 8px 12px;">TICKER</th>
+                  <th style="padding: 8px 12px;">SETOR</th>
+                  <th style="padding: 8px 12px; text-align: right;">PREÇO ATUAL</th>
+                  <th style="padding: 8px 12px; text-align: right; color: #34d399;">TARGET (+4.8%)</th>
+                  <th style="padding: 8px 12px; text-align: right; color: #f87171;">STOP LOSS (-2.4%)</th>
+                  <th style="padding: 8px 12px; text-align: center;">WIN RATE MC</th>
+                  <th style="padding: 8px 12px; text-align: right;">CVAR 95%</th>
+                  <th style="padding: 8px 12px; text-align: right;">GRAHAM SCORE</th>
+                  <th style="padding: 8px 12px; text-align: right;">ALPHA PURIFICADO</th>
+                  <th style="padding: 8px 12px; text-align: center;">AÇÃO</th>
                 </tr>
               </thead>
-              <tbody id="master-recommendations-tbody">
+              <tbody id="tbody-top-recommendations">
                 <tr>
-                  <td colspan="10" style="text-align:center; color:#6b7384; padding:32px;">
-                    Clica em "Executar Motor Quantitativo Unificado" para calcular o ranking estocástico.
+                  <td colspan="10" style="text-align: center; color: #64748b; padding: 24px;">
+                    A aguardar execução do Motor Quantitativo Unificado...
                   </td>
                 </tr>
               </tbody>

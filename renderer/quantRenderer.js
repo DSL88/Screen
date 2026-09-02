@@ -259,7 +259,15 @@
     updateGlobalSymmetricKPIs(summary, phases);
 
     // 2. Tabela Mestra de Recomendações (Top Buy List)
-    renderMasterRecommendationsTable(recs.length > 0 ? recs : assets);
+    const recList = (data.top_recommendations && data.top_recommendations.length > 0)
+      ? data.top_recommendations
+      : (recs.length > 0 ? recs : assets);
+
+    if (typeof window.renderTopRecommendations === 'function') {
+      window.renderTopRecommendations(recList);
+    } else {
+      renderMasterRecommendationsTable(recList);
+    }
 
     // 3. Renderizar Fases Detalhadas
     if (phases.phase_1_fundamentals) renderPhase1Fundamentals(phases.phase_1_fundamentals);
@@ -318,8 +326,8 @@
   // ═══════════════════════════════════════════════════════════
 
   function renderMasterRecommendationsTable(assetsList) {
-    const tbody = $('master-recommendations-tbody') || $('recommendations-table-body');
-    const countBadge = $('master-table-count');
+    const tbody = $('tbody-top-recommendations') || $('master-recommendations-tbody') || $('recommendations-table-body');
+    const countBadge = $('badge-top-count') || $('master-table-count');
     if (!tbody) return;
     tbody.innerHTML = '';
 

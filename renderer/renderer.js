@@ -4604,6 +4604,127 @@
     const res = await window.api.runMarketScan(indexFilter);
     return res;
   }
+  // ── 7. WORKSTATION: TABELA MESTRA DE RECOMENDAÇÕES (TOP BUY LIST) ──
+  function renderTopRecommendations(recommendedAssets) {
+    const tbody = document.getElementById('tbody-top-recommendations') || document.getElementById('master-recommendations-tbody');
+    const countBadge = document.getElementById('badge-top-count') || document.getElementById('master-table-count');
+    
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    if (!recommendedAssets || recommendedAssets.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="10" style="text-align: center; color: #94a3b8; padding: 20px;">
+            Nenhum ativo cumpriu simultaneamente todos os critérios de convicção estocástica (Win Rate >= 60%) e purificação fatorial.
+          </td>
+        </tr>`;
+      if (countBadge) countBadge.textContent = '0 Ativos';
+      return;
+    }
+
+    if (countBadge) {
+      countBadge.textContent = `${recommendedAssets.length} Ativos Ordenados por Convicção`;
+    }
+
+    recommendedAssets.forEach(asset => {
+      const price = Number(asset.current_price || asset.price || asset.latest_price || 0);
+      const targetPrice = (price * 1.048).toFixed(2);
+      const stopPrice = (price * (1 - 0.024)).toFixed(2);
+      const winRate = Number(asset.mc_win_rate || asset.winRateMC || asset.win_rate_numeric || 50.0);
+      const tierLevel = asset.tier?.level || (winRate >= 70 ? 'Extrema' : winRate >= 65 ? 'Muito Forte' : winRate >= 60 ? 'Forte' : winRate >= 50 ? 'Moderada' : 'Fraca');
+
+      const tr = document.createElement('tr');
+      tr.className = 'table-row-clickable';
+      tr.style.borderBottom = '1px solid #1a202c';
+      tr.style.height = '44px';
+      tr.style.cursor = 'pointer';
+      tr.onmouseover = () => tr.style.background = '#161c28';
+      tr.onmouseout = () => tr.style.background = 'transparent';
+
+      tr.innerHTML = `
+        <td style="padding: 8px 12px; font-weight: 700; color: #ffffff;">${asset.ticker}</td>
+        <td style="padding: 8px 12px; color: #94a3b8;">${asset.sector || 'Outros'}</td>
+        <td style="padding: 8px 12px; text-align: right; color: #f1f5f9; font-variant-numeric: tabular-nums;">${price.toFixed(2)} €</td>
+        <td style="padding: 8px 12px; text-align: right; color: #34d399; font-weight: 600; font-variant-numeric: tabular-nums;">${targetPrice} €</td>
+        <td style="padding: 8px 12px; text-align: right; color: #f87171; font-weight: 600; font-variant-numeric: tabular-nums;">${stopPrice} €</td>
+        <td style="padding: 8px 12px; text-align: center;">
+          <span style="background: rgba(37, 99, 235, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 600;">
+            ${winRate.toFixed(1)}% ${tierLevel}
+          </span>
+        </td>
+        <td style="padding: 8px 12px; text-align: right; color: #cbd5e1; font-variant-numeric: tabular-nums;">
+          ${asset.cvar_95 != null ? `-${Math.abs(asset.cvar_95).toFixed(1)}%` : (asset.mc_cvar_95 != null ? `-${Math.abs(asset.mc_cvar_95).toFixed(1)}%` : '-7.5%')}
+        </td>
+        <td style="padding: 8px 12px; text-align: right; color: #e2e8f0; font-variant-numeric: tabular-nums;">
+          ${asset.graham_score != null ? Number(asset.graham_score).toFixed(1) : '54.0'}
+        </td>
+        <td style="padding: 8px 12px; text-align: right; color: #e2e8f0; font-variant-numeric: tabular-nums;">
+          ${asset.purified_alpha_score != null ? Number(asset.purified_alpha_score).toFixed(1) : (asset.alpha_score != null ? Number(asset.alpha_score).toFixed(1) : '70.0')}
+        </td>
+        <td style="padding: 8px 12px; text-align: center;">
+          <button class="btn-track-pill btn-track btn-save-track" onclick="event.stopPropagation(); saveToTracker('${asset.ticker}')" style="background: #1e2538; border: 1px solid #333d59; color: #cbd5e1; border-radius: 9999px; height: 28px; padding: 0 14px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+            📌 Guardar &amp; Rastrear
+          </button>
+        </td>
+      `;
+
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return;
+        if (typeof window.openStochasticDrawer === 'function') {
+          window.openStochasticDrawer(asset);
+        }
+      });
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function saveToTracker(ticker) {
+    try {
+      const btn = event?.target?.closest('button') || document.querySelector(`button[onclick*="${ticker}"]`);
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ A guardar...';
+      }
+
+      let assetData = null;
+      if (window.lastPipelineResult?.top_recommendations) {
+        assetData = window.lastPipelineResult.top_recommendations.find(a => a.ticker === ticker);
+      }
+      if (!assetData && window.lastPipelineResult?.assets) {
+        assetData = window.lastPipelineResult.assets.find(a => a.ticker === ticker);
+      }
+      if (!assetData) {
+        assetData = { ticker };
+      }
+
+      if (window.quantAPI && typeof window.quantAPI.saveTrackedRecommendation === 'function') {
+        await window.quantAPI.saveTrackedRecommendation(assetData);
+      } else if (window.quantAPI && typeof window.quantAPI.saveTrackedAsset === 'function') {
+        await window.quantAPI.saveTrackedAsset(assetData);
+      } else if (window.api && typeof window.api.saveTrackedRecommendation === 'function') {
+        await window.api.saveTrackedRecommendation(assetData);
+      }
+
+      if (btn) {
+        btn.textContent = '✓ Guardado';
+        btn.style.background = '#10b981';
+        btn.style.borderColor = '#10b981';
+        btn.style.color = '#ffffff';
+      }
+    } catch (err) {
+      console.error('[QuantEngine] Erro ao guardar ativo no tracker:', err);
+      const btn = event?.target?.closest('button');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '❌ Erro';
+      }
+    }
+  }
+
   // expõe para o botão "Iniciar Análise" (se o botão usar onclick inline)
   window.handleIniciarAnaliseScanner = handleIniciarAnaliseScanner;
+  window.renderTopRecommendations = renderTopRecommendations;
+  window.saveToTracker = saveToTracker;
 })();

@@ -54,3 +54,19 @@ test('Python Engine: horizonte padrão 35 dias e fórmulas de target/stop loss',
   assert.match(pyCode, /target_p = round\(curr_p \* \(1\.0 \+ 0\.048\), 2\)/);
   assert.match(pyCode, /stop_l = round\(curr_p \* \(1\.0 - 0\.024\), 2\)/);
 });
+
+test('Workstation HTML & JS: Tabela Mestra de Recomendações presente e renderizável', () => {
+  const html = fs.readFileSync(path.resolve('renderer/index.html'), 'utf8');
+  assert.match(html, /id=["']container-top-recommendations["']/);
+  assert.match(html, /id=["']tbody-top-recommendations["']/);
+  assert.match(html, /id=["']badge-top-count["']/);
+
+  const rendererJs = fs.readFileSync(path.resolve('renderer/renderer.js'), 'utf8');
+  assert.match(rendererJs, /function renderTopRecommendations/);
+  assert.match(rendererJs, /window\.renderTopRecommendations = renderTopRecommendations/);
+  assert.match(rendererJs, /window\.saveToTracker = saveToTracker/);
+
+  const quantJs = fs.readFileSync(path.resolve('renderer/quantRenderer.js'), 'utf8');
+  assert.match(quantJs, /renderTopRecommendations\(recList\)/);
+});
+
