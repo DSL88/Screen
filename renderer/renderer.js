@@ -16,6 +16,8 @@
   }
 
   let tabsNavigationBound = false;
+  let activeTabNorm = '';
+  const tabsLoadedOnce = new Set();
 
   function initTabsNavigation() {
     const tabButtons = document.querySelectorAll('.nav-tab, .tab-button, .tab-btn, [data-tab]');
@@ -26,12 +28,17 @@
       return;
     }
 
-    function switchTab(targetTabId) {
+    function switchTab(targetTabId, opts) {
       if (!targetTabId) return;
+      const force = !!(opts && opts.force);
 
       // Normaliza ID (remove prefixos se existirem)
       const cleanId = String(targetTabId).replace(/^#|^tab-/, '');
       const normTarget = normalizeTabIdentifier(cleanId);
+
+      // Se a aba já está ativa e não foi forçada, não faz nada (sem restart de animação/paint)
+      if (!force && normTarget === activeTabNorm) return;
+      activeTabNorm = normTarget;
 
       // 1. Atualizar estado visual de todos os botões
       tabButtons.forEach(btn => {
@@ -66,27 +73,41 @@
         }
       });
 
-      // 3. Callback reativo por aba (sem quebrar se a função não existir)
-      try {
-        if ((cleanId === 'my-list' || normTarget === 'mylist') && typeof window.refreshMyListTable === 'function') {
-          window.refreshMyListTable();
-        } else if (normTarget === 'mylist' && typeof reloadMyListFromDatabase === 'function') {
-          reloadMyListFromDatabase();
-        } else if ((cleanId === 'scanner' || normTarget === 'alpha-quant-engine') && typeof window.initScannerView === 'function') {
-          window.initScannerView();
-        } else if (normTarget === 'simulation' && typeof window.initSimulationView === 'function') {
-          window.initSimulationView();
-        } else if (normTarget === 'simulation' && typeof window.restoreSimulationViewState === 'function') {
-          window.restoreSimulationViewState();
-        } else if (normTarget === 'portfolio' && typeof loadPortfolio === 'function') {
-          loadPortfolio();
-        } else if (normTarget === 'history' && typeof loadHistory === 'function') {
-          loadHistory();
-        } else if ((cleanId === 'tracker' || normTarget === 'quant-tracker') && typeof loadTrackerDashboard === 'function') {
-          loadTrackerDashboard();
+      // 3. Callback reativo por aba — adiado para depois do primeiro paint
+      //    (a troca de aba pinta de imediato; o conteúdo chega sem bloquear a animação)
+      const shouldLoad = force || !tabsLoadedOnce.has(normTarget);
+      tabsLoadedOnce.add(normTarget);
+      if (!shouldLoad) return;
+
+      const runTabCallback = () => {
+        try {
+          if (normTarget === 'mylist' && typeof reloadMyListFromDatabase === 'function') {
+            reloadMyListFromDatabase().catch(err => console.warn('[Tabs] My List reload falhou:', err));
+          } else if (normTarget === 'alpha-quant-engine' && typeof window.initScannerView === 'function') {
+            window.initScannerView();
+          } else if (normTarget === 'simulation') {
+            if (typeof window.initSimulationView === 'function') {
+              window.initSimulationView();
+            } else if (typeof window.restoreSimulationViewState === 'function') {
+              window.restoreSimulationViewState();
+            }
+          } else if (normTarget === 'portfolio' && typeof loadPortfolio === 'function') {
+            loadPortfolio();
+          } else if (normTarget === 'history' && typeof loadHistory === 'function') {
+            loadHistory();
+          } else if (normTarget === 'quant-tracker' && typeof loadTrackerDashboard === 'function') {
+            loadTrackerDashboard();
+          }
+        } catch (cbErr) {
+          console.warn(`[Tabs Callback Warning] Erro não-bloqueante ao carregar aba ${normTarget}:`, cbErr);
         }
-      } catch (cbErr) {
-        console.warn(`[Tabs Callback Warning] Erro não-bloqueante ao carregar aba ${cleanId}:`, cbErr);
+      };
+
+      // Dois rAF: garante que o browser completou a animação de entrada antes do trabalho pesado
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => requestAnimationFrame(runTabCallback));
+      } else {
+        setTimeout(runTabCallback, 32);
       }
     }
 
@@ -115,6 +136,12 @@
 
     window.switchTab = switchTab;
   }
+
+  // Invalida o cache de dados de uma aba (chamar quando dados mudam fora da própria aba)
+  window.markTabStale = function (tabId) {
+    const norm = normalizeTabIdentifier(String(tabId || '').replace(/^#|^tab-/, ''));
+    if (norm) tabsLoadedOnce.delete(norm);
+  };
 
   window.initTabsNavigation = initTabsNavigation;
 
@@ -2021,6 +2048,8 @@
   async function loadInitial() {
     try {
       await reloadMyListFromDatabase();
+      // My List já foi renderizada no arranque: evita novo fetch completo no 1º clique na aba
+      tabsLoadedOnce.add('mylist');
       void refreshExpectedTradingDay();
 
       const paramsRes = await window.api.getParams();
@@ -3320,10 +3349,12 @@
       if (btnClearTrades) btnClearTrades.disabled = true;
       return;
     }
+    const frag = document.createDocumentFragment();
     for (const t of lastActiveTrades) {
       const state = lastStatesByTicker[t.ticker] || null;
-      portfolioBody.appendChild(renderPortfolioRow(t, state));
+      frag.appendChild(renderPortfolioRow(t, state));
     }
+    portfolioBody.appendChild(frag);
     if (btnClearTrades) btnClearTrades.disabled = false;
   }
 
@@ -3572,7 +3603,9 @@
           return dateB.localeCompare(dateA);
         });
         
-        sorted.forEach(t => historyBody.appendChild(renderHistoryRow(t)));
+        const frag = document.createDocumentFragment();
+        sorted.forEach(t => frag.appendChild(renderHistoryRow(t)));
+        historyBody.appendChild(frag);
         if (btnClearHistory) btnClearHistory.disabled = false;
       }
 
@@ -5032,6 +5065,7 @@
         btn.style.borderColor = '#10b981';
         btn.style.color = '#ffffff';
       }
+      if (typeof window.markTabStale === 'function') window.markTabStale('quant-tracker');
     } catch (err) {
       console.error('[QuantEngine] Erro ao guardar ativo no tracker:', err);
       const btn = event?.target?.closest('button');

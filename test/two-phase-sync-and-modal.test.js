@@ -230,7 +230,7 @@ test('Gestor central de abas e blindagem do arranque no renderer.js e index.html
 
   const rendererCode = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'renderer.js'), 'utf8');
   assert.match(rendererCode, /function initTabsNavigation\(\)/);
-  assert.match(rendererCode, /function switchTab\(targetTabId\)/);
+  assert.match(rendererCode, /function switchTab\(targetTabId(?:,\s*opts)?\)/);
   assert.match(rendererCode, /window\.initTabsNavigation\s*=\s*initTabsNavigation/);
   assert.match(rendererCode, /document\.addEventListener\('DOMContentLoaded'/);
   assert.match(rendererCode, /initTabsNavigation\(\);/);

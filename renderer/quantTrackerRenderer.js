@@ -200,7 +200,7 @@
       return;
     }
 
-    tierMatrix.forEach((t) => {
+    tbodyMatrix.innerHTML = tierMatrix.map((t) => {
       let diagClass = 'text-secondary';
       if (t.status_calibration === 'Calibrado com Sucesso') {
         diagClass = 'text-success fw-bold';
@@ -213,7 +213,7 @@
       const retSign = t.avg_return > 0 ? '+' : '';
       const retClass = t.avg_return >= 0 ? 'text-success' : 'text-danger';
 
-      const row = `
+      return `
         <tr>
           <td><strong>${t.tier_label}</strong></td>
           <td class="num-col">${t.suggestions_count}</td>
@@ -232,8 +232,7 @@
           </td>
         </tr>
       `;
-      tbodyMatrix.innerHTML += row;
-    });
+    }).join('');
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -287,7 +286,7 @@
       return;
     }
 
-    items.forEach((rec) => {
+    const rowsHtml = items.map((rec) => {
       // Estado badge (Pills limpas)
       let statusHtml = '';
       if (rec.status === 'TARGET_ATINGIDO') {
@@ -314,7 +313,7 @@
       else if (rec.mc_win_rate >= 50.0) badgeClass = 'bg-warning text-dark';
       else badgeClass = 'bg-danger';
 
-      const row = `
+      return `
         <tr>
           <td class="text-secondary" style="font-family: var(--mono); font-size: 12px;">${rec.recommendation_date}</td>
           <td><strong class="text-white" style="font-size: 1rem;">${rec.ticker}</strong></td>
@@ -334,8 +333,8 @@
           <td>${statusHtml}</td>
         </tr>
       `;
-      tbodyTracker.innerHTML += row;
     });
+    tbodyTracker.innerHTML = rowsHtml.join('');
   }
 
   // ═══════════════════════════════════════════════════════════

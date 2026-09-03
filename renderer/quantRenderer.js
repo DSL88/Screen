@@ -443,6 +443,7 @@
   }
 
   async function saveAssetRecommendation(assetData) {
+    const doSave = async () => {
     if (window.quantAPI && typeof window.quantAPI.saveTrackedRecommendation === 'function') {
       return await window.quantAPI.saveTrackedRecommendation(assetData);
     } else if (window.quantAPI && typeof window.quantAPI.saveTrackedAsset === 'function') {
@@ -455,6 +456,10 @@
       return await window.electronAPI.saveTrackedRecommendation(assetData);
     }
     throw new Error('Nenhum canal IPC para saveTrackedRecommendation disponível.');
+    };
+    const result = await doSave();
+    if (typeof window.markTabStale === 'function') window.markTabStale('quant-tracker');
+    return result;
   }
 
   // ═══════════════════════════════════════════════════════════
