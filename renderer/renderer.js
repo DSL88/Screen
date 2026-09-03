@@ -1,4 +1,131 @@
 (function () {
+  // ═══════════════════════════════════════════════════════════
+  // 1. GESTOR CENTRAL DE ABAS (TABS ROUTER BLINDADO)
+  // ═══════════════════════════════════════════════════════════
+
+  function normalizeTabIdentifier(id) {
+    if (!id) return '';
+    const clean = String(id).toLowerCase().replace(/^#|^tab-/, '').trim();
+    if (clean === 'my-list' || clean === 'mylist') return 'mylist';
+    if (clean === 'scanner' || clean === 'workstation' || clean === 'alpha-quant-engine' || clean === 'quant-pipeline') return 'alpha-quant-engine';
+    if (clean === 'tracker' || clean === 'quant-tracker') return 'quant-tracker';
+    if (clean === 'simulation' || clean === 'simulacao') return 'simulation';
+    if (clean === 'portfolio') return 'portfolio';
+    if (clean === 'history' || clean === 'historico') return 'history';
+    return clean;
+  }
+
+  let tabsNavigationBound = false;
+
+  function initTabsNavigation() {
+    const tabButtons = document.querySelectorAll('.nav-tab, .tab-button, .tab-btn, [data-tab]');
+    const tabContents = document.querySelectorAll('.tab-content, .tab-pane, [id^="tab-"]');
+
+    if (!tabButtons || tabButtons.length === 0) {
+      console.warn('[Tabs] Nenhum botão de aba encontrado no DOM.');
+      return;
+    }
+
+    function switchTab(targetTabId) {
+      if (!targetTabId) return;
+
+      // Normaliza ID (remove prefixos se existirem)
+      const cleanId = String(targetTabId).replace(/^#|^tab-/, '');
+      const normTarget = normalizeTabIdentifier(cleanId);
+
+      // 1. Atualizar estado visual de todos os botões
+      tabButtons.forEach(btn => {
+        const btnTab = (btn.getAttribute('data-tab') || btn.getAttribute('href') || '').replace(/^#|^tab-/, '');
+        const isMatch = btnTab === cleanId || normalizeTabIdentifier(btnTab) === normTarget;
+        if (isMatch) {
+          btn.classList.add('active');
+          btn.setAttribute('aria-selected', 'true');
+        } else {
+          btn.classList.remove('active');
+          btn.setAttribute('aria-selected', 'false');
+        }
+      });
+
+      // 2. Alternar visibilidade dos contentores
+      tabContents.forEach(content => {
+        const contentId = (content.id || content.getAttribute('data-tab-content') || '').replace(/^#|^tab-/, '');
+        const aliasId = (content.getAttribute('data-alias-tab') || '').replace(/^#|^tab-/, '');
+        const isMatch = contentId === cleanId || 
+                        aliasId === cleanId || 
+                        normalizeTabIdentifier(contentId) === normTarget ||
+                        normalizeTabIdentifier(aliasId) === normTarget;
+        
+        if (isMatch) {
+          content.classList.add('active');
+          content.classList.remove('hidden');
+          content.style.display = 'block';
+        } else {
+          content.classList.remove('active');
+          content.classList.add('hidden');
+          content.style.display = 'none';
+        }
+      });
+
+      // 3. Callback reativo por aba (sem quebrar se a função não existir)
+      try {
+        if ((cleanId === 'my-list' || normTarget === 'mylist') && typeof window.refreshMyListTable === 'function') {
+          window.refreshMyListTable();
+        } else if (normTarget === 'mylist' && typeof reloadMyListFromDatabase === 'function') {
+          reloadMyListFromDatabase();
+        } else if ((cleanId === 'scanner' || normTarget === 'alpha-quant-engine') && typeof window.initScannerView === 'function') {
+          window.initScannerView();
+        } else if (normTarget === 'simulation' && typeof window.initSimulationView === 'function') {
+          window.initSimulationView();
+        } else if (normTarget === 'simulation' && typeof window.restoreSimulationViewState === 'function') {
+          window.restoreSimulationViewState();
+        } else if (normTarget === 'portfolio' && typeof loadPortfolio === 'function') {
+          loadPortfolio();
+        } else if (normTarget === 'history' && typeof loadHistory === 'function') {
+          loadHistory();
+        } else if ((cleanId === 'tracker' || normTarget === 'quant-tracker') && typeof loadTrackerDashboard === 'function') {
+          loadTrackerDashboard();
+        }
+      } catch (cbErr) {
+        console.warn(`[Tabs Callback Warning] Erro não-bloqueante ao carregar aba ${cleanId}:`, cbErr);
+      }
+    }
+
+    // Registar o evento de clique nos botões das abas (blindado contra duplo registo)
+    if (!tabsNavigationBound) {
+      tabButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const target = btn.getAttribute('data-tab') || btn.getAttribute('href') || '';
+          try {
+            switchTab(target);
+          } catch (clickErr) {
+            console.error('[Tabs] Erro não-bloqueante ao trocar de aba:', clickErr);
+          }
+        });
+      });
+      tabsNavigationBound = true;
+    }
+
+    // Ativar por padrão a aba que já tiver a classe 'active' ou a primeira da lista
+    const activeBtn = Array.from(tabButtons).find(b => b.classList.contains('active')) || tabButtons[0];
+    if (activeBtn) {
+      const defaultTarget = activeBtn.getAttribute('data-tab') || activeBtn.getAttribute('href') || '';
+      switchTab(defaultTarget);
+    }
+
+    window.switchTab = switchTab;
+  }
+
+  window.initTabsNavigation = initTabsNavigation;
+
+  // A navegação é o PRIMEIRO módulo a arrancar (scripts no fim do body: DOM já parseado)
+  try {
+    initTabsNavigation();
+    console.log('✅ Router de abas registado com sucesso.');
+  } catch (navError) {
+    console.error('❌ Erro crítico ao iniciar navegação de abas:', navError);
+  }
+
   const btn = document.getElementById('btn-scan');
   const btnCancelScan = document.getElementById('btn-cancel-scan');
   const spinner = document.getElementById('spinner');
@@ -1512,7 +1639,7 @@
     });
 
     // Botão primário: "Adicionar à watchlist"
-    const btnSubmit = modal.querySelector('#btn-confirm-add-stock, button.btn-primary, button:has-text("Adicionar à watchlist")') ||
+    const btnSubmit = modal.querySelector('#btn-confirm-add-stock, button.btn-primary') ||
                       Array.from(modal.querySelectorAll('button')).find(b => b.textContent.includes('Adicionar à watchlist'));
 
     if (btnSubmit) {
@@ -1634,7 +1761,11 @@
     });
   }
 
-  bindManualModalEvents();
+  try {
+    bindManualModalEvents();
+  } catch (modalError) {
+    console.warn('Aviso: Falha isolada no modal de adição:', modalError);
+  }
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && modalAdd && !modalAdd.hidden) {
@@ -2979,27 +3110,26 @@
 
 
 
-  registerParamChangeListeners();
-  loadInitial();
+  try {
+    registerParamChangeListeners();
+  } catch (err) {
+    console.warn('Aviso: Falha ao associar listeners de parâmetros:', err);
+  }
+
+  try {
+    loadInitial();
+  } catch (err) {
+    console.warn('Aviso: Falha ao executar loadInitial:', err);
+  }
 
   // ═══════════════════════════════════════════════════════════
-  //  TABS
+  //  TABS (Centralizado em initTabsNavigation)
   // ═══════════════════════════════════════════════════════════
-  const tabBtns = document.querySelectorAll('.tab-btn');
-  const tabContents = document.querySelectorAll('.tab-content');
-
-  tabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      tabBtns.forEach(b => b.classList.remove('active'));
-      tabContents.forEach(c => c.classList.remove('active'));
-      btn.classList.add('active');
-      const target = document.getElementById('tab-' + btn.dataset.tab);
-      if (target) target.classList.add('active');
-      if (btn.dataset.tab === 'simulation' && typeof window.restoreSimulationViewState === 'function') {
-        window.restoreSimulationViewState();
-      }
-    });
-  });
+  try {
+    initTabsNavigation();
+  } catch (err) {
+    console.warn('Aviso: Falha ao invocar initTabsNavigation:', err);
+  }
 
   // ═══════════════════════════════════════════════════════════
   //  MODAL INVESTIR
@@ -5123,6 +5253,48 @@
         ctx.lineTo(getX(d), getY(p));
       }
       ctx.stroke();
+    }
+  }
+
+  function loadInitialStockData() {
+    if (typeof loadInitial === 'function') {
+      loadInitial();
+    }
+  }
+  window.loadInitialStockData = loadInitialStockData;
+
+  // ═══════════════════════════════════════════════════════════
+  // 2. BLINDAGEM DO ARRANQUE
+  // ═══════════════════════════════════════════════════════════
+  document.addEventListener('DOMContentLoaded', () => {
+    // 1. O gestor de abas arranca SEMPRE em primeiro lugar
+    try {
+      initTabsNavigation();
+      console.log('✅ Navegação por abas inicializada com sucesso.');
+    } catch (err) {
+      console.error('❌ Erro crítico ao iniciar navegação de abas:', err);
+    }
+
+    // 2. Os restantes módulos arrancam isolados em blocos try/catch
+    try {
+      if (typeof bindManualModalEvents === 'function') bindManualModalEvents();
+    } catch (err) {
+      console.warn('Aviso: Falha ao associar eventos do modal:', err);
+    }
+
+    try {
+      if (typeof loadInitialStockData === 'function') loadInitialStockData();
+    } catch (err) {
+      console.warn('Aviso: Falha ao carregar dados iniciais:', err);
+    }
+  });
+
+  // Se o DOM já tiver sido carregado antes do registo do listener, inicializa de imediato
+  if (document.readyState !== 'loading') {
+    try {
+      initTabsNavigation();
+    } catch (err) {
+      console.error('❌ Erro imediato ao iniciar navegação de abas:', err);
     }
   }
 

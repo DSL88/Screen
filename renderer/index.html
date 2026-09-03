@@ -100,19 +100,19 @@
     </aside>
 
     <main class="main">
-      <nav class="tab-nav">
-        <button class="tab-btn active" data-tab="alpha-quant-engine">Workstation Quantitativo</button>
-        <button class="tab-btn" data-tab="mylist">My List</button>
-        <button class="tab-btn" data-tab="portfolio">Monitorização de Investimentos</button>
-        <button class="tab-btn" data-tab="history">Histórico de Trades</button>
-        <button class="tab-btn" data-tab="simulation">Simulação de Estratégias</button>
-        <button class="tab-btn" data-tab="quant-tracker">AlphaQuant Tracker &amp; Performance</button>
+      <nav class="tab-nav navigation-bar">
+        <button class="tab-btn nav-tab active" data-tab="alpha-quant-engine">Workstation Quantitativo</button>
+        <button class="tab-btn nav-tab" data-tab="mylist">My List</button>
+        <button class="tab-btn nav-tab" data-tab="portfolio">Monitorização de Investimentos</button>
+        <button class="tab-btn nav-tab" data-tab="history">Histórico de Trades</button>
+        <button class="tab-btn nav-tab" data-tab="simulation">Simulação de Estratégias</button>
+        <button class="tab-btn nav-tab" data-tab="quant-tracker">AlphaQuant Tracker &amp; Performance</button>
       </nav>
 
        <!-- ═══════════════════════════════════════════════════════════ -->
       <!--  ABA UNIFICADA: WORKSTATION QUANTITATIVO                   -->
       <!-- ═══════════════════════════════════════════════════════════ -->
-      <div class="tab-content active workstation-container" id="tab-alpha-quant-engine" data-alias-tab="quant-pipeline">
+      <div class="tab-content tab-pane active workstation-container" id="tab-alpha-quant-engine" data-alias-tab="tab-scanner" data-tab-content="alpha-quant-engine">
         <header class="topbar">
           <div class="topbar-info">
             <h1>Workstation Quantitativo Alpha Quant</h1>
@@ -490,7 +490,7 @@
         </div>
       </div>
 
-      <div class="tab-content" id="tab-mylist">
+      <div class="tab-content tab-pane hidden" id="tab-mylist" data-alias-tab="tab-my-list" data-tab-content="mylist" style="display: none;">
         <div class="mylist-toolbar">
           <div class="toolbar-group index-select-group">
             <select id="select-index-bulk-fetch" class="toolbar-select" title="Filtrar a My List por índice (ou ver todos)">
@@ -591,7 +591,7 @@
         </section>
       </div>
 
-      <div class="tab-content" id="tab-portfolio">
+      <div class="tab-content tab-pane hidden" id="tab-portfolio" data-tab-content="portfolio" style="display: none;">
         <header class="topbar portfolio-topbar">
           <div class="topbar-info">
             <h1>Monitorização de Investimentos</h1>
@@ -647,7 +647,7 @@
         </section>
       </div>
 
-      <div class="tab-content" id="tab-history">
+      <div class="tab-content tab-pane hidden" id="tab-history" data-tab-content="history" style="display: none;">
         <header class="topbar portfolio-topbar">
           <div class="topbar-info">
             <h1>Histórico de Trades</h1>
@@ -714,7 +714,7 @@
         </footer>
       </div>
 
-      <div class="tab-content" id="tab-simulation">
+      <div class="tab-content tab-pane hidden" id="tab-simulation" data-tab-content="simulation" style="display: none;">
         <header class="topbar">
           <div class="topbar-info">
             <h1>Simulação de Estratégias</h1>
@@ -939,7 +939,7 @@
       <!-- ═══════════════════════════════════════════════════════════ -->
       <!--  ABA: ALPHAQUANT TRACKER & PERFORMANCE (AUDIT TRAIL)        -->
       <!-- ═══════════════════════════════════════════════════════════ -->
-      <div class="tab-content" id="tab-quant-tracker">
+      <div class="tab-content tab-pane hidden" id="tab-quant-tracker" data-alias-tab="tab-tracker" data-tab-content="quant-tracker" style="display: none;">
         <div class="quant-container">
           <!-- Título e Descrição -->
           <div style="margin-bottom: 8px;">

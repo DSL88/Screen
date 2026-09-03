@@ -212,3 +212,30 @@ test('Modal manual tem estrutura HTML e lógica no renderer.js com Enter e fecho
   assert.match(rendererCode, /submitAndCloseManualStockModal\(\)/);
 });
 
+// ═══════════════════════════════════════════════════════════
+// 5. GESTOR DE ABAS E BLINDAGEM DO ARRANQUE
+// ═══════════════════════════════════════════════════════════
+
+test('Gestor central de abas e blindagem do arranque no renderer.js e index.html', () => {
+  const htmlCode = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  assert.match(htmlCode, /class="[^"]*navigation-bar[^"]*"/);
+  assert.match(htmlCode, /class="[^"]*nav-tab[^"]*"/);
+  assert.match(htmlCode, /class="[^"]*tab-pane[^"]*"/);
+  assert.match(htmlCode, /data-tab="alpha-quant-engine"/);
+  assert.match(htmlCode, /data-tab="mylist"/);
+  assert.match(htmlCode, /data-tab="portfolio"/);
+  assert.match(htmlCode, /data-tab="history"/);
+  assert.match(htmlCode, /data-tab="simulation"/);
+  assert.match(htmlCode, /data-tab="quant-tracker"/);
+
+  const rendererCode = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'renderer.js'), 'utf8');
+  assert.match(rendererCode, /function initTabsNavigation\(\)/);
+  assert.match(rendererCode, /function switchTab\(targetTabId\)/);
+  assert.match(rendererCode, /window\.initTabsNavigation\s*=\s*initTabsNavigation/);
+  assert.match(rendererCode, /document\.addEventListener\('DOMContentLoaded'/);
+  assert.match(rendererCode, /initTabsNavigation\(\);/);
+  assert.match(rendererCode, /bindManualModalEvents\(\);/);
+  assert.match(rendererCode, /loadInitialStockData\(\);/);
+});
+
+
