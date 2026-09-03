@@ -1130,11 +1130,11 @@
     </div>
   </div>
 
-  <div class="modal-backdrop" id="modal-add" hidden>
+  <div class="modal-backdrop modal-manual-container" id="modal-add" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div class="modal-header">
         <div class="modal-title" id="modal-title">Adicionar Ticker Manualmente</div>
-        <button class="modal-close" id="modal-close" aria-label="Fechar">×</button>
+        <button class="modal-close close-btn" id="modal-close" aria-label="Fechar">×</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -1143,6 +1143,7 @@
             <input
               type="text"
               id="modal-ticker"
+              name="ticker"
               class="form-input"
               placeholder="ex: BCP.LS, AAPL, ITX.MC..."
               autocomplete="off"
@@ -1158,6 +1159,7 @@
           <input
             type="text"
             id="modal-name"
+            name="name"
             class="form-input"
             placeholder="ex: Banco Comercial Português"
             required
@@ -1168,6 +1170,7 @@
           <input
             type="text"
             id="modal-country"
+            name="country"
             class="form-input"
             placeholder="ex: Portugal, Espanha, EUA..."
             list="modal-country-list"
@@ -1181,7 +1184,7 @@
         </div>
         <div class="form-group">
           <label class="form-label" for="manual-stock-index">Índice Respetivo *</label>
-          <select id="manual-stock-index" class="form-input" required>
+          <select id="manual-stock-index" name="index" class="form-input" required>
             <option value="" disabled selected>-- Seleciona o Índice --</option>
             <option value="PSI">PSI (Portugal)</option>
             <option value="IBEX35">IBEX35 (Espanha)</option>
@@ -1209,6 +1212,7 @@
           <input
             type="text"
             id="modal-index-custom"
+            name="new-index"
             class="form-input"
             placeholder="ex: MINHA_CARTEIRA, TECNOLOGIA_PT..."
           />

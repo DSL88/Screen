@@ -11,6 +11,7 @@ const ALLOWED_EVENTS = new Set([
   'scanner-sync-status',
   'ticker:synced',
   'SYNC_PROGRESS',
+  'SYNC_PROGRESS_UPDATE',
   'SYNC_RECENT_PROGRESS',
   'sync-all-progress',
   'sync-all-done',
@@ -33,6 +34,7 @@ const apiBridge = {
   cancelIndexOperation: (operationId) => ipcRenderer.invoke('index:cancel', { operationId }),
   searchTicker: (query, limit) => ipcRenderer.invoke('ticker:search', { query, limit }),
   addTicker: (t) => ipcRenderer.invoke('ticker:add', t),
+  addStockToWatchlist: (stockData) => ipcRenderer.invoke('add-stock-to-watchlist', stockData),
   addBulkTickers: (tickers) => ipcRenderer.invoke('ticker:addBulk', { tickers }),
   removeTicker: (ticker) => ipcRenderer.invoke('ticker:remove', { ticker }),
   listTickers: () => ipcRenderer.invoke('ticker:list'),
@@ -68,10 +70,16 @@ const apiBridge = {
   syncAllListStocks: (indexFilter) => ipcRenderer.invoke('sync-all-recent-prices', indexFilter),
   checkListFreshness: (indexFilter) => ipcRenderer.invoke('check-list-freshness', indexFilter),
   syncIncrementalBatch: (tickers, expectedTradingDay) => ipcRenderer.invoke('sync-incremental-batch', { tickers, expectedTradingDay }),
+  processAssetSync: (payload) => ipcRenderer.invoke('process-asset-sync', payload),
   onSyncProgress: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('SYNC_PROGRESS', handler);
     return () => ipcRenderer.removeListener('SYNC_PROGRESS', handler);
+  },
+  onSyncProgressUpdate: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('SYNC_PROGRESS_UPDATE', handler);
+    return () => ipcRenderer.removeListener('SYNC_PROGRESS_UPDATE', handler);
   },
   onSyncRecentProgress: (callback) => {
     const handler = (_event, data) => callback(data);

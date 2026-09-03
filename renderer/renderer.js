@@ -1302,6 +1302,8 @@
     if (!modalAdd) return;
     populateIndexDropdown();
     modalAdd.hidden = false;
+    modalAdd.classList.remove('hidden');
+    modalAdd.style.display = '';
     showModalError(null);
     if (modalCountry) modalCountry.value = '';
     setModalIndexValue('');
@@ -1312,6 +1314,7 @@
     // Autocomplete de países já guardados na base de dados; países novos
     // continuam a ser gravados no submit do formulário.
     void populateCountryDatalist();
+    bindManualModalEvents();
     setTimeout(() => modalTicker.focus(), 50);
   }
 
@@ -1392,43 +1395,145 @@
     }
   }
 
-  async function submitAddModal() {
-    showModalError(null);
-    const raw = modalTicker.value.trim().toUpperCase();
-    const v = validateTickerSymbol(raw);
-    if (!v.valid) {
-      showModalError(v.msg);
-      showModalHint('invalid', v.msg);
-      modalTicker.focus();
+  async function submitAndCloseManualStockModal() {
+    const modal = document.getElementById('modal-add-manual') || 
+                  document.querySelector('.modal-manual-container') ||
+                  document.getElementById('manual-stock-modal') ||
+                  document.getElementById('modal-add') ||
+                  document.querySelector('.modal-backdrop:not(.hidden)');
+
+    if (!modal) return;
+
+    const tickerInput = modal.querySelector('input[id*="ticker"], input[name*="ticker"]') || modal.querySelectorAll('input')[0];
+    const nameInput = modal.querySelector('input[id*="name"], input[name*="name"]') || modal.querySelectorAll('input')[1];
+    const countryInput = modal.querySelector('input[id*="country"], input[name*="country"]') || modal.querySelectorAll('input')[2];
+    const indexSelect = modal.querySelector('select[id*="index"], select');
+    const newIndexInput = modal.querySelector('input[id*="new-index"], input[id*="custom"]') || modal.querySelectorAll('input')[3];
+
+    const rawTicker = tickerInput ? tickerInput.value.trim().toUpperCase() : '';
+    const name = nameInput ? nameInput.value.trim() : rawTicker;
+    const country = countryInput ? countryInput.value.trim() : 'Desconhecido';
+    
+    let indexName = indexSelect ? indexSelect.value.trim() : '';
+    if ((indexName === 'NEW' || indexName === 'CUSTOM_NEW' || indexName === '') && newIndexInput && newIndexInput.value.trim()) {
+      indexName = newIndexInput.value.trim();
+    }
+
+    if (!rawTicker) {
+      console.warn('[Validação] O Ticker é obrigatório.');
+      showModalError('Código da Ação (Ticker) é obrigatório.');
+      if (tickerInput) tickerInput.focus();
       return;
     }
 
-    const name = (modalName ? modalName.value : '').trim();
-    if (!name) {
-      showModalError('Nome da Empresa é obrigatório.');
-      if (modalName) modalName.focus();
-      return;
-    }
+    try {
+      // Gravação no SQLite via canal IPC
+      const api = window.electronAPI || window.api;
+      let response;
+      if (api && typeof api.addStockToWatchlist === 'function') {
+        response = await api.addStockToWatchlist({
+          ticker: rawTicker,
+          name: name || rawTicker,
+          country: country || 'Alemanha',
+          index_name: indexName || 'Geral'
+        });
+      } else if (api && typeof api.addTicker === 'function') {
+        response = await api.addTicker({
+          ticker: rawTicker,
+          name: name || rawTicker,
+          country: country || 'Alemanha',
+          indexName: indexName || 'Geral'
+        });
+      }
 
-    const country = (modalCountry ? modalCountry.value : '').trim();
-    if (!country) {
-      showModalError('País é obrigatório.');
-      if (modalCountry) modalCountry.focus();
-      return;
-    }
+      if (response && response.success !== false) {
+        // 1. Fechar o modal imediatamente
+        closeManualAddModal(modal);
 
-    const indexName = getSelectedModalIndex();
-    if (!indexName) {
-      showModalError('Seleção de Índice é obrigatória. Por favor, seleciona um índice da lista.');
-      showModalHint('invalid', 'Seleção de Índice é obrigatória.', 'alert-triangle');
-      if (modalIndexSelect) modalIndexSelect.focus();
-      return;
-    }
+        // 2. Atualizar a visualização da My List no DOM
+        if (typeof reloadMyListFromDatabase === 'function') {
+          await reloadMyListFromDatabase();
+        } else if (typeof refreshMyListTable === 'function') {
+          await refreshMyListTable();
+        } else if (typeof loadMyListStocks === 'function') {
+          await loadMyListStocks();
+        } else if (typeof renderStocksTable === 'function') {
+          await renderStocksTable();
+        }
 
-    await addTicker({ ticker: raw, name, country, indexName, index: indexName });
-    addIndexOptionToSelect(indexName);
-    status.textContent = `${raw} (${indexName}) adicionado à watchlist.`;
+        // 3. Notificação opcional de sucesso
+        if (typeof showToast === 'function') {
+          showToast(`Ativo ${rawTicker} adicionado com sucesso!`);
+        }
+      } else {
+        console.error('[Erro ao guardar ativo]:', response ? response.error : 'Sem resposta');
+        showModalError((response && response.error) || 'Erro ao guardar ativo na base de dados.');
+      }
+    } catch (err) {
+      console.error('[Erro na chamada IPC addStockToWatchlist]:', err);
+      showModalError('Erro na chamada IPC: ' + (err.message || String(err)));
+    }
+  }
+
+  function closeManualAddModal(modalElement) {
+    const modal = modalElement || document.getElementById('modal-add-manual') || document.querySelector('.modal-manual-container') || document.getElementById('modal-add') || document.querySelector('.modal-backdrop');
+    if (modal) {
+      modal.classList.add('hidden');
+      modal.style.display = 'none';
+      modal.hidden = true;
+    }
+    const inputs = modal ? modal.querySelectorAll('input') : [];
+    inputs.forEach(i => i.value = '');
     closeAddModal();
+  }
+
+  function handleModalEnter(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      submitAndCloseManualStockModal();
+    }
+  }
+
+  function bindManualModalEvents() {
+    const modal = document.getElementById('modal-add-manual') || 
+                  document.querySelector('.modal-manual-container') ||
+                  document.getElementById('manual-stock-modal') ||
+                  document.getElementById('modal-add') ||
+                  document.body;
+
+    if (!modal) return;
+
+    // Intercetar Enter em todos os campos de texto e selects do pop-up
+    const modalInputs = modal.querySelectorAll('input, select');
+    modalInputs.forEach(input => {
+      input.removeEventListener('keydown', handleModalEnter);
+      input.addEventListener('keydown', handleModalEnter);
+    });
+
+    // Botão primário: "Adicionar à watchlist"
+    const btnSubmit = modal.querySelector('#btn-confirm-add-stock, button.btn-primary, button:has-text("Adicionar à watchlist")') ||
+                      Array.from(modal.querySelectorAll('button')).find(b => b.textContent.includes('Adicionar à watchlist'));
+
+    if (btnSubmit) {
+      btnSubmit.onclick = async (e) => {
+        e.preventDefault();
+        await submitAndCloseManualStockModal();
+      };
+    }
+
+    // Botão de fechar (cruz X no canto superior direito) e botão "Cancelar"
+    const closeButtons = modal.querySelectorAll('.close-btn, #btn-cancel-modal, #modal-close, #modal-cancel');
+    closeButtons.forEach(btn => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        closeManualAddModal(modal);
+      };
+    });
+  }
+
+  async function submitAddModal() {
+    await submitAndCloseManualStockModal();
   }
 
   function renderModalResults(tickers) {
@@ -1495,17 +1600,17 @@
   }
 
   if (modalCloseBtn) {
-    modalCloseBtn.addEventListener('click', closeAddModal);
+    modalCloseBtn.addEventListener('click', () => closeManualAddModal(modalAdd));
   }
   if (modalCancel) {
-    modalCancel.addEventListener('click', closeAddModal);
+    modalCancel.addEventListener('click', () => closeManualAddModal(modalAdd));
   }
   if (modalSubmit) {
-    modalSubmit.addEventListener('click', submitAddModal);
+    modalSubmit.addEventListener('click', submitAndCloseManualStockModal);
   }
   if (modalAdd) {
     modalAdd.addEventListener('click', (e) => {
-      if (e.target === modalAdd) closeAddModal();
+      if (e.target === modalAdd) closeManualAddModal(modalAdd);
     });
   }
   if (modalTicker) {
@@ -1527,20 +1632,13 @@
       }
       modalSearchDebounce = setTimeout(() => modalLiveSearch(v), 280);
     });
-    modalTicker.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeAddModal();
-      else if (e.key === 'Enter') submitAddModal();
-    });
   }
-  if (modalName) {
-    modalName.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeAddModal();
-      else if (e.key === 'Enter') submitAddModal();
-    });
-  }
+
+  bindManualModalEvents();
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && modalAdd && !modalAdd.hidden) {
-      closeAddModal();
+      closeManualAddModal(modalAdd);
     }
   });
 
@@ -3564,6 +3662,7 @@
   const assetDeleteBtn = document.getElementById('asset-detail-delete-history');
 
   let currentAssetTicker = null;
+  let currentModalStock = null;
   let assetSelectedFile = null;
   // Valores de metadados ativos (fonte de verdade para a camada de edição).
   let assetDetailCurrentValues = { name: '', country: '', indexName: '' };
@@ -3614,6 +3713,7 @@
 
     // 1. Explicitly set active ticker for this session
     currentAssetTicker = cleanTicker;
+    currentModalStock = { ticker: cleanTicker, name: '', country: '', index_name: '' };
     assetSelectedFile = null;
 
     // 2. Full clean reset of all modal DOM elements & inputs
@@ -3673,6 +3773,9 @@
     if (historySummaryZone) historySummaryZone.style.display = 'none';
 
     modalAssetDetail.hidden = false;
+    modalAssetDetail.style.display = '';
+    modalAssetDetail.classList.remove('hidden');
+    attachModalEnterKeyListeners();
 
     // 4. Query IPC database for currentAssetTicker specifically
     try {
@@ -3688,6 +3791,12 @@
             country: res.stock.country || '',
             indexName: res.stock.index_name || ''
           };
+          currentModalStock = {
+            ticker: cleanTicker,
+            name: res.stock.name || '',
+            country: res.stock.country || '',
+            index_name: res.stock.index_name || ''
+          };
           setAssetDetailViewValues(assetDetailCurrentValues);
           // Pré-preenche também os inputs de edição (usados como fallback pela
           // importação CSV e para entrar em modo de edição com os valores atuais).
@@ -3697,6 +3806,12 @@
         } else if (res.custom) {
           if (assetDetailNameEl) assetDetailNameEl.textContent = res.custom.name || '';
           assetDetailCurrentValues = { name: res.custom.name || '', country: '', indexName: '' };
+          currentModalStock = {
+            ticker: cleanTicker,
+            name: res.custom.name || '',
+            country: '',
+            index_name: ''
+          };
           setAssetDetailViewValues(assetDetailCurrentValues);
           if (editStockName) editStockName.value = assetDetailCurrentValues.name;
           if (editStockCountry) editStockCountry.value = '';
@@ -3715,11 +3830,85 @@
     }
   }
 
-  function closeAssetDetailModal() {
-    if (!modalAssetDetail) return;
-    modalAssetDetail.hidden = true;
+  function closeStockModal() {
+    const modal = document.getElementById('stock-detail-modal') || document.getElementById('stock-modal') || modalAssetDetail;
+    if (modal) {
+      modal.classList.add('hidden');
+      modal.style.display = 'none';
+      modal.hidden = true;
+    }
+    currentModalStock = null;
     currentAssetTicker = null;
     assetSelectedFile = null;
+  }
+
+  function closeAssetDetailModal() {
+    closeStockModal();
+  }
+
+  async function saveModalDataAndClose() {
+    const ticker = (currentModalStock && currentModalStock.ticker) || currentAssetTicker;
+    if (!ticker) return;
+
+    const nameInput = document.getElementById('edit-stock-name') || document.getElementById('modal-stock-name-input');
+    const countryInput = document.getElementById('edit-stock-country') || document.getElementById('modal-stock-country-input');
+    const indexInput = document.getElementById('edit-stock-index') || document.getElementById('modal-stock-index-input');
+    const customIndexInput = document.getElementById('edit-stock-index-custom') || document.getElementById('modal-index-custom');
+
+    let indexVal = '';
+    if (indexInput) {
+      if (indexInput.value === 'CUSTOM_NEW') {
+        indexVal = customIndexInput ? customIndexInput.value.trim() : '';
+      } else {
+        indexVal = indexInput.value.trim();
+      }
+    }
+
+    const payload = {
+      name: nameInput ? nameInput.value.trim() : (currentModalStock ? currentModalStock.name : ''),
+      country: countryInput ? countryInput.value.trim() : (currentModalStock ? currentModalStock.country : ''),
+      index_name: indexVal || (currentModalStock ? currentModalStock.index_name : '')
+    };
+
+    try {
+      // 1. Gravação na base de dados SQLite via IPC
+      const api = window.electronAPI || window.api;
+      if (api && typeof api.updateStockMetadata === 'function') {
+        await api.updateStockMetadata(ticker, payload);
+      }
+
+      // 2. Atualizar a tabela/cards visíveis na interface
+      if (typeof refreshMyListTable === 'function') {
+        refreshMyListTable();
+      } else if (typeof loadMyListStocks === 'function') {
+        loadMyListStocks();
+      } else if (typeof reloadMyListFromDatabase === 'function') {
+        await reloadMyListFromDatabase();
+      }
+
+      // 3. Fecho automático da janela pop-up e limpeza de referências
+      closeStockModal();
+    } catch (err) {
+      console.error(`[Erro ao gravar ativo ${ticker}]:`, err);
+    }
+  }
+
+  // Associar listener a todos os inputs do formulário do modal:
+  function attachModalEnterKeyListeners() {
+    const modal = document.getElementById('stock-detail-modal') || document.getElementById('stock-modal') || modalAssetDetail;
+    if (!modal) return;
+
+    const inputs = modal.querySelectorAll('input, select');
+    inputs.forEach(input => {
+      if (input._enterBound) return;
+      input._enterBound = true;
+      input.addEventListener('keydown', async (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          await saveModalDataAndClose();
+        }
+      });
+    });
   }
 
   // ── Modo de Edição Dinâmico do Ativo (Nome / País / Índice) ──
@@ -3896,6 +4085,7 @@
     if (editStockCountry) editStockCountry.value = vals.country || '';
     if (editStockIndexCustom) { editStockIndexCustom.value = ''; editStockIndexCustom.hidden = true; }
     setAssetDetailViewMode(false);
+    attachModalEnterKeyListeners();
   }
 
   // "Cancelar": regressa a .view-mode sem alterar dados.
@@ -4006,6 +4196,7 @@
       closeAssetDetailModal();
     }
   });
+  attachModalEnterKeyListeners();
 
   async function syncAssetYahoo() {
     if (!currentAssetTicker || !assetDetailSyncBtn) return;

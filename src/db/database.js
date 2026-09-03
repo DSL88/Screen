@@ -722,7 +722,18 @@ class DB {
         candles: [c]
       }));
     } else if (Array.isArray(ticker)) {
-      entries = ticker;
+      if (ticker.length > 0 && ticker[0] && ticker[0].date && !ticker[0].candles) {
+        const grouped = new Map();
+        for (const c of ticker) {
+          if (!c) continue;
+          const t = canonicalTicker(c.ticker || 'UNKNOWN');
+          if (!grouped.has(t)) grouped.set(t, []);
+          grouped.get(t).push(c);
+        }
+        entries = Array.from(grouped.entries()).map(([t, candles]) => ({ ticker: t, candles }));
+      } else {
+        entries = ticker;
+      }
     }
     if (!Array.isArray(entries) || entries.length === 0) return { changes: 0 };
 
@@ -1003,6 +1014,10 @@ class DB {
     ).get(canonicalTicker(ticker));
   }
 
+  getStock(ticker) {
+    return this.getStockByTicker(ticker);
+  }
+
   getStocksByIndex(indexName = null) {
     if (!indexName || indexName === 'ALL') {
       return this.db.prepare(`SELECT * FROM stocks ORDER BY ticker ASC`).all();
@@ -1254,6 +1269,31 @@ class DB {
         first_date = CASE WHEN NULLIF(excluded.first_date, '') IS NULL THEN stocks.first_date ELSE excluded.first_date END,
         full_history_fetched = COALESCE(?, stocks.full_history_fetched)
     `).run(ticker, name, country, indexName, firstDate, fullHistoryFetched, fullHistoryFetched);
+  }
+
+  addOrUpdateStockRecord({ ticker, name, country, index_name }) {
+    const cleanTicker = String(ticker).trim().toUpperCase();
+    const cleanName = String(name || cleanTicker).trim();
+    const cleanCountry = String(country || 'Desconhecido').trim();
+    const cleanIndex = String(index_name || 'Geral').trim();
+    const stmt = this.db.prepare(`
+      INSERT INTO stocks (ticker, name, country, index_name)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(ticker) DO UPDATE SET
+        name = excluded.name,
+        country = excluded.country,
+        index_name = excluded.index_name
+    `);
+    stmt.run(cleanTicker, cleanName, cleanCountry, cleanIndex);
+    try {
+      this.addCustomTicker({
+        ticker: cleanTicker,
+        name: cleanName,
+        country: cleanCountry,
+        indexName: cleanIndex
+      });
+    } catch (_) {}
+    return { success: true, ticker: cleanTicker };
   }
 
   setFullHistoryFetched(ticker) {
@@ -2046,6 +2086,29 @@ class DB {
     } catch (_) {}
 
     return savedCount;
+  }
+
+  auditAllAssetsStatus(indexFilter = null) {
+    let sql = `
+      SELECT 
+        s.ticker,
+        s.name,
+        s.country,
+        s.index_name,
+        MIN(hp.date) AS first_date,
+        MAX(hp.date) AS last_date,
+        COUNT(hp.date) AS total_candles
+      FROM stocks s
+      LEFT JOIN historical_prices hp ON UPPER(TRIM(s.ticker)) = UPPER(TRIM(hp.ticker))
+    `;
+    const params = [];
+    if (indexFilter && indexFilter !== 'ALL' && indexFilter !== '') {
+      sql += ` WHERE LOWER(TRIM(s.index_name)) = LOWER(TRIM(?))`;
+      params.push(indexFilter);
+    }
+    sql += ` GROUP BY s.ticker ORDER BY s.ticker ASC`;
+
+    return this.db.prepare(sql).all(...params);
   }
 
   close() {

@@ -778,6 +778,7 @@ async function fetchFullHistoryFromIPO(ticker) {
       : Math.min(open, close);
     seen.add(date);
     sanitized.push({
+      ticker: String(ticker).trim().toUpperCase(),
       date,
       open,
       high,

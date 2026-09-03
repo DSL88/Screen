@@ -1133,6 +1133,22 @@ app.whenReady().then(async () => {
       return { ok: true };
     });
 
+    ipcMain.handle('add-stock-to-watchlist', async (event, stockData) => {
+      try {
+        if (!stockData || !stockData.ticker) {
+          return { success: false, error: 'missing-ticker' };
+        }
+        const result = db.addOrUpdateStockRecord(stockData);
+        if (result && result.ticker && stockData.index_name) {
+          tickerToIndexMap[result.ticker] = stockData.index_name;
+        }
+        return { success: true, ...result };
+      } catch (error) {
+        console.error('[IPC Error add-stock-to-watchlist]:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
     ipcMain.handle('ticker:addBulk', async (_event, payload) => {
       if (!payload || !Array.isArray(payload.tickers) || payload.tickers.length === 0) {
         return { ok: false, error: 'missing-tickers' };
@@ -1864,6 +1880,97 @@ app.whenReady().then(async () => {
       } catch (err) {
         console.error('[sync-audit] Error:', err);
         return { ok: false, error: err.message || String(err), total: 0, pending: 0, upToDate: 0 };
+      }
+    });
+
+    ipcMain.handle('process-asset-sync', async (event, input = {}) => {
+      try {
+        const { mode, targetTicker = null, indexFilter = null } = (input || {});
+        // 1. Execução obrigatória da FASE 1: Diagnóstico total prévio em SQLite
+        const fullAudit = db.auditAllAssetsStatus(indexFilter);
+        const expectedTradingDay = db.getLastExpectedTradingDay();
+
+        // 2. Determinar quais os ativos alvo
+        let queue = [];
+        if (targetTicker) {
+          queue = fullAudit.filter(a => a.ticker.toUpperCase() === String(targetTicker).trim().toUpperCase());
+        } else {
+          queue = fullAudit;
+        }
+
+        if (queue.length === 0) {
+          return { success: false, message: 'Nenhum ativo encontrado para processar.' };
+        }
+
+        let updatedCount = 0;
+        let skippedCount = 0;
+        let failedCount = 0;
+        const allCandlesToSave = [];
+
+        // 3. Execução da FASE 2: Download sequencial controlado
+        for (let i = 0; i < queue.length; i++) {
+          const asset = queue[i];
+          const ticker = asset.ticker;
+
+          try {
+            if (mode === 'LAST_DAY') {
+              // Apenas o dia/sessão mais recente
+              if (asset.last_date && expectedTradingDay && asset.last_date >= expectedTradingDay) {
+                skippedCount++;
+              } else {
+                const candles = await yahooClient.fetchIncrementalCandles(ticker, asset.last_date);
+                if (candles && candles.length > 0) {
+                  allCandlesToSave.push(...candles.map(c => ({ ...c, ticker })));
+                  updatedCount++;
+                }
+              }
+            } else if (mode === 'FULL_HISTORY') {
+              // Todo o histórico desde a origem (IPO / period1 = 0)
+              const candles = await yahooClient.fetchFullHistoryFromIPO(ticker);
+              if (candles && candles.length > 0) {
+                allCandlesToSave.push(...candles.map(c => ({ ...c, ticker })));
+                updatedCount++;
+              }
+            }
+
+            // Emissão de progresso para a UI
+            if (event && event.sender && !event.sender.isDestroyed()) {
+              event.sender.send('SYNC_PROGRESS_UPDATE', {
+                current: i + 1,
+                total: queue.length,
+                ticker,
+                mode
+              });
+            }
+
+            // Pausa de proteção (jitter) para evitar Erro 429 do Yahoo Finance
+            await new Promise(resolve => setTimeout(resolve, 100));
+          } catch (assetErr) {
+            console.warn(`[Sync Error] Falha em ${ticker}: ${assetErr.message}`);
+            failedCount++;
+          }
+        }
+
+        // Gravação consolidada em lote na SQLite
+        if (allCandlesToSave.length > 0) {
+          db.saveHistoricalCandlesBatch(allCandlesToSave);
+          // Se descarregou histórico completo, reconcilia a first_date
+          if (mode === 'FULL_HISTORY') {
+            db.reconcileAllStocksFirstDate();
+          }
+        }
+
+        return {
+          success: true,
+          mode,
+          total: queue.length,
+          updatedCount,
+          skippedCount,
+          failedCount
+        };
+      } catch (err) {
+        console.error('[Sync Fatal Error]:', err);
+        return { success: false, error: err.message };
       }
     });
 

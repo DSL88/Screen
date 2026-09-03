@@ -15,7 +15,7 @@ test('preload expõe IPC permitido, remove listeners e bloqueia canais arbitrár
   };
   const originalLoad = Module._load;
   Module._load = function (request, parent, isMain) {
-    if (request === 'electron') return { contextBridge: { exposeInMainWorld(_name, value) { api = value; } }, ipcRenderer };
+    if (request === 'electron') return { contextBridge: { exposeInMainWorld(_name, value) { if (_name === 'api' || _name === 'electronAPI') api = value; } }, ipcRenderer };
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -63,7 +63,7 @@ test('preload expõe auditIndex, syncIndexFirstRecords e onIndexSyncProgress', (
   };
   const originalLoad = Module._load;
   Module._load = function (request, parent, isMain) {
-    if (request === 'electron') return { contextBridge: { exposeInMainWorld(_name, value) { api = value; } }, ipcRenderer };
+    if (request === 'electron') return { contextBridge: { exposeInMainWorld(_name, value) { if (_name === 'api' || _name === 'electronAPI') api = value; } }, ipcRenderer };
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -110,7 +110,7 @@ test('preload expõe getDistinctIndices que invoca o canal get-distinct-indices'
   };
   const originalLoad = Module._load;
   Module._load = function (request, parent, isMain) {
-    if (request === 'electron') return { contextBridge: { exposeInMainWorld(_name, value) { api = value; } }, ipcRenderer };
+    if (request === 'electron') return { contextBridge: { exposeInMainWorld(_name, value) { if (_name === 'api' || _name === 'electronAPI') api = value; } }, ipcRenderer };
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
@@ -140,7 +140,7 @@ test('preload expõe updateStockMetadata que invoca o canal com { ticker, data }
   };
   const originalLoad = Module._load;
   Module._load = function (request, parent, isMain) {
-    if (request === 'electron') return { contextBridge: { exposeInMainWorld(_name, value) { api = value; } }, ipcRenderer };
+    if (request === 'electron') return { contextBridge: { exposeInMainWorld(_name, value) { if (_name === 'api' || _name === 'electronAPI') api = value; } }, ipcRenderer };
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
