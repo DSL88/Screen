@@ -1866,48 +1866,58 @@ class DB {
   }
 
   getMyListAssetsSyncStatus(indexFilter = null) {
-    const stocksSql = `
-      SELECT s.ticker, s.name, s.index_name
-      FROM stocks s
-      WHERE LOWER(TRIM(s.index_name)) = LOWER(TRIM(?))
-      ORDER BY s.ticker ASC
+    // Universo completo auditável = UNION deduplicado de stocks + custom_tickers
+    // por UPPER(TRIM(ticker)); stocks tem prioridade para name/index_name.
+    // Com indexFilter específico entram também os ativos sem índice (NULL/''),
+    // porque pertencem ao universo auditável e a My List mostra-os.
+    const hasFilter = !!(indexFilter && indexFilter !== 'ALL' && indexFilter !== '');
+    const universeSql = `
+      SELECT ticker, name, index_name
+      FROM (
+        SELECT ticker, name, index_name,
+               ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY prio ASC) AS rn
+        FROM (
+          SELECT UPPER(TRIM(s.ticker)) AS ticker, s.name AS name, s.index_name AS index_name, 0 AS prio
+          FROM stocks s
+          UNION ALL
+          SELECT UPPER(TRIM(ct.ticker)) AS ticker, ct.name AS name, ct.index_name AS index_name, 1 AS prio
+          FROM custom_tickers ct
+        )
+      )
+      WHERE rn = 1
+        AND (
+          LOWER(TRIM(index_name)) = LOWER(TRIM(?))
+          OR index_name IS NULL
+          OR TRIM(index_name) = ''
+        )
+      ORDER BY ticker ASC
     `;
-    const stocksSqlAll = `
-      SELECT s.ticker, s.name, s.index_name
-      FROM stocks s
-      ORDER BY s.ticker ASC
+    const universeSqlAll = `
+      SELECT ticker, name, index_name
+      FROM (
+        SELECT ticker, name, index_name,
+               ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY prio ASC) AS rn
+        FROM (
+          SELECT UPPER(TRIM(s.ticker)) AS ticker, s.name AS name, s.index_name AS index_name, 0 AS prio
+          FROM stocks s
+          UNION ALL
+          SELECT UPPER(TRIM(ct.ticker)) AS ticker, ct.name AS name, ct.index_name AS index_name, 1 AS prio
+          FROM custom_tickers ct
+        )
+      )
+      WHERE rn = 1
+      ORDER BY ticker ASC
     `;
 
     let rows = [];
     try {
-      if (indexFilter && indexFilter !== 'ALL' && indexFilter !== '') {
-        rows = this.db.prepare(stocksSql).all(indexFilter);
+      if (hasFilter) {
+        rows = this.db.prepare(universeSql).all(indexFilter);
       } else {
-        rows = this.db.prepare(stocksSqlAll).all();
+        rows = this.db.prepare(universeSqlAll).all();
       }
     } catch (_) {
       rows = [];
-    }
-
-    if (rows.length === 0) {
-      const ctSql = `
-        SELECT ct.ticker, ct.name, ct.index_name
-        FROM custom_tickers ct
-        WHERE LOWER(TRIM(ct.index_name)) = LOWER(TRIM(?))
-        ORDER BY ct.ticker ASC
-      `;
-      const ctSqlAll = `
-        SELECT ct.ticker, ct.name, ct.index_name
-        FROM custom_tickers ct
-        ORDER BY ct.ticker ASC
-      `;
-      try {
-        if (indexFilter && indexFilter !== 'ALL' && indexFilter !== '') {
-          rows = this.db.prepare(ctSql).all(indexFilter);
-        } else {
-          rows = this.db.prepare(ctSqlAll).all();
-        }
-      } catch (_) {}
     }
 
     if (rows.length === 0) {
@@ -1986,13 +1996,31 @@ class DB {
 
     try {
       let ticker = null;
+      let firstCandle = null;
       for (const c of candles) {
         const t = String(c.ticker || '').trim().toUpperCase();
         const d = String(c.date || '').slice(0, 10);
         if (!t || !d || !Number.isFinite(Number(c.close))) continue;
-        if (!ticker) ticker = t;
+        if (!ticker) { ticker = t; firstCandle = c; }
       }
       if (ticker) {
+        // Garante que ativos que só existem em custom_tickers passam a ter row
+        // em stocks (name/index_name herdados da watchlist) sem partir a transação.
+        this.db.prepare(`
+          INSERT INTO stocks (ticker, name, country, index_name)
+          SELECT ?,
+                 COALESCE(NULLIF(TRIM(ct.name), ''), ?),
+                 COALESCE(ct.country, ''),
+                 COALESCE(ct.index_name, '')
+          FROM custom_tickers ct WHERE UPPER(TRIM(ct.ticker)) = ?
+          ON CONFLICT(ticker) DO NOTHING
+        `).run(ticker, ticker, ticker);
+        this.db.prepare(`
+          INSERT INTO stocks (ticker, name, country, index_name)
+          VALUES (?, ?, '', '')
+          ON CONFLICT(ticker) DO NOTHING
+        `).run(ticker, firstCandle && firstCandle.name ? String(firstCandle.name) : ticker);
+
         const row = this.db.prepare(
           `SELECT first_date FROM stocks WHERE UPPER(TRIM(ticker)) = ?`
         ).get(ticker);

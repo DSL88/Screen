@@ -1831,6 +1831,15 @@ app.whenReady().then(async () => {
 
     let syncRecentInProgress = false;
 
+    const classifySyncError = (err) => {
+      const status = err && (err.response?.status || err.status || err.statusCode);
+      const msg = (err && err.message) ? String(err.message) : '';
+      if (status === 429 || /429|rate.?limit|too many requests/i.test(msg)) return 'Rate Limit (429)';
+      if (status === 404 || /404|not found|invalid symbol|no data/i.test(msg)) return 'Ticker não encontrado / deslistado (404)';
+      if ((err && /timeout|ETIMEDOUT|ECONNABORTED/i.test(String(err.code || '') + ' ' + msg))) return 'Timeout';
+      return msg || 'Erro desconhecido';
+    };
+
     ipcMain.handle('sync-audit', async (_event, input = {}) => {
       const startTime = Date.now();
       const indexFilter = (input && typeof input === 'object')
@@ -2050,7 +2059,11 @@ app.whenReady().then(async () => {
               }
             } catch (err) {
               console.warn(`[Sync Warning] Falha ao sincronizar ${asset.ticker}:`, err.message);
-              failedTickers.push({ ticker: asset.ticker, reason: err.message });
+              failedTickers.push({
+                ticker: asset.ticker,
+                index_name: asset.index_name || '',
+                reason: classifySyncError(err)
+              });
             }
 
             sendEvent('SYNC_RECENT_PROGRESS', {
@@ -2073,6 +2086,8 @@ app.whenReady().then(async () => {
           total: allStoredStocks.length,
           updatedCount,
           alreadyUpToDateCount,
+          updated: updatedCount,
+          skipped: alreadyUpToDateCount,
           fallbackInitialized,
           failedCount: failedTickers.length,
           failedTickers,

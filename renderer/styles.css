@@ -6872,3 +6872,118 @@ tr.empty td .empty-state {
   height: 48px !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   MODAL DE DIAGNÓSTICO DE FALHAS ("MAIS RECENTE")
+   ═══════════════════════════════════════════════════════════ */
+.modal-diagnostics {
+  width: 720px;
+  max-width: 720px;
+}
+.diag-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-mute);
+}
+.diag-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.diag-stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.diag-stat-value {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+.diag-stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-mute);
+}
+.diag-stat-card.diag-ok {
+  border-color: var(--bull-glow);
+  background: var(--bull-soft);
+}
+.diag-stat-card.diag-ok .diag-stat-value { color: var(--bull); }
+.diag-stat-card.diag-warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+.diag-stat-card.diag-warn .diag-stat-value { color: var(--warn); }
+.diag-stat-card.diag-error {
+  border-color: var(--bear-glow);
+  background: var(--bear-soft);
+}
+.diag-stat-card.diag-error .diag-stat-value { color: var(--bear); }
+.diag-table-wrap {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+.diag-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.diag-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  color: var(--text-mute);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.diag-table tbody td {
+  padding: 9px 12px;
+  color: var(--text-dim);
+  vertical-align: top;
+}
+.diag-table tbody tr {
+  border-bottom: 1px solid var(--border);
+}
+.diag-table tbody tr:last-child {
+  border-bottom: none;
+}
+.diag-table tbody tr:hover {
+  background: var(--glass);
+}
+.diag-table .diag-ticker {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+.diag-table .diag-reason {
+  color: var(--bear);
+}
+.diag-empty-row {
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--text-mute);
+  font-style: italic;
+}
+#modal-sync-diagnostics .modal-footer {
+  justify-content: flex-end;
+}

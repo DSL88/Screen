@@ -4743,7 +4743,135 @@
 
     await reloadMyListFromDatabase();
     await refreshIndexStatusBadge();
+
+    // Abrir automaticamente o modal de diagnóstico se houver falhas reportadas.
+    const failedEntries = normalizeFailedEntries(p.failedTickers || p.failed || []);
+    if (failedEntries.length > 0) {
+      openSyncDiagnosticsModal(Object.assign({}, p, { failedTickers: failedEntries }));
+    }
   });
+
+  // ═══════════════════════════════════════════════════════════
+  // MODAL DE DIAGNÓSTICO DE FALHAS DO "MAIS RECENTE"
+  // ═══════════════════════════════════════════════════════════
+  let currentFailedSyncList = [];
+
+  function normalizeFailedEntries(list) {
+    if (!Array.isArray(list)) return [];
+    return list.map((entry) => {
+      if (typeof entry === 'string') {
+        return { ticker: entry, index_name: '', reason: '' };
+      }
+      if (entry && typeof entry === 'object') {
+        return {
+          ticker: String(entry.ticker || entry.symbol || ''),
+          index_name: String(entry.index_name || entry.indexName || entry.index || ''),
+          reason: String(entry.reason || entry.error || entry.message || '')
+        };
+      }
+      return { ticker: String(entry || ''), index_name: '', reason: '' };
+    });
+  }
+
+  function openSyncDiagnosticsModal(report) {
+    const modal = document.getElementById('modal-sync-diagnostics');
+    if (!modal || !report) return;
+
+    const entries = normalizeFailedEntries(report.failedTickers || report.failed || []);
+    currentFailedSyncList = entries;
+
+    const total = report.totalStocks != null ? report.totalStocks : (report.total != null ? report.total : 0);
+    const updated = report.updated != null ? report.updated
+      : (report.updatedCount != null ? report.updatedCount : 0);
+    const skipped = report.skipped != null ? report.skipped
+      : (report.alreadyUpToDateCount != null ? report.alreadyUpToDateCount : 0);
+    const failed = report.failedCount != null ? report.failedCount : entries.length;
+
+    const totalVal = document.getElementById('diag-total-val');
+    const updatedVal = document.getElementById('diag-updated-val');
+    const skippedVal = document.getElementById('diag-skipped-val');
+    const failedVal = document.getElementById('diag-failed-val');
+    const subtitle = document.getElementById('diag-subtitle');
+    const tbody = document.getElementById('diag-failed-tbody');
+
+    if (totalVal) totalVal.textContent = String(total);
+    if (updatedVal) updatedVal.textContent = String(updated);
+    if (skippedVal) skippedVal.textContent = String(skipped);
+    if (failedVal) failedVal.textContent = String(failed);
+    if (subtitle) subtitle.textContent = `Resumo da sincronização · ${failed} falha${failed === 1 ? '' : 's'} detetada${failed === 1 ? '' : 's'}`;
+
+    if (tbody) {
+      if (entries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="diag-empty-row">Nenhum erro detetado nesta sincronização.</td></tr>';
+      } else {
+        tbody.innerHTML = entries.map((e) => `
+          <tr>
+            <td class="diag-ticker">${escapeHtml(e.ticker || '--')}</td>
+            <td>${escapeHtml(e.index_name || '--')}</td>
+            <td class="diag-reason">${escapeHtml(e.reason || 'Erro desconhecido')}</td>
+          </tr>`).join('');
+      }
+    }
+
+    modal.hidden = false;
+  }
+
+  function closeSyncDiagnosticsModal() {
+    const modal = document.getElementById('modal-sync-diagnostics');
+    if (modal) modal.hidden = true;
+  }
+
+  const btnCloseDiagModal = document.getElementById('btn-close-diag-modal');
+  const btnCloseDiagBtn = document.getElementById('btn-close-diag-btn');
+  const btnCopyFailedTickers = document.getElementById('btn-copy-failed-tickers');
+  const btnRetryFailedTickers = document.getElementById('btn-retry-failed-tickers');
+  const modalSyncDiagnostics = document.getElementById('modal-sync-diagnostics');
+
+  if (btnCloseDiagModal) btnCloseDiagModal?.addEventListener('click', closeSyncDiagnosticsModal);
+  if (btnCloseDiagBtn) btnCloseDiagBtn?.addEventListener('click', closeSyncDiagnosticsModal);
+  if (modalSyncDiagnostics) {
+    modalSyncDiagnostics.addEventListener('click', (e) => {
+      if (e.target === modalSyncDiagnostics) closeSyncDiagnosticsModal();
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modalSyncDiagnostics && !modalSyncDiagnostics.hidden) {
+      closeSyncDiagnosticsModal();
+    }
+  });
+
+  if (btnCopyFailedTickers) {
+    let copyFeedbackTimer = null;
+    btnCopyFailedTickers?.addEventListener('click', async () => {
+      const tickers = currentFailedSyncList.map((e) => e.ticker).filter(Boolean);
+      if (tickers.length === 0) {
+        showToast('Sem tickers falhados para copiar.', 'info');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(tickers.join(', '));
+        const original = btnCopyFailedTickers.textContent;
+        btnCopyFailedTickers.textContent = '✅ Copiado!';
+        if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
+        copyFeedbackTimer = setTimeout(() => {
+          btnCopyFailedTickers.textContent = original;
+        }, 2000);
+      } catch (err) {
+        showToast('Não foi possível copiar para a área de transferência.', 'error');
+      }
+    });
+  }
+
+  if (btnRetryFailedTickers) {
+    btnRetryFailedTickers?.addEventListener('click', () => {
+      closeSyncDiagnosticsModal();
+      currentFailedSyncList = [];
+      handleSyncAllRecent();
+    });
+  }
+
+  window.openSyncDiagnosticsModal = openSyncDiagnosticsModal;
+  window.closeSyncDiagnosticsModal = closeSyncDiagnosticsModal;
 
   if (typeof window.api.onFirstRegistoProgress === 'function') {
     subscribeApiEvent('onFirstRegistoProgress', null, (p) => {

@@ -1616,7 +1616,56 @@
       </div>
     </div>
 
-    <script src="chart.umd.js"></script>
+    <div class="modal-backdrop" id="modal-sync-diagnostics" hidden>
+    <div class="modal modal-diagnostics" role="dialog" aria-modal="true" aria-labelledby="diag-title">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="diag-title">⚠️ Diagnóstico de Sincronização</div>
+          <div class="diag-subtitle" id="diag-subtitle"></div>
+        </div>
+        <button class="modal-close close-btn" id="btn-close-diag-modal" aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="diag-summary-grid">
+          <div class="diag-stat-card" id="diag-card-total">
+            <span class="diag-stat-value" id="diag-total-val">0</span>
+            <span class="diag-stat-label">Total</span>
+          </div>
+          <div class="diag-stat-card diag-ok" id="diag-card-updated">
+            <span class="diag-stat-value" id="diag-updated-val">0</span>
+            <span class="diag-stat-label">Atualizados</span>
+          </div>
+          <div class="diag-stat-card diag-warn" id="diag-card-skipped">
+            <span class="diag-stat-value" id="diag-skipped-val">0</span>
+            <span class="diag-stat-label">Já em Dia</span>
+          </div>
+          <div class="diag-stat-card diag-error" id="diag-card-failed">
+            <span class="diag-stat-value" id="diag-failed-val">0</span>
+            <span class="diag-stat-label">Falhas</span>
+          </div>
+        </div>
+        <div class="diag-table-wrap">
+          <table class="diag-table">
+            <thead>
+              <tr>
+                <th>Ticker</th>
+                <th>Índice</th>
+                <th>Motivo</th>
+              </tr>
+            </thead>
+            <tbody id="diag-failed-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btn-copy-failed-tickers">Copiar Tickers</button>
+        <button class="btn-primary" id="btn-retry-failed-tickers">Repetir Sincronização</button>
+        <button class="btn-secondary" id="btn-close-diag-btn">Entendido</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="chart.umd.js"></script>
     <script src="renderer.js"></script>
     <script src="simulationRenderer.js"></script>
     <script src="quantRenderer.js"></script>
