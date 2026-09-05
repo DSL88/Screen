@@ -2539,7 +2539,12 @@
 
   let isSyncingFirstRegisto = false;
   if (btnFirstRegisto) {
-    btnFirstRegisto.addEventListener('click', async () => {
+    btnFirstRegisto.addEventListener('click', async (e) => {
+      e?.preventDefault?.();
+      if (typeof openFirstRecordChoiceModal === 'function') {
+        openFirstRecordChoiceModal();
+        return;
+      }
       if (isSyncingFirstRegisto) return;
       const requestIndex = getSelectedIndexDbName();
       const idx = selectIndexBulkFetch ? selectIndexBulkFetch.value : '';
@@ -3829,6 +3834,66 @@
   let assetSelectedFile = null;
   // Valores de metadados ativos (fonte de verdade para a camada de edição).
   let assetDetailCurrentValues = { name: '', country: '', indexName: '' };
+  let currentModalActiveTicker = null;
+
+  // Formata datas ISO (YYYY-MM-DD) para padrão europeu DD-MM-AAAA
+  function formatEuropeanDate(dateStr) {
+    if (!dateStr) return '--';
+    const parts = String(dateStr).slice(0, 10).split('-');
+    return parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : dateStr;
+  }
+
+  // Atualiza e renderiza a secção de dividendos no modal
+  async function loadAndRenderDividends(ticker) {
+    currentModalActiveTicker = ticker;
+    const tbody = document.getElementById('tbody-modal-dividends');
+    const totalElem = document.getElementById('modal-div-total');
+    const countElem = document.getElementById('modal-div-count');
+    const lastElem = document.getElementById('modal-div-last');
+
+    if (!tbody) return;
+
+    tbody.innerHTML = `<tr><td colspan="2" style="text-align: center; color: #64748b; padding: 12px;">A consultar registos...</td></tr>`;
+
+    try {
+      const api = window.electronAPI || window.api;
+      const data = await api.getStockDividends(ticker);
+
+      if (countElem) countElem.textContent = data.totalCount || 0;
+      if (totalElem) totalElem.textContent = data.totalAmount ? `${data.totalAmount.toFixed(2)} €/$` : '--';
+      
+      if (lastElem) {
+        if (data.lastDividend) {
+          lastElem.textContent = `${Number(data.lastDividend.amount).toFixed(2)} (${formatEuropeanDate(data.lastDividend.date)})`;
+        } else {
+          lastElem.textContent = '--';
+        }
+      }
+
+      if (!data.dividends || data.dividends.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="2" style="text-align: center; color: #64748b; padding: 16px;">
+              Sem dividendos registados. Clica em "Descarregar Dividendos".
+            </td>
+          </tr>`;
+        return;
+      }
+
+      tbody.innerHTML = data.dividends.map(d => `
+        <tr style="border-bottom: 1px solid #161f30;">
+          <td style="padding: 6px 12px; color: #cbd5e1;">${formatEuropeanDate(d.date)}</td>
+          <td style="padding: 6px 12px; color: #34d399; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums;">
+            ${Number(d.amount).toFixed(4)} €/$
+          </td>
+        </tr>
+      `).join('');
+
+    } catch (err) {
+      console.error('Erro ao carregar dividendos:', err);
+      tbody.innerHTML = `<tr><td colspan="2" style="text-align: center; color: #ef4444; padding: 10px;">Erro ao carregar dividendos.</td></tr>`;
+    }
+  }
 
   // Formatação de datas ISO YYYY-MM-DD para o padrão europeu DD-MM-AAAA.
   function formatDateDisplay(isoDateString) {
@@ -3876,8 +3941,10 @@
 
     // 1. Explicitly set active ticker for this session
     currentAssetTicker = cleanTicker;
+    currentModalActiveTicker = cleanTicker;
     currentModalStock = { ticker: cleanTicker, name: '', country: '', index_name: '' };
     assetSelectedFile = null;
+    loadAndRenderDividends(cleanTicker);
 
     // 2. Full clean reset of all modal DOM elements & inputs
     if (assetDetailTickerEl) assetDetailTickerEl.textContent = cleanTicker;
@@ -4002,6 +4069,7 @@
     }
     currentModalStock = null;
     currentAssetTicker = null;
+    currentModalActiveTicker = null;
     assetSelectedFile = null;
   }
 
@@ -4528,6 +4596,166 @@
   }
 
   if (assetDeleteBtn) assetDeleteBtn.addEventListener('click', deleteAssetHistory);
+
+  const btnDownloadDividends = document.getElementById('btn-download-dividends');
+  if (btnDownloadDividends) {
+    btnDownloadDividends.addEventListener('click', async () => {
+      if (!currentModalActiveTicker) return;
+
+      const btn = btnDownloadDividends;
+      const originalText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<span>⏳ A descarregar...</span>`;
+
+      try {
+        const api = window.electronAPI || window.api;
+        const result = await api.downloadStockDividends(currentModalActiveTicker);
+        if (result && result.success) {
+          await loadAndRenderDividends(currentModalActiveTicker);
+        } else {
+          alert(`Não foi possível obter dividendos: ${(result && result.error) || 'Sem dados na Yahoo'}`);
+        }
+      } catch (error) {
+        console.error('Erro no download:', error);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+      }
+    });
+  }
+
+  // ── Modal de Escolha do 1º Registo (Preços vs. Dividendos) ──
+  const modalChoice = document.getElementById('modal-first-record-choice');
+  const btnCloseChoice = document.getElementById('btn-close-choice-modal');
+  const btnCancelChoice = document.getElementById('btn-cancel-choice-modal');
+  const btnChoicePrices = document.getElementById('btn-choice-prices-only');
+  const btnChoiceDividends = document.getElementById('btn-choice-dividends-only');
+  const btnChoiceBoth = document.getElementById('btn-choice-both');
+
+  function openFirstRecordChoiceModal() {
+    if (!modalChoice) return;
+
+    // Identifica o índice atualmente selecionado para contextualizar a mensagem
+    const dbIndex = typeof getSelectedIndexDbName === 'function' ? getSelectedIndexDbName() : null;
+    const selElem = document.getElementById('select-index') || document.getElementById('select-index-bulk-fetch');
+    const selectedText = (selElem && selElem.selectedOptions && selElem.selectedOptions[0])
+      ? selElem.selectedOptions[0].textContent
+      : (selElem?.value || 'Todos os Ativos');
+    const displayIndex = (selElem?.value === 'ALL' || !selElem?.value) ? 'Todos os Ativos' : (dbIndex || selectedText);
+
+    // Atualiza a pílula de informação do índice alvo
+    const targetBadge = document.getElementById('target-index-pill-badge');
+    if (targetBadge) {
+      targetBadge.textContent = displayIndex || 'Todos os Ativos';
+    }
+
+    const targetLabel = document.getElementById('first-record-choice-target');
+    if (targetLabel) {
+      targetLabel.textContent = `Seleciona os dados que pretendes obter da Yahoo Finance para ${displayIndex}:`;
+    }
+
+    // Reset do estado de progresso
+    const progressBox = document.getElementById('choice-modal-progress-box');
+    if (progressBox) {
+      progressBox.classList.add('hidden');
+      progressBox.style.display = 'none';
+    }
+    const progressBar = document.getElementById('choice-modal-progress-bar');
+    if (progressBar) progressBar.style.width = '0%';
+    const counterText = document.getElementById('choice-modal-counter');
+    if (counterText) counterText.textContent = '0 / 0';
+    const statusText = document.getElementById('choice-modal-status-text');
+    if (statusText) statusText.textContent = 'A preparar descarregamento...';
+
+    // Reativa os botões caso tivessem ficado desativados
+    modalChoice.querySelectorAll('.choice-option-btn').forEach(btn => btn.disabled = false);
+
+    modalChoice.classList.remove('hidden');
+    modalChoice.style.display = 'flex';
+  }
+
+  function closeFirstRecordChoiceModal() {
+    if (modalChoice) {
+      modalChoice.classList.add('hidden');
+      modalChoice.style.display = 'none';
+    }
+  }
+
+  if (btnCloseChoice) btnCloseChoice.addEventListener('click', closeFirstRecordChoiceModal);
+  if (btnCancelChoice) btnCancelChoice.addEventListener('click', closeFirstRecordChoiceModal);
+
+  async function executeBatchDownload(mode) {
+    const selectedIndex = (typeof getSelectedIndexDbName === 'function' ? getSelectedIndexDbName() : null)
+      || (document.getElementById('select-index-bulk-fetch')?.value)
+      || (document.getElementById('select-index')?.value)
+      || null;
+    const progressBox = document.getElementById('choice-modal-progress-box');
+    const statusText = document.getElementById('choice-modal-status-text');
+    const counterText = document.getElementById('choice-modal-counter');
+    const progressBar = document.getElementById('choice-modal-progress-bar');
+    const optionButtons = modalChoice ? modalChoice.querySelectorAll('.choice-option-btn') : [];
+
+    // Bloquear botões enquanto descarrega
+    optionButtons.forEach(b => b.disabled = true);
+    if (progressBox) {
+      progressBox.classList.remove('hidden');
+      progressBox.style.display = 'block';
+    }
+
+    if (statusText) statusText.textContent = 'A auditar ativos no SQLite...';
+    if (progressBar) progressBar.style.width = '0%';
+
+    try {
+      const api = window.electronAPI || window.api;
+      const result = await api.syncIndexDataBatch({
+        indexFilter: selectedIndex,
+        mode: mode // 'PRICES_ONLY', 'DIVIDENDS_ONLY' ou 'BOTH'
+      });
+
+      if (result && result.success) {
+        if (statusText) statusText.textContent = `✅ Concluído! ${result.updatedCount} ativos processados.`;
+        if (progressBar) progressBar.style.width = '100%';
+
+        setTimeout(async () => {
+          closeFirstRecordChoiceModal();
+          if (typeof reloadMyListFromDatabase === 'function') await reloadMyListFromDatabase();
+          if (typeof refreshIndexStatusBadge === 'function') await refreshIndexStatusBadge();
+          if (typeof refreshMyListTable === 'function') await refreshMyListTable();
+          else if (typeof loadMyListStocks === 'function') await loadMyListStocks();
+        }, 900);
+      } else {
+        const errMsg = (result && (result.message || result.error)) || 'Aviso durante o download';
+        alert(`Aviso durante o download: ${errMsg}`);
+        optionButtons.forEach(b => b.disabled = false);
+      }
+    } catch (err) {
+      console.error('Erro na sincronização em lote:', err);
+      if (statusText) statusText.textContent = '❌ Erro durante o processo.';
+      optionButtons.forEach(b => b.disabled = false);
+    }
+  }
+
+  // Ouvir evento de progresso IPC emitido pelo Main Process
+  const apiInstance = window.electronAPI || window.api;
+  if (apiInstance && typeof apiInstance.onSyncProgressUpdate === 'function') {
+    apiInstance.onSyncProgressUpdate((data) => {
+      const statusText = document.getElementById('choice-modal-status-text');
+      const counterText = document.getElementById('choice-modal-counter');
+      const progressBar = document.getElementById('choice-modal-progress-bar');
+
+      if (data && data.total > 0) {
+        const pct = Math.round((data.current / data.total) * 100);
+        if (progressBar) progressBar.style.width = `${pct}%`;
+        if (counterText) counterText.textContent = `${data.current} / ${data.total}`;
+        if (statusText) statusText.textContent = `A processar ${data.ticker} (${data.label || 'A descarregar'})...`;
+      }
+    });
+  }
+
+  // Eventos de clique nas opções
+  if (btnChoicePrices) btnChoicePrices.addEventListener('click', () => executeBatchDownload('PRICES_ONLY'));
+  if (btnChoiceDividends) btnChoiceDividends.addEventListener('click', () => executeBatchDownload('DIVIDENDS_ONLY'));
+  if (btnChoiceBoth) btnChoiceBoth.addEventListener('click', () => executeBatchDownload('BOTH'));
 
   function handleAssetFileSelect(file) {
     if (!file) return;

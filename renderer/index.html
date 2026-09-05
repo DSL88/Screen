@@ -1459,6 +1459,54 @@
           <div class="asset-detail-full-download-status" id="asset-detail-full-download-status" hidden></div>
         </div>
 
+        <!-- SECÇÃO DE HISTÓRICO DE DIVIDENDOS -->
+        <div class="modal-section-divider"></div>
+        <div class="modal-dividends-container" style="margin-top: 15px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h3 style="font-size: 14px; font-weight: 700; color: #f1f5f9; margin: 0;">
+              💰 Histórico de Dividendos
+            </h3>
+            <button id="btn-download-dividends" class="btn-primary asset-detail-download-dividends-btn" style="border-radius: 9999px;">
+              <span>📥 Descarregar Dividendos</span>
+            </button>
+          </div>
+
+          <!-- RESUMO DE DIVIDENDOS -->
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px;">
+            <div style="background: #111827; padding: 8px 12px; border-radius: 6px; border: 1px solid #1f2937;">
+              <span style="font-size: 11px; color: #94a3b8; display: block;">Total Distribuído</span>
+              <strong id="modal-div-total" style="font-size: 13px; color: #34d399;">--</strong>
+            </div>
+            <div style="background: #111827; padding: 8px 12px; border-radius: 6px; border: 1px solid #1f2937;">
+              <span style="font-size: 11px; color: #94a3b8; display: block;">Nº de Pagamentos</span>
+              <strong id="modal-div-count" style="font-size: 13px; color: #f8fafc;">0</strong>
+            </div>
+            <div style="background: #111827; padding: 8px 12px; border-radius: 6px; border: 1px solid #1f2937;">
+              <span style="font-size: 11px; color: #94a3b8; display: block;">Último Pagamento</span>
+              <strong id="modal-div-last" style="font-size: 13px; color: #60a5fa;">--</strong>
+            </div>
+          </div>
+
+          <!-- TABELA COM SCROLL DE DIVIDENDOS -->
+          <div style="max-height: 160px; overflow-y: auto; border: 1px solid #1f2937; border-radius: 6px; background: #0b0f19;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 12px; text-align: left;">
+              <thead style="background: #161f30; position: sticky; top: 0;">
+                <tr>
+                  <th style="padding: 6px 12px; color: #94a3b8; font-weight: 600;">Data Ex-Dividendo</th>
+                  <th style="padding: 6px 12px; color: #94a3b8; font-weight: 600; text-align: right;">Montante Pago</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-modal-dividends">
+                <tr>
+                  <td colspan="2" style="text-align: center; color: #64748b; padding: 15px;">
+                    A carregar dividendos...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div id="upload-zone">
           <div class="asset-detail-import-section">
             <div class="asset-detail-section-title">Importar / Adicionar Folha de Dados (.csv / .xlsx)</div>
@@ -1662,6 +1710,86 @@
         <button class="btn-primary" id="btn-retry-failed-tickers">Repetir Sincronização</button>
         <button class="btn-secondary" id="btn-close-diag-btn">Entendido</button>
       </div>
+    </div>
+  </div>
+
+  <!-- MODAL DE ESCOLHA DO 1º REGISTO / DIVIDENDOS (REFINADO) -->
+  <div id="modal-first-record-choice" class="modal-backdrop hidden" style="display: none; position: fixed; inset: 0; background: rgba(3, 7, 18, 0.78); backdrop-filter: blur(6px); z-index: 9999; align-items: center; justify-content: center;">
+    <div class="modal-card" style="background: #0f172a; border: 1px solid #1e293b; border-radius: 22px; width: 470px; padding: 26px 28px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);">
+      
+      <!-- Cabeçalho -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+        <h3 style="font-size: 16px; font-weight: 700; color: #f8fafc; margin: 0; display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 18px;">📥</span>
+          <span>Descarregar Histórico Inicial</span>
+        </h3>
+        <button id="btn-close-choice-modal" style="background: #1e293b; border: 1px solid #334155; color: #94a3b8; width: 30px; height: 30px; border-radius: 9999px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: all 0.2s;">✕</button>
+      </div>
+
+      <!-- PÍLULA DE INFORMAÇÃO DO ALVO / ÍNDICE -->
+      <div style="margin-bottom: 16px;">
+        <div class="info-target-pill" style="display: inline-flex; align-items: center; gap: 8px; background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(51, 65, 85, 0.8); padding: 6px 14px; border-radius: 9999px;">
+          <span style="font-size: 13px;">🎯</span>
+          <span style="font-size: 12px; color: #94a3b8; font-weight: 500;">Alvo:</span>
+          <span id="target-index-pill-badge" style="background: rgba(37, 99, 235, 0.25); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 600; padding: 2px 10px; border-radius: 9999px;">
+            Todos os Ativos
+          </span>
+        </div>
+        <p id="first-record-choice-target" style="font-size: 12px; color: #64748b; margin: 10px 0 0 4px;">
+          Seleciona os dados que pretendes obter da Yahoo Finance:
+        </p>
+      </div>
+
+      <!-- Grelha de Opções -->
+      <div style="display: flex; flex-direction: column; gap: 11px;">
+        
+        <!-- Opção 1: Cotações / Preços -->
+        <button id="btn-choice-prices-only" class="choice-option-btn" style="background: #162032; border: 1px solid #283548; border-radius: 14px; padding: 13px 16px; text-align: left; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 14px;">
+          <span style="font-size: 22px;">📊</span>
+          <div>
+            <strong style="color: #f1f5f9; font-size: 13px; display: block;">1º Registo de Cotações (Preços)</strong>
+            <span style="color: #8da2be; font-size: 11.5px;">Descarrega velas diárias históricas desde o IPO/Origem</span>
+          </div>
+        </button>
+
+        <!-- Opção 2: Dividendos -->
+        <button id="btn-choice-dividends-only" class="choice-option-btn" style="background: #162032; border: 1px solid #283548; border-radius: 14px; padding: 13px 16px; text-align: left; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 14px;">
+          <span style="font-size: 22px;">💰</span>
+          <div>
+            <strong style="color: #f1f5f9; font-size: 13px; display: block;">Histórico de Dividendos</strong>
+            <span style="color: #8da2be; font-size: 11.5px;">Descarrega todos os pagamentos e datas de ex-dividendo</span>
+          </div>
+        </button>
+
+        <!-- Opção 3: Ambos -->
+        <button id="btn-choice-both" class="choice-option-btn" style="background: #162032; border: 1px solid #2563eb; border-radius: 14px; padding: 13px 16px; text-align: left; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 14px;">
+          <span style="font-size: 22px;">⚡</span>
+          <div>
+            <strong style="color: #60a5fa; font-size: 13px; display: block;">Descarregar Ambos (Preços + Dividendos)</strong>
+            <span style="color: #8da2be; font-size: 11.5px;">Sincronização completa de cotações e proventos passados</span>
+          </div>
+        </button>
+
+      </div>
+
+      <!-- Progresso Dinâmico (oculto inicialmente) -->
+      <div id="choice-modal-progress-box" class="hidden" style="display: none; margin-top: 16px; padding-top: 14px; border-top: 1px solid #1e293b;">
+        <div style="display: flex; justify-content: space-between; font-size: 12px; color: #cbd5e1; margin-bottom: 6px;">
+          <span id="choice-modal-status-text">A preparar descarregamento...</span>
+          <span id="choice-modal-counter">0 / 0</span>
+        </div>
+        <div style="width: 100%; height: 7px; background: #1e293b; border-radius: 9999px; overflow: hidden;">
+          <div id="choice-modal-progress-bar" style="width: 0%; height: 100%; background: #3b82f6; border-radius: 9999px; transition: width 0.3s ease;"></div>
+        </div>
+      </div>
+
+      <!-- Rodapé com Botão Cancelar Pílula -->
+      <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
+        <button id="btn-cancel-choice-modal" style="background: #1e293b; color: #cbd5e1; border: 1px solid #334155; padding: 8px 24px; border-radius: 9999px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+          Cancelar
+        </button>
+      </div>
+
     </div>
   </div>
 

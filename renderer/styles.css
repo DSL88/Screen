@@ -3714,6 +3714,87 @@ select.param-input option {
   border: 1px solid rgba(251, 113, 133, 0.20);
 }
 
+.asset-detail-download-dividends-btn,
+#btn-download-dividends {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  height: 32px !important;
+  padding: 0 16px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  border-radius: 9999px !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
+  border: none !important;
+  cursor: pointer !important;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35) !important;
+  transition: all 0.2s ease-in-out !important;
+  white-space: nowrap !important;
+}
+
+.asset-detail-download-dividends-btn:hover,
+#btn-download-dividends:hover {
+  background: #1d4ed8 !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45) !important;
+}
+
+.asset-detail-download-dividends-btn:active,
+#btn-download-dividends:active {
+  transform: translateY(0) !important;
+}
+
+.asset-detail-download-dividends-btn:disabled,
+#btn-download-dividends:disabled {
+  opacity: 0.55 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Modal de Escolha do 1º Registo / Dividendos (Refinado) */
+.choice-option-btn {
+  background: #162032;
+  border: 1px solid #283548;
+  border-radius: 14px;
+  padding: 13px 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.choice-option-btn:hover {
+  background: #1e293b !important;
+  border-color: #3b82f6 !important;
+  transform: translateY(-1px);
+}
+
+.choice-option-btn:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+}
+
+.info-target-pill {
+  transition: all 0.2s ease;
+}
+
+#btn-close-choice-modal:hover {
+  background: #334155 !important;
+  color: #f8fafc !important;
+}
+
+#btn-cancel-choice-modal:hover {
+  background: #334155 !important;
+  color: #ffffff !important;
+}
+
 .asset-delete-icon {
   display: inline-block;
   width: 11px;
@@ -5265,6 +5346,10 @@ tr.empty td .empty-state {
 .asset-detail-save-metadata-btn,
 .asset-detail-full-download-btn,
 .asset-detail-delete-btn,
+.asset-detail-download-dividends-btn,
+#btn-download-dividends,
+#btn-cancel-choice-modal,
+#btn-close-choice-modal,
 .shortcuts-search-btn,
 .modal-search-add-btn,
 .toolbar-btn,

@@ -1208,6 +1208,45 @@ async function fetchIncrementalCandles(ticker, lastDate) {
   throw lastErr || new Error(`Falha ao obter cotações para ${ticker}`);
 }
 
+/**
+ * Descarrega todos os dividendos históricos de um ativo desde a origem (period1=0)
+ */
+async function fetchStockDividendsFromYahoo(ticker, period1 = 0) {
+  const cleanTicker = encodeURIComponent(String(ticker).trim().toUpperCase());
+  const period2 = Math.floor(Date.now() / 1000);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${cleanTicker}?period1=${period1}&period2=${period2}&interval=1d&events=div`;
+
+  const response = await axios.get(url, {
+    timeout: 10000,
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+  });
+
+  const result = response.data?.chart?.result?.[0];
+  if (!result) return [];
+
+  const rawDividends = result.events?.dividends;
+  if (!rawDividends || typeof rawDividends !== 'object') {
+    return []; // A empresa não possui histórico de dividendos registado
+  }
+
+  const dividends = [];
+  for (const timestampKey of Object.keys(rawDividends)) {
+    const item = rawDividends[timestampKey];
+    if (item && item.amount != null) {
+      const d = new Date(Number(item.date || timestampKey) * 1000);
+      dividends.push({
+        ticker: String(ticker).trim().toUpperCase(),
+        date: d.toISOString().slice(0, 10), // Formato YYYY-MM-DD
+        amount: Number(item.amount)
+      });
+    }
+  }
+
+  // Ordena por data decrescente (mais recente primeiro)
+  dividends.sort((a, b) => (a.date < b.date ? 1 : -1));
+  return dividends;
+}
+
 module.exports = {
   fetchWithRetry,
   fetchWithRetrySpec,
@@ -1229,6 +1268,7 @@ module.exports = {
   fetchFullHistoryFromIPO,
   networkLimit,
   fetchWithBackoff,
-  syncTickersBatch
+  syncTickersBatch,
+  fetchStockDividendsFromYahoo
 };
 

@@ -180,6 +180,16 @@ class DB {
           added_at  TEXT DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_market_shortcuts_ticker ON market_shortcuts(ticker);
+
+        CREATE TABLE IF NOT EXISTS historical_dividends (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ticker TEXT NOT NULL,
+          date TEXT NOT NULL,
+          amount REAL NOT NULL,
+          UNIQUE(ticker, date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_div_ticker ON historical_dividends(ticker);
+        CREATE INDEX IF NOT EXISTS idx_div_ticker_date ON historical_dividends(ticker, date);
       `);
 
       const cols = this.db.prepare("PRAGMA table_info(historical_signals)").all();
@@ -2137,6 +2147,49 @@ class DB {
     sql += ` GROUP BY s.ticker ORDER BY s.ticker ASC`;
 
     return this.db.prepare(sql).all(...params);
+  }
+
+  saveStockDividends(ticker, dividends) {
+    if (!Array.isArray(dividends) || dividends.length === 0) return 0;
+    const cleanTicker = String(ticker || '').trim().toUpperCase();
+    const insertDividendStmt = this.db.prepare(`
+      INSERT OR REPLACE INTO historical_dividends (ticker, date, amount)
+      VALUES (@ticker, @date, @amount)
+    `);
+
+    const bulkInsertDividends = this.db.transaction((divs) => {
+      for (const div of divs) {
+        insertDividendStmt.run({
+          ticker: String(div.ticker || cleanTicker).trim().toUpperCase(),
+          date: String(div.date).slice(0, 10),
+          amount: Number(div.amount)
+        });
+      }
+    });
+
+    bulkInsertDividends(dividends);
+    return dividends.length;
+  }
+
+  getStockDividends(ticker) {
+    const cleanTicker = String(ticker).trim().toUpperCase();
+    const stmt = this.db.prepare(`
+      SELECT date, amount
+      FROM historical_dividends
+      WHERE UPPER(TRIM(ticker)) = ?
+      ORDER BY date DESC
+    `);
+    const rows = stmt.all(cleanTicker);
+
+    const totalAmount = rows.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    const lastDividend = rows.length > 0 ? rows[0] : null;
+
+    return {
+      dividends: rows,
+      totalCount: rows.length,
+      totalAmount: Number(totalAmount.toFixed(4)),
+      lastDividend: lastDividend
+    };
   }
 
   close() {

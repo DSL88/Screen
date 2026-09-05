@@ -1488,6 +1488,111 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('get-stock-dividends', async (_event, payload) => {
+      const ticker = (payload && typeof payload === 'object') ? payload.ticker : payload;
+      try {
+        return db.getStockDividends(ticker);
+      } catch (error) {
+        console.error(`Erro ao obter dividendos para ${ticker}:`, error.message);
+        return { dividends: [], totalCount: 0, totalAmount: 0, lastDividend: null };
+      }
+    });
+
+    ipcMain.handle('download-stock-dividends', async (_event, payload) => {
+      const rawTicker = (payload && typeof payload === 'object') ? payload.ticker : payload;
+      const cleanTicker = String(rawTicker || '').trim().toUpperCase();
+      try {
+        const dividends = await yahooClient.fetchStockDividendsFromYahoo(cleanTicker, 0);
+        if (dividends && dividends.length > 0) {
+          db.saveStockDividends(cleanTicker, dividends);
+        }
+        const updatedData = db.getStockDividends(cleanTicker);
+        return {
+          success: true,
+          count: (dividends && dividends.length) || 0,
+          ...updatedData
+        };
+      } catch (error) {
+        console.error(`Erro ao descarregar dividendos para ${cleanTicker}:`, error.message);
+        return { success: false, error: error.message };
+      }
+    });
+
+    ipcMain.handle('sync-index-data-batch', async (event, input) => {
+      try {
+        const { indexFilter, mode = 'BOTH' } = input || {};
+        const assets = db.getStocksByIndex(indexFilter);
+        if (!assets || assets.length === 0) {
+          return { success: false, message: 'Nenhum ativo associado ao índice selecionado.' };
+        }
+
+        let updatedCount = 0;
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        for (let i = 0; i < assets.length; i++) {
+          const stock = assets[i];
+          const ticker = (stock.ticker || '').trim().toUpperCase();
+          if (!ticker) continue;
+
+          if (event && event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('SYNC_PROGRESS_UPDATE', {
+              current: i + 1,
+              total: assets.length,
+              ticker: ticker,
+              label: mode === 'DIVIDENDS_ONLY' ? 'Dividendos' : (mode === 'PRICES_ONLY' ? '1º Registo' : 'Preços + Dividendos')
+            });
+          }
+
+          if (mode === 'PRICES_ONLY' || mode === 'BOTH') {
+            try {
+              const candles = await yahooClient.fetchFullHistoryFromIPO(ticker);
+              if (candles && candles.length > 0) {
+                if (typeof db.saveHistoricalCandlesBatch === 'function') {
+                  db.saveHistoricalCandlesBatch(ticker, candles);
+                } else if (typeof db.saveHistoricalCandlesFromImport === 'function') {
+                  db.saveHistoricalCandlesFromImport(ticker, candles);
+                }
+                if (typeof db.setFullHistoryFetched === 'function') {
+                  db.setFullHistoryFetched(ticker);
+                }
+              }
+            } catch (priceErr) {
+              console.warn(`[Aviso Preços] ${ticker}: ${priceErr.message}`);
+            }
+          }
+
+          if (mode === 'DIVIDENDS_ONLY' || mode === 'BOTH') {
+            try {
+              const dividends = await yahooClient.fetchStockDividendsFromYahoo(ticker, 0);
+              if (dividends && dividends.length > 0) {
+                db.saveStockDividends(ticker, dividends);
+              }
+            } catch (divErr) {
+              console.warn(`[Aviso Dividendos] ${ticker}: ${divErr.message}`);
+            }
+          }
+
+          updatedCount++;
+          await sleep(200);
+        }
+
+        if (mode === 'PRICES_ONLY' || mode === 'BOTH') {
+          if (typeof db.reconcileAllStocksFirstDate === 'function') {
+            db.reconcileAllStocksFirstDate();
+          }
+        }
+
+        return {
+          success: true,
+          updatedCount,
+          total: assets.length
+        };
+      } catch (error) {
+        console.error('Erro na sincronização em lote:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
     ipcMain.handle('get-distinct-indices', async () => {
       try {
         const indices = db.getAllDistinctIndices();
