@@ -606,6 +606,16 @@ app.whenReady().then(async () => {
           console.warn('[QuantEngine] Erro ao carregar custom_tickers do SQLite:', e);
         }
       }
+      // Metadados de identificação (nome, país, índice) para o motor e para o drawer.
+      try {
+        const tickers = Array.isArray(p.tickers) ? p.tickers : [];
+        if (tickers.length > 0) {
+          const metadata = db.getTickersMetadata(tickers);
+          p.asset_meta = { ...(p.asset_meta || {}), ...metadata };
+        }
+      } catch (e) {
+        console.warn('[QuantEngine] Erro ao anexar asset_meta ao payload do pipeline:', e);
+      }
       return p;
     };
 

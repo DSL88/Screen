@@ -236,7 +236,7 @@
                 📌 Tabela Mestra de Recomendações (Top Buy List)
               </span>
               <span class="badge-count-pill" id="badge-top-count" style="background: #1e293b; color: #38bdf8; font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 9999px; border: 1px solid #334155;">
-                5 Ativos Ordenados por Convicção
+                A aguardar execução do Motor...
               </span>
               <span class="master-table-count-badge" id="master-table-count" style="display: none;"></span>
             </div>
@@ -249,6 +249,7 @@
             <table class="table-master-recommendations table-master-quant" id="table-master-recommendations" style="width: 100%; border-collapse: collapse; font-size: 12px;">
               <thead>
                 <tr style="border-bottom: 1px solid #1e2538; color: #64748b; text-align: left; height: 38px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">
+                  <th style="padding: 8px 10px; text-align: center;">#</th>
                   <th style="padding: 8px 12px;">TICKER</th>
                   <th style="padding: 8px 12px;">SETOR</th>
                   <th style="padding: 8px 12px; text-align: right;">PREÇO ATUAL</th>
@@ -263,7 +264,7 @@
               </thead>
               <tbody id="tbody-top-recommendations">
                 <tr>
-                  <td colspan="10" style="text-align: center; color: #64748b; padding: 24px;">
+                  <td colspan="11" style="text-align: center; color: #64748b; padding: 24px;">
                     A aguardar execução do Motor Quantitativo Unificado...
                   </td>
                 </tr>
@@ -1540,7 +1541,7 @@
     <!--  DRAWER LATERAL DE INSPEÇÃO ESTOCÁSTICA (OFF-CANVAS)       -->
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- OVERLAY / BACKDROP ESCURO -->
-    <div id="drawer-backdrop" class="drawer-backdrop hidden" onclick="closeStochasticDrawer()"></div>
+    <div id="drawer-backdrop" class="drawer-backdrop hidden" onclick="event.preventDefault(); event.stopPropagation(); closeStochasticDrawer()"></div>
 
     <!-- GAVETA LATERAL RETRÁTIL (DRAWER) -->
     <aside id="stochastic-drawer" class="stochastic-drawer" aria-hidden="true">
@@ -1551,10 +1552,15 @@
             <span class="badge-drawer-tag">INSPEÇÃO ESTOCÁSTICA</span>
             <span id="drawer-mc-tier" class="badge-drawer-tier">ELITE (70%+)</span>
           </div>
-          <h2 id="drawer-ticker">ELEC.PA</h2>
+          <h2 id="drawer-company-name" class="drawer-company-name" title="">Nome da Empresa</h2>
+          <div class="drawer-meta-badges">
+            <span id="drawer-ticker" class="drawer-badge-ticker">TICKER</span>
+            <span id="drawer-country-badge" class="drawer-badge-country">🌍 --</span>
+            <span id="drawer-index-badge" class="drawer-badge-index">📊 --</span>
+          </div>
           <p id="drawer-subtitle">Simulação Monte Carlo Regime-Switching • H=35 Dias Úteis</p>
         </div>
-        <button class="drawer-close-btn" onclick="closeStochasticDrawer()" title="Fechar (Esc)">✕</button>
+        <button id="drawer-close-btn" type="button" class="drawer-close-btn" onclick="event.preventDefault(); event.stopPropagation(); closeStochasticDrawer()" aria-label="Fechar painel" title="Fechar (Esc)">✕</button>
       </header>
 
       <!-- CORPO COM SCROLL INTERNO -->
@@ -1794,6 +1800,7 @@
   </div>
 
   <script src="chart.umd.js"></script>
+  <script src="currency.js"></script>
     <script src="renderer.js"></script>
     <script src="simulationRenderer.js"></script>
     <script src="quantRenderer.js"></script>

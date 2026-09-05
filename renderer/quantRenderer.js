@@ -13,6 +13,32 @@
   let lastPipelineResult = null;
   let currentSelectedAsset = null;
 
+  // Converte um país (código ISO-2 ou nome) em "🇪🇺 Nome" para as tags do drawer/tabela.
+  const COUNTRY_FLAGS = {
+    PT: '🇵🇹', ES: '🇪🇸', FR: '🇫🇷', DE: '🇩🇪', IT: '🇮🇹', GB: '🇬🇧', UK: '🇬🇧',
+    US: '🇺🇸', CA: '🇨🇦', BR: '🇧🇷', MX: '🇲🇽', CH: '🇨🇭', NL: '🇳🇱', SE: '🇸🇪',
+    BE: '🇧🇪', AT: '🇦🇹', IE: '🇮🇪', DK: '🇩🇰', NO: '🇳🇴', FI: '🇫🇮', PL: '🇵🇱',
+    GR: '🇬🇷', JP: '🇯🇵', CN: '🇨🇳', IN: '🇮🇳', KR: '🇰🇷', AU: '🇦🇺', ZA: '🇿🇦',
+    SG: '🇸🇬', HK: '🇭🇰', AE: '🇦🇪', SA: '🇸🇦', TR: '🇹🇷'
+  };
+  const COUNTRY_NAMES = {
+    PT: 'Portugal', ES: 'Espanha', FR: 'França', DE: 'Alemanha', IT: 'Itália',
+    GB: 'Reino Unido', UK: 'Reino Unido', US: 'EUA', CA: 'Canadá', BR: 'Brasil',
+    MX: 'México', CH: 'Suíça', NL: 'Países Baixos', SE: 'Suécia', BE: 'Bélgica',
+    AT: 'Áustria', IE: 'Irlanda', DK: 'Dinamarca', NO: 'Noruega', FI: 'Finlândia',
+    PL: 'Polónia', GR: 'Grécia', JP: 'Japão', CN: 'China', IN: 'Índia', KR: 'Coreia do Sul',
+    AU: 'Austrália', ZA: 'África do Sul', SG: 'Singapura', HK: 'Hong Kong',
+    AE: 'Emirados Árabes', SA: 'Arábia Saudita', TR: 'Turquia'
+  };
+  function formatCountryWithFlag(raw) {
+    const value = String(raw || '').trim();
+    if (!value || value.toLowerCase() === 'global') return value || 'Global';
+    const code = value.toUpperCase();
+    const flag = COUNTRY_FLAGS[code] || '🌍';
+    const name = COUNTRY_NAMES[code] || value;
+    return `${flag} ${name}`;
+  }
+
   function init() {
     const btnRunUnified = $('btn-run-unified-quant') || $('btn-run-quant-pipeline');
     const subnavBtns = document.querySelectorAll('.quant-subnav-btn');
@@ -51,12 +77,31 @@
     // Controlos do Drawer Lateral Estocástico
     const drawerCloseBtn = $('drawer-close-btn');
     const drawerBtnClose = $('drawer-btn-close');
-    const drawerBackdrop = $('stochastic-drawer-backdrop');
+    const drawerBackdrop = $('drawer-backdrop') || $('stochastic-drawer-backdrop');
     const drawerBtnTrack = $('drawer-btn-track');
 
-    if (drawerCloseBtn) drawerCloseBtn.addEventListener('click', closeStochasticDrawer);
+    if (drawerCloseBtn) {
+      drawerCloseBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeStochasticDrawer();
+      });
+    }
     if (drawerBtnClose) drawerBtnClose.addEventListener('click', closeStochasticDrawer);
-    if (drawerBackdrop) drawerBackdrop.addEventListener('click', closeStochasticDrawer);
+    if (drawerBackdrop) {
+      drawerBackdrop.addEventListener('click', (e) => {
+        e.preventDefault();
+        closeStochasticDrawer();
+      });
+    }
+
+    // Fechar com a tecla Escape (garante fuga do painel sem reiniciar a app)
+    if (!window.__stochasticDrawerEscBound) {
+      window.__stochasticDrawerEscBound = true;
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeStochasticDrawer();
+      });
+    }
 
     if (drawerBtnTrack) {
       drawerBtnTrack.addEventListener('click', async () => {
@@ -334,7 +379,7 @@
     if (!assetsList || assetsList.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="10" style="text-align:center; color:#eab308; padding:28px;">
+          <td colspan="11" style="text-align:center; color:#eab308; padding:28px;">
             Nenhum ativo cumpriu os critérios estocásticos e de solvência neste momento.
           </td>
         </tr>`;
@@ -342,9 +387,15 @@
       return;
     }
 
-    if (countBadge) countBadge.textContent = `${assetsList.length} Ativos Ordenados por Convicção`;
+    // Salvaguarda: manter a ordem do motor (Alpha Score decrescente) e cortar nos Top 20.
+    const sortedAssets = [...assetsList]
+      .sort((a, b) => Number(b.alpha_score || 0) - Number(a.alpha_score || 0))
+      .slice(0, 20);
 
-    assetsList.forEach((asset, idx) => {
+    if (countBadge) countBadge.textContent = `Top ${sortedAssets.length} Melhores Ativos (Ordenados do Maior para o Menor)`;
+
+    sortedAssets.forEach((asset, idx) => {
+      const rank = Number(asset.rank) > 0 ? Number(asset.rank) : idx + 1;
       const winRateNum = parseFloat(asset.win_rate_numeric || asset.mc_win_rate || 50.0);
       const tier = asset.tier || classifyWinRateTier(winRateNum);
       const tierClass = `tier-${tier.tier_id || 3}`;
@@ -354,10 +405,13 @@
       const targetPrice = currentPrice * (1 + 0.048);
       const stopLossPrice = currentPrice * (1 - 0.024);
 
-      // Formatação monetária com 2 casas decimais
-      const formattedCurrent = `${currentPrice.toFixed(2)} €`;
-      const formattedTarget = `${targetPrice.toFixed(2)} €`;
-      const formattedStop = `${stopLossPrice.toFixed(2)} €`;
+      // Moeda dinâmica por país/bolsa (com fallback determinístico para €)
+      const money = (value) => (typeof window.formatPriceWithCurrency === 'function'
+        ? window.formatPriceWithCurrency(value, asset)
+        : `${Number(value || 0).toFixed(2)} €`);
+      const formattedCurrent = money(currentPrice);
+      const formattedTarget = money(targetPrice);
+      const formattedStop = money(stopLossPrice);
 
       const cvarRisk = parseFloat(asset.mc_cvar_95 || asset.cvar_95 || 3.5).toFixed(1);
       const grahamScore = parseFloat(asset.graham_score || asset.quality_score || 75.0).toFixed(1);
@@ -376,8 +430,17 @@
       tr.setAttribute('data-ticker', asset.ticker || '');
 
       tr.innerHTML = `
-        <td><strong style="color:#ffffff; font-size:14px;">${asset.ticker}</strong></td>
-        <td><span style="color:#94a3b8; font-size:12px;">${asset.sector || 'Outros'}</span></td>
+        <td style="text-align:center; font-weight:700; font-size:11px; color:${rank <= 3 ? '#38bdf8' : '#64748b'};">
+          #${rank}
+        </td>
+        <td>
+          <strong style="color:#ffffff; font-size:14px;">${asset.ticker}</strong>
+          <div style="font-size:10px; color:#64748b; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${asset.name || asset.ticker}">${asset.name || asset.ticker}</div>
+        </td>
+        <td>
+          <span style="color:#94a3b8; font-size:12px;">${asset.sector || 'Outros'}</span>
+          <div style="font-size:10px; color:#64748b;">${asset.country ? formatCountryWithFlag(asset.country) : ''}${asset.country && asset.index_name ? ' • ' : ''}${asset.index_name || ''}</div>
+        </td>
         <td class="num-col" style="font-weight:600;">${formattedCurrent}</td>
         <td class="num-col text-emerald-400 font-semibold" style="color:#34d399; font-weight:700;">${formattedTarget}</td>
         <td class="num-col text-rose-400 font-semibold" style="color:#fb7185; font-weight:600;">${formattedStop}</td>
@@ -477,12 +540,22 @@
     const sl = price * (1 - 0.024); // -2.4%
     const winRate = Number(asset.winRateMC || asset.mc_win_rate || asset.win_rate_numeric || 70);
 
-    // 1. Preencher Cabeçalho
+    // 1. Preencher Cabeçalho (Nome da Empresa + Metadados)
+    const nameEl = $('drawer-company-name');
     const tickerEl = $('drawer-ticker');
+    const countryEl = $('drawer-country-badge');
+    const indexEl = $('drawer-index-badge');
     const subtitleEl = $('drawer-subtitle');
     const tierBadge = $('drawer-mc-tier');
 
+    const companyName = (asset.name || asset.company_name || asset.ticker || '--').toString().trim();
+    if (nameEl) {
+      nameEl.textContent = companyName;
+      nameEl.title = companyName;
+    }
     if (tickerEl) tickerEl.textContent = asset.ticker || '--';
+    if (countryEl) countryEl.textContent = `🌍 ${formatCountryWithFlag(asset.country || 'Global')}`;
+    if (indexEl) indexEl.textContent = `📊 ${asset.index_name || asset.index || 'Sem Índice'}`;
     if (subtitleEl) {
       subtitleEl.textContent = `${asset.sector || 'Outros'} • Simulação Monte Carlo Regime-Switching • H=35 Dias Úteis`;
     }
@@ -490,21 +563,28 @@
       tierBadge.textContent = winRate >= 70 ? 'ELITE (70%+)' : winRate >= 65 ? 'MUITO FORTE (65%+)' : winRate >= 60 ? 'FORTE (60%+)' : 'MODERADO (50-59%)';
     }
 
-    // 2. Preencher Preços e Alvos Monetários
+    // 2. Preencher Preços e Alvos Monetários (moeda dinâmica por país/bolsa)
+    const money = (value) => (typeof window.formatPriceWithCurrency === 'function'
+      ? window.formatPriceWithCurrency(value, asset)
+      : `${Number(value || 0).toFixed(2)} €`);
+    const delta = (value) => (typeof window.formatDeltaWithCurrency === 'function'
+      ? window.formatDeltaWithCurrency(value, asset)
+      : `${value >= 0 ? '+' : '-'}${Math.abs(Number(value || 0)).toFixed(2)} €`);
+
     const valPrice = $('drawer-val-price');
-    if (valPrice) valPrice.textContent = `${price.toFixed(2)} €`;
+    if (valPrice) valPrice.textContent = money(price);
 
     const valTp = $('drawer-val-tp');
-    if (valTp) valTp.textContent = `${tp.toFixed(2)} €`;
+    if (valTp) valTp.textContent = money(tp);
 
     const subTp = $('drawer-sub-tp');
-    if (subTp) subTp.textContent = `+${(tp - price).toFixed(2)} € (+4.8%)`;
+    if (subTp) subTp.textContent = `${delta(tp - price)} (+4.8%)`;
 
     const valSl = $('drawer-val-sl');
-    if (valSl) valSl.textContent = `${sl.toFixed(2)} €`;
+    if (valSl) valSl.textContent = money(sl);
 
     const subSl = $('drawer-sub-sl');
-    if (subSl) subSl.textContent = `-${(price - sl).toFixed(2)} € (-2.4%)`;
+    if (subSl) subSl.textContent = `${delta(-(price - sl))} (-2.4%)`;
 
     // 3. Preencher KPIs Estocásticos
     const mcWinRateEl = $('drawer-mc-winrate');
@@ -538,7 +618,8 @@
 
     // 5. Canvas Monte Carlo
     if (typeof window.drawMonteCarloSimulation === 'function') {
-      window.drawMonteCarloSimulation(price, tp, sl, 35);
+      const sym = typeof window.getAssetCurrencySymbol === 'function' ? window.getAssetCurrencySymbol(asset) : '€';
+      window.drawMonteCarloSimulation(price, tp, sl, 35, sym);
     }
 
     // 6. Abrir Gaveta
@@ -557,12 +638,16 @@
     if (drawer) {
       drawer.classList.remove('open');
       drawer.classList.remove('active');
+      drawer.style.display = '';
+      drawer.style.transform = '';
       drawer.setAttribute('aria-hidden', 'true');
     }
     if (backdrop) {
       backdrop.classList.remove('active');
       backdrop.classList.add('hidden');
+      backdrop.style.display = '';
     }
+    currentSelectedAsset = null;
     document.querySelectorAll('.table-master-quant tbody tr').forEach(r => r.classList.remove('selected'));
   }
 

@@ -561,6 +561,57 @@ class DB {
     ).all();
   }
 
+  /**
+   * Metadados de identificação (name, country, index_name) para o motor quantitativo
+   * e para a inspeção estocástica (drawer). Faz merge de custom_tickers (My List) com a
+   * tabela stocks (índices/países importados), priorizando o registo mais completo.
+   * @param {string[]} [tickers] - Lista opcional de tickers a filtrar; se ausente, todos.
+   * @returns {Object<string,{name:string,country:string,index_name:string}>}
+   */
+  getTickersMetadata(tickers) {
+    const norm = (v) => String(v == null ? '' : v).trim();
+    const key = (v) => norm(v).toUpperCase();
+    const meta = {};
+
+    const want = Array.isArray(tickers) && tickers.length > 0
+      ? new Set(tickers.map((t) => key(t)).filter(Boolean))
+      : null;
+
+    // 1. Base a partir da tabela stocks (índices/países importados).
+    try {
+      const rows = this.db.prepare(
+        'SELECT ticker, name, country, index_name FROM stocks'
+      ).all();
+      for (const r of rows) {
+        const tk = key(r.ticker);
+        if (!tk || (want && !want.has(tk))) continue;
+        meta[tk] = { name: norm(r.name), country: norm(r.country), index_name: norm(r.index_name) };
+      }
+    } catch (e) {
+      console.warn('[DB] getTickersMetadata: falha ao ler stocks:', e && e.message);
+    }
+
+    // 2. Overlay/complemento com custom_tickers (My List) — preenche lacunas.
+    try {
+      const rows = this.db.prepare(
+        'SELECT ticker, name, country, index_name FROM custom_tickers'
+      ).all();
+      for (const r of rows) {
+        const tk = key(r.ticker);
+        if (!tk || (want && !want.has(tk))) continue;
+        const cur = meta[tk] || { name: '', country: '', index_name: '' };
+        if (!cur.name && norm(r.name)) cur.name = norm(r.name);
+        if (!cur.country && norm(r.country)) cur.country = norm(r.country);
+        if (!cur.index_name && norm(r.index_name)) cur.index_name = norm(r.index_name);
+        meta[tk] = cur;
+      }
+    } catch (e) {
+      console.warn('[DB] getTickersMetadata: falha ao ler custom_tickers:', e && e.message);
+    }
+
+    return meta;
+  }
+
   clearCustomTickers() {
     this.db.prepare('DELETE FROM custom_tickers').run();
   }

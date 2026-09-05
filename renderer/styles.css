@@ -6532,7 +6532,7 @@ tr.empty td .empty-state {
   inset: 0;
   background: rgba(4, 7, 13, 0.72);
   backdrop-filter: blur(4px);
-  z-index: 998;
+  z-index: 10000;
   opacity: 1;
   transition: opacity 0.25s ease-in-out;
 }
@@ -6556,7 +6556,7 @@ tr.empty td .empty-state {
   background: #0d111a;
   border-left: 1px solid #1e2638;
   box-shadow: -12px 0 36px rgba(0, 0, 0, 0.65);
-  z-index: 999;
+  z-index: 10001;
   display: flex;
   flex-direction: column;
   transform: translateX(100%);
@@ -6608,6 +6608,47 @@ tr.empty td .empty-state {
   font-weight: 800;
   color: #f8fafc;
   letter-spacing: -0.5px;
+}
+.drawer-company-name {
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawer-meta-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.drawer-badge-ticker {
+  background: #1e293b;
+  color: #38bdf8;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  letter-spacing: 0.5px;
+}
+.drawer-badge-country {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.drawer-badge-index {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
 }
 .drawer-header p {
   margin: 4px 0 0;

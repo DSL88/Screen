@@ -247,6 +247,20 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
     horizon_markov = int(params.get("horizonte") or params.get("horizon") or 35)
     n_mc_sims = int(params.get("n_simulations", 2000 if len(tickers) > 100 else 5000))
 
+    # Metadados de identificação (nome, país, índice) vindos do SQLite via Node/IPC.
+    raw_meta = params.get("asset_meta") or params.get("assetMeta") or {}
+    asset_meta: Dict[str, Dict[str, Any]] = {}
+    if isinstance(raw_meta, dict):
+        for mk, mv in raw_meta.items():
+            key = str(mk).upper().strip()
+            if not key or not isinstance(mv, dict):
+                continue
+            asset_meta[key] = {
+                "name": str(mv.get("name") or "").strip(),
+                "country": str(mv.get("country") or "").strip(),
+                "index_name": str(mv.get("index_name") or mv.get("indexName") or mv.get("index") or "").strip(),
+            }
+
     # 1. Extração concorrente de dados via ThreadPoolExecutor com Cache SQLite local
     max_workers = min(32, max(4, len(tickers)))
     raw_assets_dict: Dict[str, Dict[str, Any]] = fetch_all_assets_parallel(tickers, max_workers=max_workers)
@@ -470,6 +484,7 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
 
     for i, row in df_assets.iterrows():
         t = row["ticker"]
+        meta = asset_meta.get(str(t).upper().strip(), {})
         norm_graham = row["graham_score"] / 100.0
         norm_win_rate = row["mc_win_rate"] / 100.0
         norm_markov = row["markov_bullish_prob"] / 100.0
@@ -508,6 +523,9 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
 
         analyzed_assets.append({
             "ticker": t,
+            "name": (meta.get("name") or "").strip() or str(t),
+            "country": (meta.get("country") or "").strip() or "Global",
+            "index_name": (meta.get("index_name") or "").strip() or "Geral",
             "sector": row["sector"],
             "market_cap": row["market_cap_str"],
             "market_cap_raw": row["market_cap_raw"],
@@ -631,7 +649,11 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
     first_series = first_asset.get("price_series", pd.Series(dtype=float))
     chart_close = [round(float(p), 2) for p in first_series.tail(60).tolist()] if len(first_series) >= 10 else [100.0] * 60
 
-    recommendations = generate_top_investment_recommendations(analyzed_assets, top_n=5, horizon_days=horizon_markov)
+    recommendations = generate_top_investment_recommendations(
+        analyzed_assets,
+        top_n=int(params.get("top_n") or params.get("topN") or 20),
+        horizon_days=horizon_markov,
+    )
 
     output_payload = {
         "success": True,
@@ -739,7 +761,7 @@ def classify_win_rate_tier(win_rate: float) -> dict:
 
 def generate_top_investment_recommendations(
     processed_assets: List[Dict[str, Any]],
-    top_n: int = 5,
+    top_n: Optional[int] = 20,
     horizon_days: int = 35
 ) -> List[Dict[str, Any]]:
     """
@@ -748,6 +770,11 @@ def generate_top_investment_recommendations(
     1. Filtro de Solvência (Fase 1): status == 'Aprovado' ou approved == True
     2. Convicção Estocástica Gradual (Markov + Monte Carlo): Win Rate MC >= 50.0% e Retorno Esperado > 0
     3. Score de Alpha Purificado e Rácio de Eficiência Estocástica (Retorno / CVaR95)
+    Retorna os Top 15 a 20 ativos mais fortes (por Alpha Score/convicção decrescente).
+    Se top_n for None, aplica o teto padrão de 20. O corte é limitado ao intervalo [15, 20],
+    garantindo pelo menos os 15 melhores qualificados, sem ultrapassar 20. Se existirem menos
+    ativos elegíveis do que o limite, retorna todos os elegíveis.
+    Cada recomendação inclui os metadados name, country e index_name.
     """
     eligible_assets = []
 
@@ -782,6 +809,9 @@ def generate_top_investment_recommendations(
 
         eligible_assets.append({
             "ticker": asset.get('ticker', ''),
+            "name": (asset.get('name') or asset.get('company_name') or asset.get('ticker', '')).strip(),
+            "country": (asset.get('country') or 'Global').strip() or 'Global',
+            "index_name": (asset.get('index_name') or asset.get('index') or 'Geral').strip() or 'Geral',
             "sector": asset.get('sector', 'Outros'),
             "current_price": round(current_price, 2),
             "target_price": round(target_price, 2),
@@ -808,14 +838,26 @@ def generate_top_investment_recommendations(
             "matrix_breakdown": asset.get("matrix_breakdown", []),
         })
 
-    # Ordenar pelos ativos de maior patamar de convicção estocástica (tier_id desc) e maior Alpha Score
+    # ORDENAÇÃO DECRESCENTE ESTRITA: do maior para o menor Alpha Score
+    # (patamar de convicção estocástica usado apenas como desempate).
     recommended_sorted = sorted(
         eligible_assets,
-        key=lambda x: (x['tier'].get('tier_id', 0), x['alpha_score']),
+        key=lambda x: (x['alpha_score'], x['tier'].get('tier_id', 0)),
         reverse=True
     )
-    
-    return recommended_sorted[:top_n]
+
+    # Corte Top 15-20 ativos mais fortes (garante >= 15 se existirem, nunca > 20).
+    if top_n is None:
+        limit = 20
+    else:
+        limit = max(15, min(int(top_n), 20))
+    top_assets = recommended_sorted[:limit]
+
+    # Atribuir posição de ranking (#1 ao #20) já na origem, para o frontend não reordenar.
+    for position, rec in enumerate(top_assets, start=1):
+        rec["rank"] = position
+
+    return top_assets
 
 
 run_full_quant_pipeline = execute_alpha_quant_engine

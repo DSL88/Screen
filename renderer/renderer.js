@@ -5325,7 +5325,7 @@
     if (!recommendedAssets || recommendedAssets.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="10" style="text-align: center; color: #94a3b8; padding: 20px;">
+          <td colspan="11" style="text-align: center; color: #94a3b8; padding: 20px;">
             Nenhum ativo cumpriu simultaneamente todos os critérios de convicção estocástica (Win Rate >= 60%) e purificação fatorial.
           </td>
         </tr>`;
@@ -5333,16 +5333,26 @@
       return;
     }
 
+    // Salvaguarda: reproduz a ordem do motor (Alpha Score decrescente) e corta nos Top 20.
+    const sortedAssets = [...recommendedAssets]
+      .sort((a, b) => Number(b.alpha_score || 0) - Number(a.alpha_score || 0))
+      .slice(0, 20);
+
     if (countBadge) {
-      countBadge.textContent = `${recommendedAssets.length} Ativos Ordenados por Convicção`;
+      countBadge.textContent = `Top ${sortedAssets.length} Melhores Ativos (Ordenados do Maior para o Menor)`;
     }
 
-    recommendedAssets.forEach(asset => {
+    sortedAssets.forEach((asset, index) => {
+      const rank = Number(asset.rank) > 0 ? Number(asset.rank) : index + 1;
       const price = Number(asset.current_price || asset.price || asset.latest_price || 0);
-      const targetPrice = (price * 1.048).toFixed(2);
-      const stopPrice = (price * (1 - 0.024)).toFixed(2);
+      const targetPrice = price * 1.048;
+      const stopPrice = price * (1 - 0.024);
       const winRate = Number(asset.mc_win_rate || asset.winRateMC || asset.win_rate_numeric || 50.0);
       const tierLevel = asset.tier?.level || (winRate >= 70 ? 'Extrema' : winRate >= 65 ? 'Muito Forte' : winRate >= 60 ? 'Forte' : winRate >= 50 ? 'Moderada' : 'Fraca');
+
+      const money = (value) => (typeof window.formatPriceWithCurrency === 'function'
+        ? window.formatPriceWithCurrency(value, asset)
+        : `${Number(value || 0).toFixed(2)} €`);
 
       const tr = document.createElement('tr');
       tr.className = 'table-row-clickable';
@@ -5353,11 +5363,15 @@
       tr.onmouseout = () => tr.style.background = 'transparent';
 
       tr.innerHTML = `
-        <td style="padding: 8px 12px; font-weight: 700; color: #ffffff;">${asset.ticker}</td>
+        <td style="padding: 8px 10px; text-align: center; font-weight: 700; font-size: 11px; color: ${rank <= 3 ? '#38bdf8' : '#64748b'};">#${rank}</td>
+        <td style="padding: 8px 12px;">
+          <div style="font-weight: 700; color: #ffffff;">${asset.ticker}</div>
+          <div style="font-size: 10px; color: #64748b; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${asset.name || asset.ticker}">${asset.name || asset.ticker}</div>
+        </td>
         <td style="padding: 8px 12px; color: #94a3b8;">${asset.sector || 'Outros'}</td>
-        <td style="padding: 8px 12px; text-align: right; color: #f1f5f9; font-variant-numeric: tabular-nums;">${price.toFixed(2)} €</td>
-        <td style="padding: 8px 12px; text-align: right; color: #34d399; font-weight: 600; font-variant-numeric: tabular-nums;">${targetPrice} €</td>
-        <td style="padding: 8px 12px; text-align: right; color: #f87171; font-weight: 600; font-variant-numeric: tabular-nums;">${stopPrice} €</td>
+        <td style="padding: 8px 12px; text-align: right; color: #f1f5f9; font-variant-numeric: tabular-nums;">${money(price)}</td>
+        <td style="padding: 8px 12px; text-align: right; color: #34d399; font-weight: 600; font-variant-numeric: tabular-nums;">${money(targetPrice)}</td>
+        <td style="padding: 8px 12px; text-align: right; color: #f87171; font-weight: 600; font-variant-numeric: tabular-nums;">${money(stopPrice)}</td>
         <td style="padding: 8px 12px; text-align: center;">
           <span style="background: rgba(37, 99, 235, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 600;">
             ${winRate.toFixed(1)}% ${tierLevel}
@@ -5451,9 +5465,22 @@
     const sl = price * (1 - 0.024); // -2.4%
     const winRate = Number(asset.winRateMC || asset.mc_win_rate || asset.win_rate_numeric || 70);
 
-    // 1. Atualizar Textos e Títulos
+    // 1. Atualizar Cabeçalho: Nome da Empresa, Ticker, País e Índice
+    const nameEl = document.getElementById('drawer-company-name');
+    if (nameEl) {
+      const companyName = (asset.name || asset.company_name || asset.ticker || '--').toString().trim();
+      nameEl.textContent = companyName;
+      nameEl.title = companyName;
+    }
+
     const tickerEl = document.getElementById('drawer-ticker');
     if (tickerEl) tickerEl.textContent = asset.ticker || '--';
+
+    const countryEl = document.getElementById('drawer-country-badge');
+    if (countryEl) countryEl.textContent = `🌍 ${(asset.country || 'Global').toString().trim() || 'Global'}`;
+
+    const indexEl = document.getElementById('drawer-index-badge');
+    if (indexEl) indexEl.textContent = `📊 ${(asset.index_name || asset.index || 'Sem Índice').toString().trim()}`;
 
     const subtitleEl = document.getElementById('drawer-subtitle');
     if (subtitleEl) {
@@ -5465,21 +5492,28 @@
       tierBadge.textContent = winRate >= 70 ? 'ELITE (70%+)' : winRate >= 65 ? 'MUITO FORTE (65%+)' : winRate >= 60 ? 'FORTE (60%+)' : 'MODERADO (50-59%)';
     }
 
-    // 2. Atualizar Preços e Alvos Monetários
+    // 2. Atualizar Preços e Alvos Monetários (moeda dinâmica por país/bolsa)
+    const money = (value) => (typeof window.formatPriceWithCurrency === 'function'
+      ? window.formatPriceWithCurrency(value, asset)
+      : `${Number(value || 0).toFixed(2)} €`);
+    const delta = (value) => (typeof window.formatDeltaWithCurrency === 'function'
+      ? window.formatDeltaWithCurrency(value, asset)
+      : `${value >= 0 ? '+' : '-'}${Math.abs(Number(value || 0)).toFixed(2)} €`);
+
     const valPrice = document.getElementById('drawer-val-price');
-    if (valPrice) valPrice.textContent = `${price.toFixed(2)} €`;
+    if (valPrice) valPrice.textContent = money(price);
 
     const valTp = document.getElementById('drawer-val-tp');
-    if (valTp) valTp.textContent = `${tp.toFixed(2)} €`;
+    if (valTp) valTp.textContent = money(tp);
 
     const subTp = document.getElementById('drawer-sub-tp');
-    if (subTp) subTp.textContent = `+${(tp - price).toFixed(2)} € (+4.8%)`;
+    if (subTp) subTp.textContent = `${delta(tp - price)} (+4.8%)`;
 
     const valSl = document.getElementById('drawer-val-sl');
-    if (valSl) valSl.textContent = `${sl.toFixed(2)} €`;
+    if (valSl) valSl.textContent = money(sl);
 
     const subSl = document.getElementById('drawer-sub-sl');
-    if (subSl) subSl.textContent = `-${(price - sl).toFixed(2)} € (-2.4%)`;
+    if (subSl) subSl.textContent = `${delta(sl - price)} (-2.4%)`;
 
     // 3. Atualizar KPIs Estocásticos
     const mcWinRateEl = document.getElementById('drawer-mc-winrate');
@@ -5517,7 +5551,10 @@
     }
 
     // 6. Desenhar as Trajetórias de Monte Carlo no Canvas
-    drawMonteCarloSimulation(price, tp, sl, 35);
+    const currencySymbol = (typeof window.getAssetCurrencySymbol === 'function'
+      ? window.getAssetCurrencySymbol(asset)
+      : '€');
+    drawMonteCarloSimulation(price, tp, sl, 35, currencySymbol);
 
     // 7. Revelar a Gaveta (Slide in)
     backdrop.classList.remove('hidden');
@@ -5553,11 +5590,14 @@
   /**
    * Renderizador de Trajetórias Estocásticas em Canvas 2D
    */
-  function drawMonteCarloSimulation(startPrice, tpPrice, slPrice, horizonDays) {
+  function drawMonteCarloSimulation(startPrice, tpPrice, slPrice, horizonDays, currencySymbol) {
     const canvas = document.getElementById('drawer-montecarlo-canvas') || document.getElementById('drawer-mc-chart');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    const sym = currencySymbol || '€';
+    const priceLabel = (v) => `${v.toFixed(1)} ${sym}`;
 
     const w = canvas.width || 480;
     const h = canvas.height || 230;
@@ -5610,9 +5650,9 @@
     ctx.fillStyle = '#64748b';
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(`${tpPrice.toFixed(1)}€`, padding.left - 6, yTP + 3);
-    ctx.fillText(`${slPrice.toFixed(1)}€`, padding.left - 6, ySL + 3);
-    ctx.fillText(`${startPrice.toFixed(1)}€`, padding.left - 6, yStart + 3);
+    ctx.fillText(priceLabel(tpPrice), padding.left - 6, yTP + 3);
+    ctx.fillText(priceLabel(slPrice), padding.left - 6, ySL + 3);
+    ctx.fillText(priceLabel(startPrice), padding.left - 6, yStart + 3);
 
     // Simulação Sintética de 14 Trajetórias Estocásticas
     const numPaths = 14;
