@@ -11,6 +11,16 @@
   let activeStatusFilter = 'all';
   let activeSearchQuery = '';
 
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   // ═══════════════════════════════════════════════════════════
   //  ELEMENTOS DOM
   // ═══════════════════════════════════════════════════════════
@@ -313,18 +323,30 @@
       else if (rec.mc_win_rate >= 50.0) badgeClass = 'bg-warning text-dark';
       else badgeClass = 'bg-danger';
 
+      const fmt = (val) => {
+        if (typeof window.formatPriceWithCurrency === 'function') {
+          return window.formatPriceWithCurrency(val, rec);
+        }
+        return `${Number(val || 0).toFixed(2)} €`;
+      };
+
+      const safeDate = escapeHtml(rec.recommendation_date || '');
+      const safeTicker = escapeHtml(rec.ticker || '');
+      const safeSector = escapeHtml(rec.sector || '');
+      const safeTierLabel = escapeHtml(rec.mc_tier_label || '');
+
       return `
         <tr>
-          <td class="text-secondary" style="font-family: var(--mono); font-size: 12px;">${rec.recommendation_date}</td>
-          <td><strong class="text-white" style="font-size: 1rem;">${rec.ticker}</strong></td>
-          <td><span class="text-secondary small">${rec.sector}</span></td>
-          <td class="num-col">${rec.entry_price} €</td>
-          <td class="num-col" style="font-weight: 700; color: #fff;">${rec.current_price || rec.exit_price || rec.entry_price} €</td>
-          <td class="num-col text-success">${rec.target_price} €</td>
-          <td class="num-col text-danger">${rec.stop_loss_price || rec.stop_loss} €</td>
+          <td class="text-secondary" style="font-family: var(--mono); font-size: 12px;">${safeDate}</td>
+          <td><strong class="text-white" style="font-size: 1rem;">${safeTicker}</strong></td>
+          <td><span class="text-secondary small">${safeSector}</span></td>
+          <td class="num-col">${fmt(rec.entry_price)}</td>
+          <td class="num-col" style="font-weight: 700; color: #fff;">${fmt(rec.current_price || rec.exit_price || rec.entry_price)}</td>
+          <td class="num-col text-success">${fmt(rec.target_price)}</td>
+          <td class="num-col text-danger">${fmt(rec.stop_loss_price || rec.stop_loss)}</td>
           <td>
             <span class="badge ${badgeClass}" style="font-size: 0.8rem; font-weight: 600; padding: 4px 8px;">
-              ${rec.mc_win_rate}% (${rec.mc_tier_label})
+              ${Number(rec.mc_win_rate || 0)}% (${safeTierLabel})
             </span>
           </td>
           <td class="num-col ${pnlClass}">

@@ -20,10 +20,18 @@ def get_db_path() -> str:
     return os.environ.get("QUANT_TRACKER_DB_PATH", DEFAULT_DB_PATH)
 
 
+def get_connection(path: Optional[str] = None) -> sqlite3.Connection:
+    p = path or get_db_path()
+    conn = sqlite3.connect(p, timeout=10.0)
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA busy_timeout = 5000;")
+    return conn
+
+
 def init_tracker_db(db_path: Optional[str] = None):
     """Inicializa e migra as tabelas de recomendações rastreadas se necessário."""
     path = db_path or get_db_path()
-    conn = sqlite3.connect(path)
+    conn = get_connection(path)
     cursor = conn.cursor()
     
     # Tabela canónica alphaquant_history_tracker
@@ -106,7 +114,7 @@ def save_recommendation(data: dict, db_path: Optional[str] = None) -> Dict[str, 
     """Guarda uma nova sugestão com snapshot completo para acompanhamento e auditoria."""
     path = db_path or get_db_path()
     init_tracker_db(path)
-    conn = sqlite3.connect(path)
+    conn = get_connection(path)
     cursor = conn.cursor()
     
     ticker = str(data.get('ticker', '')).upper().strip()
@@ -217,7 +225,7 @@ def evaluate_tracked_assets(db_path: Optional[str] = None) -> Dict[str, Any]:
     """
     path = db_path or get_db_path()
     init_tracker_db(path)
-    conn = sqlite3.connect(path)
+    conn = get_connection(path)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, ticker, entry_price, target_price, 
@@ -330,7 +338,7 @@ def get_model_accuracy_metrics(db_path: Optional[str] = None) -> Dict[str, Any]:
     """Calcula a taxa de acerto real do modelo comparada com as previsões de Monte Carlo."""
     path = db_path or get_db_path()
     init_tracker_db(path)
-    conn = sqlite3.connect(path)
+    conn = get_connection(path)
     df = pd.read_sql_query("SELECT * FROM tracked_recommendations WHERE status != 'PENDENTE'", conn)
     conn.close()
 
@@ -369,7 +377,7 @@ def get_tracker_dashboard_data(params: Optional[Dict[str, Any]] = None, db_path:
     """
     path = db_path or get_db_path()
     init_tracker_db(path)
-    conn = sqlite3.connect(path)
+    conn = get_connection(path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -540,7 +548,7 @@ def get_all_tracked_recommendations(status: Optional[str] = None, db_path: Optio
     """Retorna todas as recomendações registadas com filtro opcional de status."""
     path = db_path or get_db_path()
     init_tracker_db(path)
-    conn = sqlite3.connect(path)
+    conn = get_connection(path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     

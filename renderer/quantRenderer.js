@@ -39,6 +39,16 @@
     return `${flag} ${name}`;
   }
 
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function init() {
     const btnRunUnified = $('btn-run-unified-quant') || $('btn-run-quant-pipeline');
     const subnavBtns = document.querySelectorAll('.quant-subnav-btn');
@@ -422,42 +432,49 @@
       asset.target_price = Number(targetPrice.toFixed(2));
       asset.stop_loss = Number(stopLossPrice.toFixed(2));
 
-      const assetJson = JSON.stringify(asset).replace(/'/g, '&apos;');
+      const safeTicker = escapeHtml(asset.ticker || '');
+      const safeName = escapeHtml(asset.name || asset.ticker || '');
+      const safeSector = escapeHtml(asset.sector || 'Outros');
+      const safeCountry = asset.country ? escapeHtml(formatCountryWithFlag(asset.country)) : '';
+      const safeIndex = escapeHtml(asset.index_name || '');
 
       const tr = document.createElement('tr');
       tr.className = 'table-row-clickable';
-      tr.setAttribute('data-asset', assetJson);
       tr.setAttribute('data-ticker', asset.ticker || '');
+      tr._assetData = asset;
 
       tr.innerHTML = `
         <td style="text-align:center; font-weight:700; font-size:11px; color:${rank <= 3 ? '#38bdf8' : '#64748b'};">
           #${rank}
         </td>
         <td>
-          <strong style="color:#ffffff; font-size:14px;">${asset.ticker}</strong>
-          <div style="font-size:10px; color:#64748b; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${asset.name || asset.ticker}">${asset.name || asset.ticker}</div>
+          <strong style="color:#ffffff; font-size:14px;">${safeTicker}</strong>
+          <div style="font-size:10px; color:#64748b; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${safeName}">${safeName}</div>
         </td>
         <td>
-          <span style="color:#94a3b8; font-size:12px;">${asset.sector || 'Outros'}</span>
-          <div style="font-size:10px; color:#64748b;">${asset.country ? formatCountryWithFlag(asset.country) : ''}${asset.country && asset.index_name ? ' • ' : ''}${asset.index_name || ''}</div>
+          <span style="color:#94a3b8; font-size:12px;">${safeSector}</span>
+          <div style="font-size:10px; color:#64748b;">${safeCountry}${safeCountry && safeIndex ? ' • ' : ''}${safeIndex}</div>
         </td>
         <td class="num-col" style="font-weight:600;">${formattedCurrent}</td>
         <td class="num-col text-emerald-400 font-semibold" style="color:#34d399; font-weight:700;">${formattedTarget}</td>
         <td class="num-col text-rose-400 font-semibold" style="color:#fb7185; font-weight:600;">${formattedStop}</td>
         <td>
           <span class="tier-badge ${tierClass}">
-            ${winRateNum.toFixed(1)}% ${tier.level || ''}
+            ${winRateNum.toFixed(1)}% ${escapeHtml(tier.level || '')}
           </span>
         </td>
         <td class="num-col" style="color:#fb7185;">-${cvarRisk}%</td>
         <td class="num-col"><span style="color:#cbd5e1;">${grahamScore}</span></td>
         <td class="num-col"><strong style="color:#818cf8; font-size:13px;">${alphaScore}</strong></td>
         <td style="text-align:center;">
-          <button class="btn-track btn-track-action btn-table-action btn-save-track" data-asset='${assetJson}'>
+          <button class="btn-track btn-track-action btn-table-action btn-save-track">
             📌 Guardar &amp; Rastrear
           </button>
         </td>
       `;
+
+      const trackBtn = tr.querySelector('.btn-save-track');
+      if (trackBtn) trackBtn._assetData = asset;
 
       // Clique na linha para abrir o drawer
       tr.addEventListener('click', (e) => {
@@ -476,8 +493,7 @@
         e.stopPropagation();
         const button = e.currentTarget || e.target;
         try {
-          const rawData = button.getAttribute('data-asset');
-          const assetData = JSON.parse(rawData.replace(/&apos;/g, "'"));
+          const assetData = button._assetData || (button.closest('tr') && button.closest('tr')._assetData) || JSON.parse((button.getAttribute('data-asset') || '{}').replace(/&apos;/g, "'"));
           button.disabled = true;
           button.textContent = '⏳ A guardar...';
 
@@ -922,16 +938,21 @@
         const isBearishDiv = s.divergence_signal === 'BEARISH_DIVERGENCE';
         const divBadge = isBullishDiv ? 'quant-badge-bull' : isBearishDiv ? 'quant-badge-bear' : 'quant-badge-neutral';
         const scoreColor = s.sentiment_score > 0 ? 'text-bull' : s.sentiment_score < 0 ? 'text-bear' : 'text-dim';
+        const safeTicker = escapeHtml(s.ticker);
+        const safeHeadline = escapeHtml(s.headline);
+        const safeSentimentLabel = escapeHtml(s.sentiment_label);
+        const safeInterpretation = escapeHtml(s.interpretation);
+        const safeDivergence = escapeHtml(s.divergence_signal);
 
         return `
         <tr>
-          <td><strong>${s.ticker}</strong></td>
-          <td class="headline-cell" title="${s.headline}">${s.headline}</td>
-          <td><span class="quant-badge ${s.sentiment_label === 'Positivo' ? 'quant-badge-bull' : s.sentiment_label === 'Negativo' ? 'quant-badge-bear' : 'quant-badge-neutral'}">${s.sentiment_label} (${s.confidence}%)</span></td>
-          <td class="${scoreColor}"><strong>${s.sentiment_score >= 0 ? '+' : ''}${s.sentiment_score}</strong></td>
-          <td class="${s.price_momentum >= 0 ? 'text-bull' : 'text-bear'}">${s.price_momentum >= 0 ? '+' : ''}${s.price_momentum}%</td>
-          <td><span class="quant-badge ${divBadge}">${s.divergence_signal}</span></td>
-          <td>${s.interpretation}</td>
+          <td><strong>${safeTicker}</strong></td>
+          <td class="headline-cell" title="${safeHeadline}">${safeHeadline}</td>
+          <td><span class="quant-badge ${s.sentiment_label === 'Positivo' ? 'quant-badge-bull' : s.sentiment_label === 'Negativo' ? 'quant-badge-bear' : 'quant-badge-neutral'}">${safeSentimentLabel} (${Number(s.confidence || 0)}%)</span></td>
+          <td class="${scoreColor}"><strong>${s.sentiment_score >= 0 ? '+' : ''}${Number(s.sentiment_score || 0)}</strong></td>
+          <td class="${s.price_momentum >= 0 ? 'text-bull' : 'text-bear'}">${s.price_momentum >= 0 ? '+' : ''}${Number(s.price_momentum || 0)}%</td>
+          <td><span class="quant-badge ${divBadge}">${safeDivergence}</span></td>
+          <td>${safeInterpretation}</td>
         </tr>
       `;
       })

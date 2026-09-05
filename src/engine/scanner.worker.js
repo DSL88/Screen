@@ -94,12 +94,20 @@ function pickAnalysisCandles(candles, params) {
   const now = new Date();
   const dow = now.getDay();
   const isWeekday = dow >= 1 && dow <= 5;
-  const today = now.toISOString().slice(0, 10);
-  const lastIsToday = last && last.date === today;
-  const marketOpen = isWeekday && lastIsToday;
+  const pad = (n) => String(n).padStart(2, '0');
+  const localToday = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const utcToday = now.toISOString().slice(0, 10);
+  const lastIsToday = last && (last.date === localToday || last.date === utcToday);
+
+  // Consider market open only during active trading hours (approx. 08:00 to 21:30 UTC for EU & US markets)
+  const utcHour = now.getUTCHours();
+  const utcMinute = now.getUTCMinutes();
+  const utcTimeMinutes = utcHour * 60 + utcMinute;
+  const sessionActive = utcTimeMinutes >= (8 * 60) && utcTimeMinutes < (21 * 60 + 30);
+  const marketOpen = isWeekday && lastIsToday && sessionActive;
 
   let lowVolume = false;
-  if (last && Number.isFinite(last.volume)) {
+  if (last && Number.isFinite(last.volume) && marketOpen) {
     const n = Math.min(20, candles.length - 1);
     let sum = 0, count = 0;
     for (let i = candles.length - 1 - n; i < candles.length - 1; i++) {

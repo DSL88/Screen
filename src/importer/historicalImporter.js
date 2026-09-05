@@ -77,21 +77,35 @@ function normalizeDate(dateStr) {
 
   const isoMatch = s.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
   if (isoMatch) {
-    y = parseInt(isoMatch[1]);
-    m = parseInt(isoMatch[2]);
-    d = parseInt(isoMatch[3]);
+    y = parseInt(isoMatch[1], 10);
+    m = parseInt(isoMatch[2], 10);
+    d = parseInt(isoMatch[3], 10);
   } else {
     const slashMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
     if (slashMatch) {
-      m = parseInt(slashMatch[1]);
-      d = parseInt(slashMatch[2]);
-      y = parseInt(slashMatch[3]);
+      const p1 = parseInt(slashMatch[1], 10);
+      const p2 = parseInt(slashMatch[2], 10);
+      y = parseInt(slashMatch[3], 10);
+      if (p1 > 12 && p2 <= 12) {
+        d = p1;
+        m = p2;
+      } else {
+        m = p1;
+        d = p2;
+      }
     } else {
       const dashMatch = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
       if (dashMatch) {
-        d = parseInt(dashMatch[1]);
-        m = parseInt(dashMatch[2]);
-        y = parseInt(dashMatch[3]);
+        const p1 = parseInt(dashMatch[1], 10);
+        const p2 = parseInt(dashMatch[2], 10);
+        y = parseInt(dashMatch[3], 10);
+        if (p2 > 12 && p1 <= 12) {
+          m = p1;
+          d = p2;
+        } else {
+          d = p1;
+          m = p2;
+        }
       } else {
         const fallback = new Date(s);
         if (!isNaN(fallback.getTime())) {

@@ -28,13 +28,20 @@ TTL_QUOTE_NEWS = 86400       # 24 Horas para Cotações e Notícias
 TTL_FUNDAMENTALS = 2592000   # 30 Dias para Balanços e Demonstrações Financeiras
 
 
+def _get_cache_conn(db_path: str = DB_FILE) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path, timeout=10.0)
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA busy_timeout = 5000;")
+    return conn
+
+
 def init_db(db_path: str = DB_FILE) -> None:
     """Inicializa a base de dados SQLite local para cache estruturado em dois níveis."""
     db_dir = os.path.dirname(os.path.abspath(db_path))
     if db_dir and not os.path.exists(db_dir):
         os.makedirs(db_dir, exist_ok=True)
 
-    conn = sqlite3.connect(db_path)
+    conn = _get_cache_conn(db_path)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS asset_cache (
@@ -77,7 +84,7 @@ def get_cached_data(
         if not os.path.exists(db_path):
             return None
 
-        conn = sqlite3.connect(db_path)
+        conn = _get_cache_conn(db_path)
         cursor = conn.cursor()
         cursor.execute(
             "SELECT data, timestamp, fundamentals_timestamp FROM asset_cache WHERE ticker = ?",
@@ -120,7 +127,7 @@ def save_to_cache(ticker: str, data: dict, db_path: str = DB_FILE) -> None:
     """Guarda os dados obtidos da API no cache local com timestamps individuais."""
     try:
         init_db(db_path)
-        conn = sqlite3.connect(db_path)
+        conn = _get_cache_conn(db_path)
         cursor = conn.cursor()
         now = time.time()
 

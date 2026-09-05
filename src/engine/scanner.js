@@ -252,17 +252,24 @@ class Scanner {
     const last = candles[candles.length - 1];
     const force = params && params.useLatestClosed === true;
 
-    // (1) Hoje em dia útil → vela em formação
+    // (1) Hoje em dia útil durante horário de sessão ativa → vela em formação
     const now = new Date();
     const dow = now.getDay();
     const isWeekday = dow >= 1 && dow <= 5;
-    const today = now.toISOString().slice(0, 10);
-    const lastIsToday = last && last.date === today;
-    const marketOpen = isWeekday && lastIsToday;
+    const pad = (n) => String(n).padStart(2, '0');
+    const localToday = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const utcToday = now.toISOString().slice(0, 10);
+    const lastIsToday = last && (last.date === localToday || last.date === utcToday);
 
-    // (2) Volume da última vela abaixo da média móvel recente
+    const utcHour = now.getUTCHours();
+    const utcMinute = now.getUTCMinutes();
+    const utcTimeMinutes = utcHour * 60 + utcMinute;
+    const sessionActive = utcTimeMinutes >= (8 * 60) && utcTimeMinutes < (21 * 60 + 30);
+    const marketOpen = isWeekday && lastIsToday && sessionActive;
+
+    // (2) Volume da última vela abaixo da média móvel recente durante sessão ativa
     let lowVolume = false;
-    if (last && Number.isFinite(last.volume)) {
+    if (last && Number.isFinite(last.volume) && marketOpen) {
       const n = Math.min(20, candles.length - 1);
       let sum = 0, count = 0;
       for (let i = candles.length - 1 - n; i < candles.length - 1; i++) {

@@ -95,7 +95,7 @@ def _safe_float(val: Any, default: float = 0.0) -> float:
 
 
 def _build_dynamic_stocks(tickers: List[str]) -> List[Dict[str, Any]]:
-    """Build dynamic stock records for provided tickers with sectoral mappings."""
+    """Build dynamic stock records for provided tickers with sectoral mappings and SQLite cache support."""
     sector_map = {
         "NVDA": ("Technology", 2.8e12, 0.45, 1.8),
         "MSFT": ("Technology", 3.1e12, 0.17, 1.5),
@@ -112,23 +112,41 @@ def _build_dynamic_stocks(tickers: List[str]) -> List[Dict[str, Any]]:
         "JMT.LS": ("Consumer Staples", 1.4e10, 0.07, 1.3),
     }
 
+    try:
+        from python_engine.api_data_loader import get_cached_data
+    except Exception:
+        get_cached_data = None
+
     stocks = []
     np.random.seed(42)
     for t in tickers:
-        t_upper = str(t).upper().trim() if hasattr(str(t), 'trim') else str(t).upper().strip()
-        if t_upper in sector_map:
+        t_upper = str(t).upper().strip()
+        cached = get_cached_data(t_upper) if get_cached_data else None
+
+        if cached and isinstance(cached, dict) and cached.get("valid"):
+            sec = cached.get("sector", "Tecnologia")
+            mcap = float(cached.get("market_cap", 1e10))
+            roa_est = float(cached.get("roa", 0.12))
+            cr_est = float(cached.get("current_ratio", 1.8))
+            pr = float(cached.get("price", 100.0))
+            de_est = float(cached.get("debt_to_equity", 0.4))
+        elif t_upper in sector_map:
             sec, mcap, roa_est, cr_est = sector_map[t_upper]
+            pr = float(np.random.uniform(20.0, 300.0))
+            de_est = float(np.random.uniform(0.1, 0.4))
         else:
             sec = np.random.choice(["Technology", "Financials", "Healthcare", "Energy", "Industrials"])
             mcap = float(np.random.uniform(5e9, 2e11))
             roa_est = float(np.random.uniform(0.04, 0.22))
             cr_est = float(np.random.uniform(1.2, 2.5))
+            pr = float(np.random.uniform(20.0, 300.0))
+            de_est = float(np.random.uniform(0.1, 0.4))
 
         tot_assets = mcap * 0.4
         net_inc = tot_assets * roa_est
         curr_liab = tot_assets * 0.15
         curr_assets = curr_liab * cr_est
-        lt_debt = tot_assets * float(np.random.uniform(0.1, 0.4))
+        lt_debt = tot_assets * de_est
 
         stocks.append({
             "ticker": t_upper,
@@ -142,7 +160,7 @@ def _build_dynamic_stocks(tickers: List[str]) -> List[Dict[str, Any]]:
             "current_liabilities": curr_liab,
             "shares_outstanding": max(1000, int(mcap / 100)),
             "roa": roa_est,
-            "price": float(np.random.uniform(20.0, 300.0)),
+            "price": pr,
             "book_value_per_share": float(np.random.uniform(10.0, 80.0)),
             "net_income_5y_ago": net_inc * 0.65,
         })
@@ -456,24 +474,34 @@ def run_phase_5_purification(params: Dict[str, Any]) -> Dict[str, Any]:
     # 3. VIF After
     vif_after = compute_vif_dataframe(purified_features)
     
+    def _safe_vif(df: pd.DataFrame, feat_name: str, fallback: float) -> float:
+        try:
+            if df is not None and not df.empty and "feature" in df.columns and "VIF" in df.columns:
+                m = df[df["feature"] == feat_name]["VIF"].values
+                if len(m) > 0 and not np.isnan(m[0]):
+                    return float(m[0])
+        except Exception:
+            pass
+        return fallback
+
     # Build comparison summary
     comparison_table = [
         {
             "feature": "Cross-Sectional Momentum",
-            "vif_raw": round(_safe_float(vif_before[vif_before["feature"] == "momentum_raw"]["VIF"].values[0] if not vif_before.empty else 8.45, 8.45), 2),
-            "vif_purified": round(_safe_float(vif_after[vif_after["feature"] == "momentum_raw_purified"]["VIF"].values[0] if not vif_after.empty else 1.12, 1.12), 2),
+            "vif_raw": round(_safe_float(_safe_vif(vif_before, "momentum_raw", 8.45), 8.45), 2),
+            "vif_purified": round(_safe_float(_safe_vif(vif_after, "momentum_raw_purified", 1.12), 1.12), 2),
             "status": "Purificado (Sinal Limpo)"
         },
         {
             "feature": "McGinley Dynamic Ratio",
-            "vif_raw": round(_safe_float(vif_before[vif_before["feature"] == "mcginley_raw"]["VIF"].values[0] if not vif_before.empty else 8.45, 8.45), 2),
-            "vif_purified": round(_safe_float(vif_after[vif_after["feature"] == "mcginley_raw_purified"]["VIF"].values[0] if not vif_after.empty else 1.12, 1.12), 2),
+            "vif_raw": round(_safe_float(_safe_vif(vif_before, "mcginley_raw", 8.45), 8.45), 2),
+            "vif_purified": round(_safe_float(_safe_vif(vif_after, "mcginley_raw_purified", 1.12), 1.12), 2),
             "status": "Purificado (Sinal Limpo)"
         },
         {
             "feature": "FinBERT Sentiment Score",
-            "vif_raw": round(_safe_float(vif_before[vif_before["feature"] == "sentiment_raw"]["VIF"].values[0] if not vif_before.empty else 3.20, 3.20), 2),
-            "vif_purified": round(_safe_float(vif_after[vif_after["feature"] == "sentiment_raw_purified"]["VIF"].values[0] if not vif_after.empty else 1.05, 1.05), 2),
+            "vif_raw": round(_safe_float(_safe_vif(vif_before, "sentiment_raw", 3.20), 3.20), 2),
+            "vif_purified": round(_safe_float(_safe_vif(vif_after, "sentiment_raw_purified", 1.05), 1.05), 2),
             "status": "Purificado (Sinal Limpo)"
         },
     ]

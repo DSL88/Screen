@@ -120,14 +120,17 @@ function normalizeTicker(ticker) {
     return knownConversions[trimmed];
   }
   
-  // Para símbolos europeus com '.', manter o formato original
-  // Yahoo Finance aceita tanto '.' como '-' para a maioria dos casos
-  // Mas alguns símbolos específicos precisam de '-'
   const parts = trimmed.split('.');
-  if (parts.length === 2 && parts[1].length <= 3) {
-    // Provavelmente um símbolo com sufixo de exchange (ex: AAPL.US, SONC.LS)
-    // Manter como está, Yahoo Finance aceita
-    return trimmed;
+  if (parts.length === 2) {
+    const sfx = parts[1].toUpperCase();
+    // Classes de ações americanas (.A, .B, .C, .K) convertem para hífen no Yahoo (ex: HEI-A, BF-B)
+    if (['A', 'B', 'C', 'K'].includes(sfx)) {
+      return `${parts[0]}-${sfx}`;
+    }
+    // Sufixos de exchange europeus/globais de 2-3 caracteres (ex: .LS, .MC, .PA, .DE) mantêm-se
+    if (sfx.length <= 3) {
+      return trimmed;
+    }
   }
   
   // Para outros casos, tentar com '-' em vez de '.'

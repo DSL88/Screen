@@ -130,7 +130,7 @@ class DB {
           volume        INTEGER NOT NULL,
           PRIMARY KEY (ticker, date)
         );
-        CREATE INDEX IF NOT EXISTS idx_ticker_date ON historical_prices (ticker, date);
+        CREATE INDEX IF NOT EXISTS idx_hist_prices_ticker_date ON historical_prices (ticker, date);
         CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date);
         CREATE INDEX IF NOT EXISTS idx_historical_prices_ticker_date_asc ON historical_prices (ticker, date ASC);
         CREATE INDEX IF NOT EXISTS idx_hist_ticker_date_desc ON historical_prices (ticker, date DESC);
@@ -255,22 +255,10 @@ class DB {
       }
 
       // Índice composto para agregações MIN/MAX/COUNT instantâneas por ativo.
-      this.db.exec('CREATE INDEX IF NOT EXISTS idx_ticker_date ON historical_prices (ticker, date)');
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_hist_prices_ticker_date ON historical_prices (ticker, date)');
 
       // AUTOCORREÇÃO DA PRIMEIRA DATA HISTÓRICA
-      // ------------------------------------------------------------------
-      // Recalcula first_date para TODOS os ativos já gravados na BD, com
-      // base no MIN(date) real de historical_prices. Isto corrige
-      // retroativamente registos cujo first_date tinha sido populado com a
-      // data do download (em vez da vela mais antiga) por versões anteriores.
-      //
-      // NOTA DE PERFORMANCE: os tickers são sempre gravados de forma canónica
-      // (UPPER + TRIM) em todos os caminhos de escrita. Usar
-      // UPPER(TRIM(hp.ticker)) na comparação impediria o uso do índice
-      // composto idx_hist_ticker_date e forçaria uma varredura completa de
-      // historical_prices POR CADA ativo — em bases com milhões de velas
-      // (ex.: 905 ativos × 5.2M linhas) a migração nunca termina e a app
-      // "não arranca". A correspondência exata usa o índice (milissegundos).
+      // Recalcula first_date para ativos na BD com base no MIN(date) real.
       try {
         const fixStmt = this.db.prepare(`
           UPDATE stocks
@@ -293,30 +281,32 @@ class DB {
         console.error('[DB Migration] Falha ao recalcular first_date:', err && err.message ? err.message : err);
       }
 
-      // Older releases stored labels such as "EUA — S&P 500" in this
-      // column.  Convert them once, defensively, before any indexed query.
-      const stockRows = this.db.prepare('SELECT ticker, index_name FROM stocks').all();
-      const updateStockIndex = this.db.prepare('UPDATE stocks SET index_name = ? WHERE ticker = ?');
-      for (const row of stockRows) {
-        const id = canonicalIndexId(row.index_name);
-        if (id && id !== row.index_name) updateStockIndex.run(id, row.ticker);
-      }
-      const customRows = this.db.prepare('SELECT ticker, index_name FROM custom_tickers').all();
-      const updateCustomIndex = this.db.prepare('UPDATE custom_tickers SET index_name = ? WHERE ticker = ?');
-      for (const row of customRows) {
-        const id = canonicalIndexId(row.index_name);
-        if (id && id !== row.index_name) updateCustomIndex.run(id, row.ticker);
-      }
-      // custom_tickers did not have index metadata in another old schema;
-      // recover it from stocks when the ticker is shared.
-      this.db.exec(`
-        UPDATE custom_tickers
-        SET index_name = (SELECT s.index_name FROM stocks s WHERE s.ticker = custom_tickers.ticker)
-        WHERE (index_name IS NULL OR TRIM(index_name) = '')
-          AND EXISTS (SELECT 1 FROM stocks s WHERE s.ticker = custom_tickers.ticker AND s.index_name IS NOT NULL)
-      `);
+      // Migração com controlo de versão (PRAGMA user_version) para não sobregravar SL/TP em cada sessão.
+      const userVersion = this.db.pragma('user_version', { simple: true });
+      if (userVersion < 1) {
+        // Normalização de rótulos antigos em index_name
+        const stockRows = this.db.prepare('SELECT ticker, index_name FROM stocks').all();
+        const updateStockIndex = this.db.prepare('UPDATE stocks SET index_name = ? WHERE ticker = ?');
+        for (const row of stockRows) {
+          const id = canonicalIndexId(row.index_name);
+          if (id && id !== row.index_name) updateStockIndex.run(id, row.ticker);
+        }
+        const customRows = this.db.prepare('SELECT ticker, index_name FROM custom_tickers').all();
+        const updateCustomIndex = this.db.prepare('UPDATE custom_tickers SET index_name = ? WHERE ticker = ?');
+        for (const row of customRows) {
+          const id = canonicalIndexId(row.index_name);
+          if (id && id !== row.index_name) updateCustomIndex.run(id, row.ticker);
+        }
+        this.db.exec(`
+          UPDATE custom_tickers
+          SET index_name = (SELECT s.index_name FROM stocks s WHERE s.ticker = custom_tickers.ticker)
+          WHERE (index_name IS NULL OR TRIM(index_name) = '')
+            AND EXISTS (SELECT 1 FROM stocks s WHERE s.ticker = custom_tickers.ticker AND s.index_name IS NOT NULL)
+        `);
 
-      this._migrateRecalculateSLTP();
+        this._migrateRecalculateSLTP();
+        this.db.pragma('user_version = 1');
+      }
     });
     tx();
   }

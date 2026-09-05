@@ -19,12 +19,12 @@ if (workerData && workerData.dbPath && Array.isArray(workerData.tickers)) {
       function loadCandlesForWorker(ticker, start, end) {
         const cleanTicker = String(ticker).trim().toUpperCase();
         if (!start && !end) {
-          return db.prepare(`SELECT date, open, high, low, close, volume FROM historical_prices WHERE UPPER(TRIM(ticker)) = ? ORDER BY date ASC`).all(cleanTicker);
+          return db.prepare(`SELECT date, open, high, low, close, volume FROM historical_prices WHERE ticker = ? ORDER BY date ASC`).all(cleanTicker);
         }
         const cleanStart = String(start).slice(0, 10);
         const cleanEnd = end ? String(end).slice(0, 10) : '9999-12-31';
-        const warmup = db.prepare(`SELECT date, open, high, low, close, volume FROM historical_prices WHERE UPPER(TRIM(ticker)) = ? AND date < ? ORDER BY date DESC LIMIT 200`).all(cleanTicker, cleanStart).reverse();
-        const main = db.prepare(`SELECT date, open, high, low, close, volume FROM historical_prices WHERE UPPER(TRIM(ticker)) = ? AND date >= ? AND date <= ? ORDER BY date ASC`).all(cleanTicker, cleanStart, cleanEnd);
+        const warmup = db.prepare(`SELECT date, open, high, low, close, volume FROM historical_prices WHERE ticker = ? AND date < ? ORDER BY date DESC LIMIT 200`).all(cleanTicker, cleanStart).reverse();
+        const main = db.prepare(`SELECT date, open, high, low, close, volume FROM historical_prices WHERE ticker = ? AND date >= ? AND date <= ? ORDER BY date ASC`).all(cleanTicker, cleanStart, cleanEnd);
         return [...warmup, ...main];
       }
 
@@ -164,7 +164,7 @@ function loadLocalCandles(dbPath, ticker, startDate, endDate) {
       const rows = db.prepare(`
         SELECT date, open, high, low, close, volume
         FROM historical_prices
-        WHERE UPPER(TRIM(ticker)) = ?
+        WHERE ticker = ?
         ORDER BY date ASC
       `).all(cleanTicker);
       return rows.map(toRow);
@@ -175,14 +175,14 @@ function loadLocalCandles(dbPath, ticker, startDate, endDate) {
     const warmup = db.prepare(`
       SELECT date, open, high, low, close, volume
       FROM historical_prices
-      WHERE UPPER(TRIM(ticker)) = ? AND date < ?
+      WHERE ticker = ? AND date < ?
       ORDER BY date DESC
       LIMIT 200
     `).all(cleanTicker, cleanStart).reverse();
     const main = db.prepare(`
       SELECT date, open, high, low, close, volume
       FROM historical_prices
-      WHERE UPPER(TRIM(ticker)) = ? AND date >= ? AND date <= ?
+      WHERE ticker = ? AND date >= ? AND date <= ?
       ORDER BY date ASC
     `).all(cleanTicker, cleanStart, cleanEnd);
     return [...warmup, ...main].map(toRow);

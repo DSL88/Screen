@@ -58,11 +58,6 @@ const apiBridge = {
   getStockDividends: (ticker) => ipcRenderer.invoke('get-stock-dividends', ticker),
   downloadStockDividends: (ticker) => ipcRenderer.invoke('download-stock-dividends', ticker),
   syncIndexDataBatch: (params) => ipcRenderer.invoke('sync-index-data-batch', params),
-  onSyncProgressUpdate: (callback) => {
-    const handler = (_event, data) => callback(data);
-    ipcRenderer.on('SYNC_PROGRESS_UPDATE', handler);
-    return () => ipcRenderer.removeListener('SYNC_PROGRESS_UPDATE', handler);
-  },
   reconcileAllDates: () => ipcRenderer.invoke('reconcile-all-dates'),
   updateStockMetadata: (ticker, data) => ipcRenderer.invoke('update-stock-metadata', { ticker, data }),
   getDistinctIndices: () => ipcRenderer.invoke('get-distinct-indices'),
