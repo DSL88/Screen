@@ -2,6 +2,8 @@
 
 const { parentPort, workerData } = require('worker_threads');
 const { runSimulation } = require('./backtesterEngine');
+const { runWorkstationSimulation } = require('./workstationEngine');
+const { runPortfolioSimulation } = require('./portfolioBacktester');
 
 // Spec Passo 3 – modo workerData (START_SIMULATION) – execução direta ao arrancar
 // Mantém compatibilidade com modo message-based (simulation:start)
@@ -191,7 +193,7 @@ function loadLocalCandles(dbPath, ticker, startDate, endDate) {
   }
 }
 
-async function handleStart({ runId, universe, params, dbPath, startDate, endDate }) {
+async function handleStart({ runId, universe, params, dbPath, startDate, endDate, fundamentalData }) {
   const messages = [];
   const list = Array.isArray(universe) ? universe : [];
   const start = toISODate(startDate);
@@ -239,8 +241,17 @@ async function handleStart({ runId, universe, params, dbPath, startDate, endDate
     let candles = null;
     let candlesError = null;
 
+    // Candles já fornecidos no universo (ex: modo workstation / testes / in-memory)
+    if (Array.isArray(u.candles) && u.candles.length) {
+      candles = u.candles.map(c => ({
+        date: String(c.date).slice(0, 10),
+        open: Number(c.open), high: Number(c.high), low: Number(c.low),
+        close: Number(c.close), volume: Number(c.volume || 0)
+      }));
+    }
+
     // Carregamento direto e rápido via SQLite local no worker quando dbPath disponível
-    if (dbPath) {
+    if (!candles && dbPath) {
       try {
         candles = loadLocalCandles(dbPath, ticker, start, end);
       } catch (err) {
@@ -279,26 +290,42 @@ async function handleStart({ runId, universe, params, dbPath, startDate, endDate
   let lastProgressAt = 0;
   let lastPercent = 0;
 
-  const result = await runSimulation({
-    universe: built,
-    params: simParams,
-    hooks: {
-      onProgress(percent) {
-        lastPercent = percent;
-        const now = Date.now();
-        if (percent < 100 && now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
-        lastProgressAt = now;
-        send({ type: 'simProgress', payload: { runId, percent, ticker: lastTicker } });
-      },
-      onStatus(message) {
-        const now = Date.now();
-        if (now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
-        lastProgressAt = now;
-        send({ type: 'simProgress', payload: { runId, percent: lastPercent, message, ticker: lastTicker } });
-      },
-      cancelled: () => cancelRequested.has(runId)
-    }
-  });
+  const useWorkstation = simParams.workstation === true;
+  const usePortfolio = simParams.engine === 'portfolio' || simParams.portfolio === true;
+
+  const hooks = {
+    onProgress(percentOrObj) {
+      const percent = typeof percentOrObj === 'number' ? percentOrObj : (percentOrObj && percentOrObj.percent) || 0;
+      lastPercent = percent;
+      const now = Date.now();
+      if (percent < 100 && now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
+      lastProgressAt = now;
+      send({ type: 'simProgress', payload: { runId, percent, ticker: lastTicker, date: percentOrObj && percentOrObj.date } });
+    },
+    onStatus(message) {
+      const now = Date.now();
+      if (now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
+      lastProgressAt = now;
+      send({ type: 'simProgress', payload: { runId, percent: lastPercent, message, ticker: lastTicker } });
+    },
+    cancelled: () => cancelRequested.has(runId)
+  };
+
+  let result;
+  if (usePortfolio) {
+    let quantEngine = null;
+    try { quantEngine = require('../native'); } catch (_) {}
+    result = await runPortfolioSimulation({ universe: built, params: simParams, quantEngine, hooks });
+  } else if (useWorkstation) {
+    result = await runWorkstationSimulation({
+      universe: built,
+      params: simParams,
+      fundamentalData: fundamentalData || undefined,
+      hooks
+    });
+  } else {
+    result = await runSimulation({ universe: built, params: simParams, hooks });
+  }
 
   result.messages = messages.concat(result.messages || []);
   cancelRequested.delete(runId);

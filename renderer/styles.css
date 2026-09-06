@@ -7113,3 +7113,48 @@ tr.empty td .empty-state {
 #modal-sync-diagnostics .modal-footer {
   justify-content: flex-end;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   MOTOR INTEGRAL DA WORKSTATION QUANTITATIVA (aba Simulação)
+   ═══════════════════════════════════════════════════════════ */
+.ws-horizon-section { margin-bottom: 18px; }
+.horizon-btn-group { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.horizon-btn {
+  border: 1px solid #2f4258; background: #16202b; color: #cfd8dc;
+  padding: 8px 16px; border-radius: 9999px; cursor: pointer;
+  font-size: 13px; font-weight: 600; transition: all 0.15s ease;
+}
+.horizon-btn:hover { border-color: #4fc3f7; color: #fff; }
+.horizon-btn.active { background: #FFE600; color: #0b1219; border-color: #FFE600; }
+.ws-custom-dates { margin-top: 12px; }
+#summary-sharpe { color: #FFE600; }
+.simulation-card-row .val-highlight-yellow { color: #FFE600; font-weight: 700; }
+.btn-view-full-report {
+  background: #FFE600; color: #0b1219; border: none; border-radius: 10px;
+  padding: 12px 20px; font-weight: 700; cursor: pointer; font-size: 14px;
+}
+.btn-view-full-report:hover { filter: brightness(1.08); }
+.ws-report-block { margin: 0 0 30px 0; padding: 18px 20px; background: #101a24; border: 1px solid #21313f; border-radius: 14px; }
+.ws-block-title { color: #4fc3f7; font-size: 16px; margin: 0 0 14px 0; font-weight: 700; letter-spacing: 0.3px; }
+.ws-empty { text-align: center; color: #8a99ad; padding: 20px; }
+#table-yearly tr.ws-pos { background: rgba(0, 230, 118, 0.08); }
+#table-yearly tr.ws-neg { background: rgba(255, 82, 82, 0.10); }
+#table-yearly td:first-child { color: #fff; }
+#table-yearly tr.ws-pos td:nth-child(2) { color: #00e676; font-weight: 700; }
+#table-yearly tr.ws-neg td:nth-child(2) { color: #ff5252; font-weight: 700; }
+#table-tiers td.ws-pos { color: #00e676; font-weight: 600; }
+#table-tiers td.ws-neg { color: #ff5252; font-weight: 600; }
+.ws-tail-risk { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.ws-risk-card {
+  background: #0b141c; border: 1px solid #21313f; border-radius: 10px;
+  padding: 12px 16px; min-width: 140px; display: flex; flex-direction: column; gap: 4px;
+}
+.ws-risk-label { font-size: 11px; color: #8a99ad; text-transform: uppercase; letter-spacing: 0.4px; }
+.ws-risk-val { font-size: 18px; color: #FFE600; font-weight: 700; }
+.ws-trades-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.ws-trades-tools { display: flex; gap: 8px; align-items: center; }
+#ws-trades-search { width: 220px; }
+#table-trades-log th[data-sort] { cursor: pointer; user-select: none; }
+#table-trades-log th[data-sort]:hover { color: #4fc3f7; }
+.table-trades-log .text-green { color: #00e676; }
+.table-trades-log .text-red { color: #ff5252; }

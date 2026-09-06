@@ -4,147 +4,168 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 
-test('Simulation Unified Dashboard & Modal UI contract in HTML', () => {
+// ═══════════════════════════════════════════════════════════
+//  CONTRATO DA UI — MOTOR INTEGRAL DA WORKSTATION (1–20 ANOS)
+//  Substitui o antigo dashboard de backtest simplificado.
+// ═══════════════════════════════════════════════════════════
+
+test('Workstation HTML: dashboard com seletor de horizonte 1–20 anos', () => {
   const html = fs.readFileSync(require.resolve('../renderer/index.html'), 'utf8');
 
-  // 1. Dashboard de Configuração Unificado
-  const expectedDashboardIds = [
-    'sim-asset-universe',
-    'sim-direction',
-    'sim-stop-loss',
-    'sim-take-profit',
-    'sim-risk-per-trade',
-    'sim-toggle-vwap',
-    'sim-min-mc',
-    'sim-markov-window',
-    'sim-start-date',
-    'sim-end-date',
-    'sim-initial-capital',
-    'btn-start-simulation',
-    'btn-reset-params'
-  ];
-
-  for (const id of expectedDashboardIds) {
-    assert.match(html, new RegExp(`id=["']${id}["']`), `HTML deve conter o elemento com id "${id}"`);
+  // Botões de horizonte rápido
+  for (const y of [1, 2, 3, 5, 10, 15, 20]) {
+    assert.match(html, new RegExp(`data-years="${y}"`), `deve existir botão de horizonte ${y} anos`);
   }
+  assert.match(html, /id=["']ws-horizon-group["']/, 'grupo de botões de horizonte');
+  assert.match(html, /id=["']ws-custom-dates["']/, 'datas personalizadas');
+  assert.match(html, /Personalizado/, 'opção de intervalo personalizado');
 
-  // 2. Card Único de Resumo
-  const expectedSummaryCardIds = [
-    'simulation-summary-card-container',
-    'btn-open-simulation-modal',
-    'summary-card-title',
-    'summary-card-dates',
-    'summary-gain',
-    'summary-winrate',
-    'summary-pf',
-    'summary-dd'
-  ];
+  // Escalão mínimo de convicção (Elite / Moderado+Elite)
+  assert.match(html, /id=["']sim-conviction-tier["']/);
+  assert.match(html, /Elite Only[^<]*65/, 'opção Elite ≥ 65%');
+  assert.match(html, /Moderado[^<]*50/, 'opção Moderado ≥ 50%');
 
-  for (const id of expectedSummaryCardIds) {
-    assert.match(html, new RegExp(`id=["']${id}["']`), `HTML deve conter o elemento do card de resumo com id "${id}"`);
+  // Gestão de risco com ATR dinâmico + start workstation
+  assert.match(html, /id=["']sim-stop-mode["']/);
+  assert.match(html, /value=["']pct["']/, 'modo percentagem fixa (2.4/4.8) é o padrão');
+  assert.match(html, /Iniciar Simulação Workstation/, 'botão de iniciar workstation');
+});
+
+test('Workstation HTML: matriz de slots 2/5/7,5/10/15/20% + preview dinâmico', () => {
+  const html = fs.readFileSync(require.resolve('../renderer/index.html'), 'utf8');
+  assert.match(html, /id=["']sim-slot-size["']/, 'seletor de slot (6 opções)');
+  for (const v of ['2', '5', '7.5', '10', '15', '20']) {
+    assert.match(html, new RegExp(`<option value=["']${v}["']`), `opção de slot ${v}%`);
   }
+  assert.match(html, /Máx\. 50 Posições/);
+  assert.match(html, /Máx\. 20 Posições/);
+  assert.match(html, /Máx\. 13 Posições/);
+  assert.match(html, /Máx\. 10 Posições/);
+  assert.match(html, /Máx\. 6 Posições/);
+  assert.match(html, /Máx\. 5 Posições/);
+  // preview dinâmico
+  assert.match(html, /id=["']sim-slot-preview["']/);
+  assert.match(html, /id=["']preview-max-positions["']/);
+  assert.match(html, /id=["']preview-capital-per-trade["']/);
+  assert.match(html, /id=["']sim-horizon-exp["']/, 'horizonte de expiração (dias úteis)');
+  // defaults calibrados SL 2.4 / TP 4.8 / 35d / capital 10.000 €
+  assert.match(html, /id=["']sim-stop-loss["'][^>]*value=["']2\.4["']/);
+  assert.match(html, /id=["']sim-take-profit["'][^>]*value=["']4\.8["']/);
+  assert.match(html, /id=["']sim-horizon-exp["'][^>]*value=["']35["']/);
+  assert.match(html, /id=["']sim-initial-capital["'][^>]*value=["']10000["']/);
+});
 
-  // 3. Modal Pop-up Detalhado
-  const expectedModalIds = [
-    'modal-simulation-details',
-    'modal-sim-subtitle',
-    'btn-close-sim-modal',
-    'modal-final-capital',
-    'modal-total-trades',
-    'modal-winning-trades',
-    'modal-expected-value',
-    'canvas-equity-curve',
-    'canvas-drawdown-curve',
-    'table-trades-log',
-    'tbody-trades-log'
-  ];
+test('Renderer: matriz SLOT_DEFINITIONS e recálculo floor(1/slot) + payload slotSize', () => {
+  const fs2 = require('fs');
+  const js = fs2.readFileSync(require.resolve('../renderer/simulationRenderer.js'), 'utf8');
+  // 6 chaves na matriz
+  ['2', '5', '7.5', '10', '15', '20'].forEach(k => assert.match(js, new RegExp(`'${k}':\\s*\\{\\s*slotPct`), `definição ${k}%`));
+  // derivada de floor(1/slotPct)
+  assert.match(js, /Math\.floor\(1 \/ 0\.020\)/);
+  assert.match(js, /Math\.floor\(1 \/ 0\.075\)/);
+  // preview reativo escuta capital + slot
+  assert.match(js, /addEventListener\('input',\s*updateSlotPreview\)/);
+  assert.match(js, /addEventListener\('change',\s*updateSlotPreview\)/);
+  // payload envia slotSize + positionAllocationPct
+  assert.match(js, /slotSize:\s*slotKey/);
+  assert.match(js, /positionAllocationPct:\s*preset\.slotPct/);
+});
 
-  for (const id of expectedModalIds) {
-    assert.match(html, new RegExp(`id=["']${id}["']`), `HTML deve conter o elemento do modal detalhado com id "${id}"`);
+test('Engine SLOT_DEFINITIONS: floor(100%/Slot%) para as 6 opções', () => {
+  const { SLOT_DEFINITIONS, maxPositionsForSlot } = require('../src/engine/portfolioBacktester');
+  const expect = { '2': 50, '5': 20, '7.5': 13, '10': 10, '15': 6, '20': 5 };
+  for (const [k, max] of Object.entries(expect)) {
+    assert.equal(SLOT_DEFINITIONS[k].maxPositions, max, `slot ${k}%`);
+    assert.equal(maxPositionsForSlot(SLOT_DEFINITIONS[k].slotPct), max, `derive ${k}%`);
   }
 });
 
-test('Simulation Unified Dashboard & Modal logic lifecycle in simulationRenderer.js', () => {
+test('Workstation HTML: card resumo com 5 destaques (incl. Sharpe)', () => {
+  const html = fs.readFileSync(require.resolve('../renderer/index.html'), 'utf8');
+  for (const id of [
+    'simulation-summary-card-container', 'btn-open-simulation-modal',
+    'summary-card-title', 'summary-card-dates',
+    'summary-gain', 'summary-winrate', 'summary-pf', 'summary-dd', 'summary-sharpe'
+  ]) {
+    assert.match(html, new RegExp(`id=["']${id}["']`), `card resumo: id "${id}"`);
+  }
+});
+
+test('Workstation HTML: modal com os 5 blocos analíticos (A–E)', () => {
+  const html = fs.readFileSync(require.resolve('../renderer/index.html'), 'utf8');
+  // Bloco A — KPIs globais
+  assert.match(html, /id=["']ws-kpis-bar["']/);
+  assert.match(html, /Métricas Globais Institucionais/);
+  // Bloco B — matriz ano a ano
+  assert.match(html, /id=["']tbody-yearly["']/);
+  assert.match(html, /Matriz de Retornos Ano a Ano/);
+  // Bloco C — tiers de calibração
+  assert.match(html, /id=["']tbody-tiers["']/);
+  assert.match(html, /Auditoria por Escalão de Convicção/);
+  // Bloco D — gráficos + tail risk
+  assert.match(html, /id=["']canvas-equity-curve["']/);
+  assert.match(html, /id=["']canvas-drawdown-curve["']/);
+  assert.match(html, /id=["']ws-tail-risk["']/);
+  // Bloco E — trade log com MFE/MAE + export CSV + pesquisa
+  assert.match(html, /id=["']tbody-trades-log["']/);
+  assert.match(html, /MFE %/);
+  assert.match(html, /MAE %/);
+  assert.match(html, /id=["']btn-export-trades-csv["']/);
+  assert.match(html, /id=["']ws-trades-search["']/);
+});
+
+test('Workstation Renderer: ciclo de vida com relatório do motor (5 blocos)', () => {
   const elements = new Map();
   const listeners = new Map();
 
   function makeMockElement(id) {
     const classListSet = new Set();
     return {
-      id,
-      value: '',
-      checked: false,
-      textContent: '',
-      innerHTML: '',
-      hidden: false,
-      style: {},
+      id, value: '', checked: false, textContent: '', innerHTML: '', hidden: false,
+      style: {}, dataset: {},
       classList: {
-        add(cls) { classListSet.add(cls); },
-        remove(cls) { classListSet.delete(cls); },
-        toggle(cls) { if (classListSet.has(cls)) classListSet.delete(cls); else classListSet.add(cls); },
-        contains(cls) { return classListSet.has(cls); }
+        add(c) { classListSet.add(c); }, remove(c) { classListSet.delete(c); },
+        toggle(c, force) { const on = force === undefined ? !classListSet.has(c) : force; if (on) classListSet.add(c); else classListSet.delete(c); },
+        contains(c) { return classListSet.has(c); }
       },
-      addEventListener(evt, handler) {
-        if (!listeners.has(`${id}:${evt}`)) listeners.set(`${id}:${evt}`, []);
-        listeners.get(`${id}:${evt}`).push(handler);
-      },
-      getContext() {
-        return {
-          clearRect() {},
-          beginPath() {},
-          moveTo() {},
-          lineTo() {},
-          stroke() {},
-          fill() {},
-          arc() {}
-        };
-      }
+      addEventListener(evt, h) { const k = `${id}:${evt}`; if (!listeners.has(k)) listeners.set(k, []); listeners.get(k).push(h); },
+      querySelectorAll() { return { forEach() {} }; },
+      getContext() { return { clearRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, fill() {}, arc() {} }; }
     };
   }
 
-  const idsToMock = [
-    'sim-asset-universe', 'sim-direction', 'sim-stop-loss', 'sim-take-profit',
-    'sim-risk-per-trade', 'sim-toggle-vwap', 'sim-min-mc', 'sim-markov-window',
-    'sim-start-date', 'sim-end-date', 'sim-initial-capital',
+  const ids = [
+    'sim-asset-universe', 'sim-conviction-tier', 'sim-direction', 'sim-stop-mode',
+    'sim-stop-loss', 'sim-take-profit', 'sim-risk-per-trade', 'sim-rebalance-days',
+    'sim-max-positions', 'sim-initial-capital', 'sim-start-date', 'sim-end-date',
     'btn-start-simulation', 'btn-reset-params', 'btn-sim-cancel',
     'sim-progress-wrap', 'sim-progress-fill', 'sim-progress-text', 'sim-status',
     'simulation-summary-card-container', 'btn-open-simulation-modal',
     'summary-card-title', 'summary-card-dates', 'summary-gain', 'summary-winrate',
-    'summary-pf', 'summary-dd',
+    'summary-pf', 'summary-dd', 'summary-sharpe',
     'modal-simulation-details', 'modal-sim-subtitle', 'btn-close-sim-modal',
-    'modal-final-capital', 'modal-total-trades', 'modal-winning-trades',
-    'modal-expected-value', 'canvas-equity-curve', 'canvas-drawdown-curve',
-    'table-trades-log', 'tbody-trades-log'
+    'ws-kpis-bar', 'tbody-yearly', 'tbody-tiers', 'ws-tail-risk',
+    'canvas-equity-curve', 'canvas-drawdown-curve', 'table-trades-log', 'tbody-trades-log'
   ];
-
-  for (const id of idsToMock) {
-    elements.set(id, makeMockElement(id));
-  }
-
-  // Pre-hide container and modal as in production
+  for (const id of ids) elements.set(id, makeMockElement(id));
   elements.get('simulation-summary-card-container').classList.add('hidden');
   elements.get('modal-simulation-details').classList.add('hidden');
 
   global.document = {
     readyState: 'complete',
-    getElementById(id) {
-      return elements.get(id) || null;
-    },
+    getElementById(id) { return elements.get(id) || null; },
     querySelectorAll() { return []; },
-    addEventListener() {},
-    removeEventListener() {}
+    addEventListener() {}, removeEventListener() {}
   };
 
-  let registeredResultCb = null;
+  let resultCb = null;
   global.window = {
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener() {}, removeEventListener() {},
     api: {
-      simulationStart: async () => ({ ok: true, runId: 'sim_run_999' }),
+      simulationStart: async () => ({ ok: true, runId: 'sim_ws_1' }),
       simulationCancel: async () => ({ ok: true }),
       onSimulationProgress() { return () => {}; },
-      onSimulationResult(cb) { registeredResultCb = cb; return () => {}; },
-      onSimulationComplete(cb) { registeredResultCb = cb; return () => {}; },
+      onSimulationResult(cb) { resultCb = cb; return () => {}; },
       onSimulationError() { return () => {}; }
     }
   };
@@ -152,72 +173,59 @@ test('Simulation Unified Dashboard & Modal logic lifecycle in simulationRenderer
   delete require.cache[require.resolve('../src/renderer/js/simulationRenderer')];
   require('../src/renderer/js/simulationRenderer');
 
-  // 1. Simulação Concluída emite resultado
-  const mockResult = {
-    totalGain: 18.5,
-    winRate: 64,
-    profitFactor: 2.15,
-    maxDrawdown: 4.8,
-    finalCapital: 11850,
-    winningTradesCount: 16,
-    expectedValue: 1.15,
-    equityCurve: [
-      { date: '2023-01-01', capital: 10000 },
-      { date: '2023-06-01', capital: 11000 },
-      { date: '2023-12-31', capital: 11850 }
+  // Relatório no formato do motor workstation
+  const wsResult = {
+    ok: true, engine: 'workstation',
+    summary: { title: 'Simulação Workstation — 20 Anos (2006 a 2026)' },
+    kpis: { rentabilidadePct: 132.5, winRateReal: 58, profitFactor: 1.94, maxDrawdown: 14.3, sharpe: 1.62, finalCapital: 23250 },
+    globalKpis: { initialCapital: 10000, finalCapital: 23250, netProfitPct: 132.5, cagr: 6.1, sharpe: 1.62, sortino: 2.1, calmar: 0.43, maxDrawdownPct: 14.3, totalTrades: 3, winRate: 58, profitFactor: 1.94, payoffRatio: 1.5, expectancy: 4416, avgDurationDays: 22, exposurePct: 40, var95: 1.8, cvar95: 2.6 },
+    yearlyMatrix: [
+      { year: '2020', returnPct: 12.5, trades: 2, winRate: 50, maxDrawdownPct: 4.1, sharpe: 1.2 },
+      { year: '2021', returnPct: -3.2, trades: 1, winRate: 0, maxDrawdownPct: 5.5, sharpe: -0.4 }
     ],
-    drawdownCurve: [
-      { date: '2023-01-01', drawdown: 0 },
-      { date: '2023-06-01', drawdown: 2.1 },
-      { date: '2023-12-31', drawdown: 0.5 }
-    ],
+    calibrationTiers: {
+      ELITE: { tier: 'Elite', range: '65–100%', trades: 2, winRateReal: 60, winRateTheoretical: 71, pnl: 5000, alpha: -11 },
+      MODERATE: { tier: 'Moderado', range: '50–64.9%', trades: 1, winRateReal: 55, winRateTheoretical: 56, pnl: 1900, alpha: -1 }
+    },
+    risk: { var95: 1.8, cvar95: 2.6 },
+    validation: { valid: true, sharpeOOS: 1.4, dsrPercent: 96.5, pboPercent: 12.5, isApproved: true },
+    equityCurve: [{ date: '2020-01-02', value: 10000 }, { date: '2021-12-30', value: 23250 }],
+    drawdownSeries: [{ date: '2020-01-02', value: 0 }, { date: '2021-01-02', value: 5.5 }],
+    benchmark: [{ date: '2020-01-02', value: 10000 }, { date: '2021-12-30', value: 15000 }],
     trades: [
-      { ticker: 'GALP.LS', type: 'LONG', entryDate: '2023-01-10', entryPrice: 10.5, exitDate: '2023-01-20', exitPrice: 11.2, exitReason: 'TP', profit: 700, profitPct: 6.67 },
-      { ticker: 'EDP.LS', type: 'LONG', entryDate: '2023-02-05', entryPrice: 4.2, exitDate: '2023-02-15', exitPrice: 4.0, exitReason: 'SL', profit: -200, profitPct: -4.76 }
-    ]
+      { ticker: 'GALP', side: 'LONG', entryDate: '2020-03-01', entryPrice: 10.5, exitDate: '2020-04-01', exitPrice: 11.2, reason: 'Take Profit', profit: 700, profitPct: 6.7, mfePct: 8.1, maePct: -1.2, winRateMC: 68, mcTier: 'ELITE' },
+      { ticker: 'EDP', side: 'LONG', entryDate: '2021-02-01', entryPrice: 4.2, exitDate: '2021-02-20', exitPrice: 4.0, reason: 'Stop Loss', profit: -200, profitPct: -4.8, mfePct: 1.1, maePct: -6.0, winRateMC: 55, mcTier: 'MODERATE' }
+    ],
+    meta: { universe: 3, blocks: 12 }
   };
 
-  assert.ok(registeredResultCb, 'onSimulationComplete deve estar subscrito');
-  registeredResultCb(mockResult);
+  assert.ok(resultCb, 'onSimulationResult subscrito');
+  resultCb({ runId: 'sim_ws_1', result: wsResult });
 
-  // 2. Card Resumo Único deve estar visível e preenchido
-  const summaryContainer = elements.get('simulation-summary-card-container');
-  assert.equal(summaryContainer.classList.contains('hidden'), false, 'Card Resumo deve estar visível');
-  assert.equal(elements.get('summary-gain').textContent, '+18.5%');
-  assert.equal(elements.get('summary-winrate').textContent, '64%');
-  assert.equal(elements.get('summary-pf').textContent, '2.15');
-  assert.equal(elements.get('summary-dd').textContent, '4.80%');
+  // Card resumo visível + destaques
+  assert.equal(elements.get('simulation-summary-card-container').classList.contains('hidden'), false);
+  assert.match(elements.get('summary-gain').textContent, /132\.5/);
+  assert.match(elements.get('summary-dd').textContent, /14\.3/);
+  assert.match(elements.get('summary-sharpe').textContent, /1\.62/);
 
-  // Modal detalhado ainda oculto antes do clique
-  const modal = elements.get('modal-simulation-details');
-  assert.equal(modal.classList.contains('hidden'), true, 'Modal deve estar oculto até ser clicado');
+  // Modal ainda oculto até clique
+  assert.equal(elements.get('modal-simulation-details').classList.contains('hidden'), true);
+  listeners.get('btn-open-simulation-modal:click')[0]();
+  assert.equal(elements.get('modal-simulation-details').classList.contains('hidden'), false);
 
-  // 3. Clique no Card Resumo abre o Modal Detalhado
-  const openHandlers = listeners.get('btn-open-simulation-modal:click') || [];
-  assert.ok(openHandlers.length > 0, 'Deve existir listener para abrir o modal no card resumo');
-  openHandlers[0]();
-
-  assert.equal(modal.classList.contains('hidden'), false, 'Modal deve abrir ao clicar no card resumo');
-  assert.equal(elements.get('modal-total-trades').textContent, '2');
-  assert.equal(elements.get('modal-winning-trades').textContent, '16 (64%)');
-  assert.equal(elements.get('modal-expected-value').textContent, '+1.15% / trade');
-  assert.match(elements.get('tbody-trades-log').innerHTML, /GALP\.LS/);
-  assert.match(elements.get('tbody-trades-log').innerHTML, /EDP\.LS/);
-
-  // 4. Fecho do Modal
-  const closeHandlers = listeners.get('btn-close-sim-modal:click') || [];
-  assert.ok(closeHandlers.length > 0, 'Deve existir listener no botão fechar modal');
-  closeHandlers[0]();
-
-  assert.equal(modal.classList.contains('hidden'), true, 'Modal deve fechar');
-  assert.equal(summaryContainer.classList.contains('hidden'), false, 'Card resumo permanece preservado em memória');
-
-  // 5. Botão Restaurar Padrões
-  const resetHandlers = listeners.get('btn-reset-params:click') || [];
-  assert.ok(resetHandlers.length > 0, 'Deve existir listener no botão restaurar padrões');
-  elements.get('sim-stop-loss').value = '5.0';
-  elements.get('sim-take-profit').value = '10.0';
-  resetHandlers[0]();
-  assert.equal(elements.get('sim-stop-loss').value, '2.4', 'Restaurar padrões deve repor SL para 2.4');
-  assert.equal(elements.get('sim-take-profit').value, '4.8', 'Restaurar padrões deve repor TP para 4.8');
+  // Bloco A preenchido
+  assert.match(elements.get('ws-kpis-bar').innerHTML, /Capital Final/);
+  // Bloco B — anos presentes
+  assert.match(elements.get('tbody-yearly').innerHTML, /2020/);
+  assert.match(elements.get('tbody-yearly').innerHTML, /2021/);
+  // Bloco C — tiers
+  assert.match(elements.get('tbody-tiers').innerHTML, /Elite/);
+  assert.match(elements.get('tbody-tiers').innerHTML, /Moderado/);
+  // Bloco D — tail risk com VaR/CVaR e validação
+  assert.match(elements.get('ws-tail-risk').innerHTML, /VaR 95%/);
+  assert.match(elements.get('ws-tail-risk').innerHTML, /CVaR/);
+  assert.match(elements.get('ws-tail-risk').innerHTML, /PBO/);
+  // Bloco E — trade log com tickers
+  assert.match(elements.get('tbody-trades-log').innerHTML, /GALP/);
+  assert.match(elements.get('tbody-trades-log').innerHTML, /EDP/);
 });

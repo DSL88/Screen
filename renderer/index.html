@@ -718,8 +718,8 @@
       <div class="tab-content tab-pane hidden" id="tab-simulation" data-tab-content="simulation" style="display: none;">
         <header class="topbar">
           <div class="topbar-info">
-            <h1>Simulação de Estratégias</h1>
-            <p id="sim-subtitle">Backtesting interativo da estratégia Markov Walk-Forward nos ativos da My List.</p>
+            <h1>Motor Integral da Workstation Quantitativa</h1>
+            <p id="sim-subtitle">Pipeline completa (Graham · McGinley · FFD · Markov + Monte Carlo · Purificação VIF · CPCV/DSR) em horizontes de 1 a 20 anos.</p>
           </div>
           <div class="topbar-actions">
             <div class="sim-progress-wrap" id="sim-progress-wrap" hidden>
@@ -730,88 +730,128 @@
           </div>
         </header>
 
-        <!-- DASHBOARD DE CONFIGURAÇÃO UNIFICADO -->
         <div class="simulation-dashboard-container">
           <div class="dashboard-header">
             <h2>Painel de Controlo da Estratégia Quantitativa</h2>
-            <p>Configure e ajuste os parâmetros técnicos e de risco num único painel central.</p>
+            <p>Selecione o horizonte temporal, o universo e os escalões de convicção.</p>
+          </div>
+
+          <!-- HORIZONTE TEMPORAL -->
+          <div class="control-panel-section ws-horizon-section">
+            <div class="section-title">⏳ Horizonte Temporal</div>
+            <div class="horizon-btn-group" id="ws-horizon-group">
+              <button class="horizon-btn" data-years="1" type="button">1 Ano</button>
+              <button class="horizon-btn" data-years="2" type="button">2 Anos</button>
+              <button class="horizon-btn" data-years="3" type="button">3 Anos</button>
+              <button class="horizon-btn active" data-years="5" type="button">5 Anos</button>
+              <button class="horizon-btn" data-years="10" type="button">10 Anos</button>
+              <button class="horizon-btn" data-years="15" type="button">15 Anos</button>
+              <button class="horizon-btn" data-years="20" type="button">20 Anos</button>
+              <button class="horizon-btn" data-years="0" type="button">Personalizado</button>
+            </div>
+            <div class="form-row-dual ws-custom-dates" id="ws-custom-dates" hidden>
+              <div class="form-group">
+                <label for="sim-start-date">Data Início</label>
+                <input type="date" id="sim-start-date" class="form-control">
+              </div>
+              <div class="form-group">
+                <label for="sim-end-date">Data Fim</label>
+                <input type="date" id="sim-end-date" class="form-control">
+              </div>
+            </div>
           </div>
 
           <div class="simulation-control-grid">
-            <!-- BLOCO 1: ATIVOS E DIREÇÃO -->
+            <!-- BLOCO 1: UNIVERSO + CONVICÇÃO -->
             <div class="control-panel-section">
-              <div class="section-title">🧭 Ativos & Direção</div>
+              <div class="section-title">🧭 Universo & Convicção</div>
               <div class="form-group">
                 <label for="sim-asset-universe">Universo de Ativos</label>
                 <select id="sim-asset-universe" class="form-control">
-                  <option value="ALL">Todos os Ativos na My List</option>
-                  <option value="PSI">Índice PSI</option>
-                  <option value="SP500">S&P 500</option>
+                  <option value="ALL">All (todos)</option>
+                  <option value="MYLIST">My List</option>
+                  <option value="PSI">PSI</option>
+                  <option value="SP500">S&amp;P 500</option>
                   <option value="DAX">DAX</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="sim-conviction-tier">Escalão Mínimo de Convicção</label>
+                <select id="sim-conviction-tier" class="form-control">
+                  <option value="elite">Elite Only (Win Rate MC ≥ 65%)</option>
+                  <option value="moderate" selected>Moderado + Elite (Win Rate MC ≥ 50%)</option>
                 </select>
               </div>
               <div class="form-group">
                 <label for="sim-direction">Direção da Estratégia</label>
                 <select id="sim-direction" class="form-control">
-                  <option value="LONG">Apenas Compra (Long / UP)</option>
-                  <option value="SHORT">Apenas Venda (Short / DN)</option>
-                  <option value="BOTH">Bi-direcional (Ambas)</option>
+                  <option value="LONG">Apenas Compra (Long)</option>
+                  <option value="BOTH" selected>Bi-direcional</option>
                 </select>
               </div>
             </div>
 
-            <!-- BLOCO 2: GESTÃO DE RISCO (SL / TP) -->
+            <!-- BLOCO 2: RISCO -->
             <div class="control-panel-section">
-              <div class="section-title">🛡️ Gestão de Risco</div>
+              <div class="section-title">🛡️ Gestão de Posição & Risco</div>
+              <div class="form-group">
+                <label for="sim-stop-mode">Modo de Stop/Target</label>
+                <select id="sim-stop-mode" class="form-control">
+                  <option value="pct" selected>Percentagem fixa (2.4% / 4.8%)</option>
+                  <option value="atr">ATR dinâmico</option>
+                </select>
+              </div>
               <div class="form-row-dual">
                 <div class="form-group">
                   <label for="sim-stop-loss">Stop Loss (SL %)</label>
-                  <input type="number" id="sim-stop-loss" class="form-control" value="2.4" placeholder="2.4" step="0.1" min="0.1">
+                  <input type="number" id="sim-stop-loss" class="form-control" value="2.4" step="0.1" min="0.1">
                 </div>
                 <div class="form-group">
                   <label for="sim-take-profit">Take Profit (TP %)</label>
-                  <input type="number" id="sim-take-profit" class="form-control" value="4.8" placeholder="4.8" step="0.1" min="0.1">
+                  <input type="number" id="sim-take-profit" class="form-control" value="4.8" step="0.1" min="0.1">
                 </div>
               </div>
               <div class="form-group">
-                <label for="sim-risk-per-trade">Risco por Trade (%)</label>
-                <input type="number" id="sim-risk-per-trade" class="form-control" value="2.0" step="0.5" min="0.5" max="100">
+                <label for="sim-horizon-exp">Horizonte de Expiração (dias úteis)</label>
+                <input type="number" id="sim-horizon-exp" class="form-control" value="35" step="1" min="1" max="252">
+              </div>
+              <div class="form-group">
+                <label for="sim-risk-per-trade">Risco / Alocação por Trade (%)</label>
+                <input type="number" id="sim-risk-per-trade" class="form-control" value="20.0" step="5" min="5" max="100">
               </div>
             </div>
 
-            <!-- BLOCO 3: FILTROS E INDICADORES -->
+            <!-- BLOCO 3: CARTERA / CICLO -->
             <div class="control-panel-section">
-              <div class="section-title">⚙️ Indicadores & Filtros</div>
-              <div class="form-group toggle-group">
-                <label for="sim-toggle-vwap">Gatekeeper Rolling VWAP (20)</label>
-                <input type="checkbox" id="sim-toggle-vwap" checked>
+              <div class="section-title">🔁 Carteira & Ciclo</div>
+              <div class="form-group">
+                <label for="sim-rebalance-days">Horizonte de Rebalanceamento H (dias úteis)</label>
+                <select id="sim-rebalance-days" class="form-control">
+                  <option value="21">H = 21</option>
+                  <option value="35" selected>H = 35</option>
+                </select>
               </div>
               <div class="form-group">
-                <label for="sim-min-mc">Mínimo Monte Carlo (%)</label>
-                <input type="number" id="sim-min-mc" class="form-control" value="50" min="0" max="100">
+                <label for="sim-slot-size">Tamanho da Posição / Alocação por Trade</label>
+                <select id="sim-slot-size" class="form-control">
+                  <option value="2">2,0% do Capital (Máx. 50 Posições)</option>
+                  <option value="5">5,0% do Capital (Máx. 20 Posições)</option>
+                  <option value="7.5">7,5% do Capital (Máx. 13 Posições)</option>
+                  <option value="10">10,0% do Capital (Máx. 10 Posições)</option>
+                  <option value="15">15,0% do Capital (Máx. 6 Posições)</option>
+                  <option value="20" selected>20,0% do Capital (Máx. 5 Posições)</option>
+                </select>
               </div>
-              <div class="form-group">
-                <label for="sim-horizon">Horizonte (dias)</label>
-                <input type="number" id="sim-horizon" class="form-control" value="35" placeholder="35" min="1" max="120">
-              </div>
-              <div class="form-group">
-                <label for="sim-markov-window">Janela de Markov (Velas)</label>
-                <input type="number" id="sim-markov-window" class="form-control" value="200" step="10" min="50" max="500">
-              </div>
-            </div>
-
-            <!-- BLOCO 4: PERÍODO E CAPITAL -->
-            <div class="control-panel-section">
-              <div class="section-title">📅 Período & Capital</div>
-              <div class="form-row-dual">
-                <div class="form-group">
-                  <label for="sim-start-date">Data Início</label>
-                  <input type="date" id="sim-start-date" class="form-control">
+              <div id="sim-slot-preview" class="slot-preview-card" style="background: #141923; border: 1px solid #232b3e; border-radius: 6px; padding: 10px 14px; margin-top: 8px;">
+                <span style="color: #8A99AD; font-size: 11px; text-transform: uppercase;">Dimensionamento Projetado:</span>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                  <span style="color: #ffffff; font-size: 13px;">Capacidade Máxima: <strong id="preview-max-positions" style="color: #FFE600;">5 Posições</strong></span>
+                  <span style="color: #ffffff; font-size: 13px;">Capital por Trade: <strong id="preview-capital-per-trade" style="color: #00E676;">2.000,00 €</strong></span>
                 </div>
-                <div class="form-group">
-                  <label for="sim-end-date">Data Fim</label>
-                  <input type="date" id="sim-end-date" class="form-control">
-                </div>
+              </div>
+              <div class="form-group" hidden>
+                <label for="sim-max-positions">Máx. Posições Simultâneas (auto)</label>
+                <input type="number" id="sim-max-positions" class="form-control" value="5" min="1" max="50">
               </div>
               <div class="form-group">
                 <label for="sim-initial-capital">Capital Inicial (€)</label>
@@ -821,120 +861,117 @@
           </div>
 
           <div class="dashboard-actions-bar">
-            <button id="btn-start-simulation" class="btn-primary-action">▶ Iniciar Simulação</button>
+            <button id="btn-start-simulation" class="btn-primary-action">▶ Iniciar Simulação Workstation</button>
             <button id="btn-reset-params" class="btn-secondary-action">↺ Restaurar Padrões</button>
           </div>
         </div>
 
         <div class="sim-status" id="sim-status" hidden></div>
 
-        <!-- CARD ÚNICO DE RESUMO (Exibido após o fim do cálculo) -->
+        <!-- CARD ÚNICO DE RESUMO -->
         <div id="simulation-summary-card-container" class="summary-card-wrapper hidden">
-          <div class="simulation-day-card simulation-card-row" id="btn-open-simulation-modal">
+          <div class="simulation-day-card simulation-card-row">
             <div class="day-card-left">
               <div class="day-badge-status">RESULTADO DA SIMULAÇÃO</div>
-              <h3 id="summary-card-title">Simulação Concluída</h3>
-              <span id="summary-card-dates" class="text-muted">Clique para ver o relatório completo</span>
-              <div class="risk-info" id="sim-risk-info" style="font-size:11px; color:#8a99ad; margin-top:4px;">SL: 2.4% / TP: 4.8% (35d)</div>
+              <h3 id="summary-card-title">Simulação Workstation</h3>
+              <span id="summary-card-dates" class="text-muted">—</span>
             </div>
-
             <div class="day-card-metrics">
-              <div class="metric-block">
-                <span class="label">RENTABILIDADE</span>
-                <span id="summary-gain" class="val-highlight-yellow">+0.0%</span>
-              </div>
-              <div class="metric-block">
-                <span class="label">WIN RATE</span>
-                <span id="summary-winrate" class="val-highlight-yellow">0%</span>
-              </div>
-              <div class="metric-block">
-                <span class="label">PROFIT FACTOR</span>
-                <span id="summary-pf" class="val-highlight-yellow">0.0</span>
-              </div>
-              <div class="metric-block">
-                <span class="label">MAX DRAWDOWN</span>
-                <span id="summary-dd" class="val-highlight-yellow">0.00%</span>
-              </div>
+              <div class="metric-block"><span class="label">RENTABILIDADE</span><span id="summary-gain" class="val-highlight-yellow">+0.0%</span></div>
+              <div class="metric-block"><span class="label">WIN RATE REAL</span><span id="summary-winrate" class="val-highlight-yellow">0%</span></div>
+              <div class="metric-block"><span class="label">PROFIT FACTOR</span><span id="summary-pf" class="val-highlight-yellow">0.00</span></div>
+              <div class="metric-block"><span class="label">MAX DRAWDOWN</span><span id="summary-dd" class="val-highlight-yellow">0.0%</span></div>
+              <div class="metric-block"><span class="label">SHARPE ANUAL</span><span id="summary-sharpe" class="val-highlight-yellow">0.00</span></div>
             </div>
-
             <div class="day-card-right">
-              <button class="btn-view-full-report">
-                📊 Ver Análise Completa & Gráficos ➔
-              </button>
+              <button class="btn-view-full-report" id="btn-open-simulation-modal">📊 Abrir Análise Detalhada &amp; Métricas Institucionais ➔</button>
             </div>
           </div>
         </div>
 
-        <!-- MODAL POP-UP DETALHADO -->
+        <!-- MODAL RELATÓRIO INSTITUCIONAL (5 BLOCOS) -->
         <div id="modal-simulation-details" class="modal-backdrop hidden">
           <div class="modal-dialog-fullscreen">
             <div class="modal-header">
               <div class="modal-header-info">
-                <h2>Relatório Detalhado da Simulação</h2>
-                <span id="modal-sim-subtitle" class="text-muted">Análise quantitativa profunda</span>
+                <h2>Relatório Analítico Institucional</h2>
+                <span id="modal-sim-subtitle" class="text-muted">Workstation Quantitativa</span>
               </div>
               <button id="btn-close-sim-modal" class="btn-close-modal">✕</button>
             </div>
 
             <div class="modal-body-scrollable">
-              <!-- 1. BLOCO DE KPIS EXPANDIDO -->
-              <div class="modal-kpis-bar">
-                <div class="kpi-card">
-                  <div class="kpi-label">CAPITAL FINAL</div>
-                  <div id="modal-final-capital" class="kpi-val-yellow">0,00 €</div>
-                </div>
-                <div class="kpi-card">
-                  <div class="kpi-label">TOTAL DE TRADES</div>
-                  <div id="modal-total-trades" class="kpi-val-yellow">0</div>
-                </div>
-                <div class="kpi-card">
-                  <div class="kpi-label">TRADES VENCEDORAS</div>
-                  <div id="modal-winning-trades" class="kpi-val-yellow">0 (0%)</div>
-                </div>
-                <div class="kpi-card">
-                  <div class="kpi-label">EXPECTATIVA MATEMÁTICA</div>
-                  <div id="modal-expected-value" class="kpi-val-yellow">+0.00% / trade</div>
-                </div>
-              </div>
+              <!-- BLOCO A -->
+              <section class="ws-report-block">
+                <h4 class="ws-block-title">A · Métricas Globais Institucionais</h4>
+                <div class="modal-kpis-bar" id="ws-kpis-bar"></div>
+              </section>
 
-              <!-- 2. GRÁFICOS (EQUITY CURVE & DRAWDOWN) -->
-              <div class="modal-charts-grid">
-                <div class="chart-container-box">
-                  <h4>📈 Curva de Capital (Equity Curve)</h4>
-                  <canvas id="canvas-equity-curve" height="300"></canvas>
+              <!-- BLOCO B -->
+              <section class="ws-report-block">
+                <h4 class="ws-block-title">B · Matriz de Retornos Ano a Ano</h4>
+                <div class="table-responsive">
+                  <table class="table-trades-log" id="table-yearly">
+                    <thead><tr><th>Ano</th><th>Retorno (%)</th><th>Trades</th><th>Win Rate %</th><th>Max DD no Ano</th><th>Sharpe Anual</th></tr></thead>
+                    <tbody id="tbody-yearly"></tbody>
+                  </table>
                 </div>
-                <div class="chart-container-box">
-                  <h4>📉 Evolução do Drawdown</h4>
-                  <canvas id="canvas-drawdown-curve" height="300"></canvas>
-                </div>
-              </div>
+              </section>
 
-              <!-- 3. TABELA COMPLETA DE TRADES -->
-              <div class="modal-trades-section">
-                <h4>📋 Histórico de Operações Executadas</h4>
+              <!-- BLOCO C -->
+              <section class="ws-report-block">
+                <h4 class="ws-block-title">C · Auditoria por Escalão de Convicção (Calibration)</h4>
+                <div class="table-responsive">
+                  <table class="table-trades-log" id="table-tiers">
+                    <thead><tr><th>Escalão</th><th>Range</th><th>Trades</th><th>Win Rate Real</th><th>Win Rate Teórico</th><th>PnL (€)</th><th>Alpha (pp)</th></tr></thead>
+                    <tbody id="tbody-tiers"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <!-- BLOCO D -->
+              <section class="ws-report-block">
+                <h4 class="ws-block-title">D · Visualização Gráfica Interativa</h4>
+                <div class="modal-charts-grid">
+                  <div class="chart-container-box"><h4>📈 Curva de Capital vs. Benchmark (Buy &amp; Hold)</h4><canvas id="canvas-equity-curve" height="300"></canvas></div>
+                  <div class="chart-container-box"><h4>📉 Underwater Chart (Drawdown %)</h4><canvas id="canvas-drawdown-curve" height="300"></canvas></div>
+                </div>
+                <div class="ws-tail-risk" id="ws-tail-risk"></div>
+              </section>
+
+              <!-- BLOCO E -->
+              <section class="ws-report-block">
+                <div class="ws-trades-toolbar">
+                  <h4 class="ws-block-title" style="margin:0">E · Registo Integral de Ordens (MFE / MAE)</h4>
+                  <div class="ws-trades-tools">
+                    <input type="text" id="ws-trades-search" class="form-control" placeholder="Pesquisar ticker...">
+                    <button id="btn-export-trades-csv" class="btn-secondary-action" type="button">⬇ Exportar CSV</button>
+                  </div>
+                </div>
                 <div class="table-responsive">
                   <table class="table-trades-log" id="table-trades-log">
-                    <thead>
-                      <tr>
-                        <th>Ticker</th>
-                        <th>Tipo</th>
-                        <th>Data Entrada</th>
-                        <th>Preço Entrada</th>
-                        <th>Data Saída</th>
-                        <th>Preço Saída</th>
-                        <th>Motivo Fecho</th>
-                        <th>Resultado (€)</th>
-                        <th>Resultado (%)</th>
-                      </tr>
-                    </thead>
+                    <thead><tr>
+                      <th data-sort="ticker">Ticker</th>
+                      <th data-sort="side">Direção</th>
+                      <th data-sort="entryDate">Entrada</th>
+                      <th data-sort="entryPrice">Preço Entr.</th>
+                      <th data-sort="exitDate">Saída</th>
+                      <th data-sort="exitPrice">Preço Saíd.</th>
+                      <th data-sort="reason">Motivo</th>
+                      <th data-sort="profit">PnL (€)</th>
+                      <th data-sort="profitPct">PnL (%)</th>
+                      <th data-sort="mfePct">MFE %</th>
+                      <th data-sort="maePct">MAE %</th>
+                    </tr></thead>
                     <tbody id="tbody-trades-log"></tbody>
                   </table>
                 </div>
-              </div>
+              </section>
             </div>
           </div>
         </div>
       </div>
+
 
 
       <!-- ═══════════════════════════════════════════════════════════ -->
