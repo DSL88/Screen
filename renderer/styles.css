@@ -2456,7 +2456,20 @@ tr.removing .portfolio-row-remove { opacity: 0.4; }
   z-index: 1000;
   animation: backdropFadeIn 0.2s var(--ease);
 }
-.modal-backdrop[hidden] { display: none; }
+.hidden {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.modal-backdrop.hidden,
+.modal-backdrop[hidden] {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
 @keyframes backdropFadeIn {
   from { opacity: 0; backdrop-filter: blur(0); }
   to { opacity: 1; backdrop-filter: blur(8px) saturate(180%); }
@@ -7158,3 +7171,19 @@ tr.empty td .empty-state {
 #table-trades-log th[data-sort]:hover { color: #4fc3f7; }
 .table-trades-log .text-green { color: #00e676; }
 .table-trades-log .text-red { color: #ff5252; }
+
+/* ── Absolute priority override for hidden state & modal backdrops ── */
+.hidden {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.modal-backdrop.hidden,
+.modal-backdrop[hidden] {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}

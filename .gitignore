@@ -63,4 +63,6 @@ __pycache__/
 venv/
 ENV/
 *.db
+*.db-shm
+*.db-wal
 

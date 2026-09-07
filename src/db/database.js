@@ -127,6 +127,7 @@ class DB {
           high          REAL NOT NULL,
           low           REAL NOT NULL,
           close         REAL NOT NULL,
+          adjclose      REAL,
           volume        INTEGER NOT NULL,
           PRIMARY KEY (ticker, date)
         );
@@ -252,6 +253,12 @@ class DB {
         } catch (_) {
           // Another process may have added the column between PRAGMA and ALTER.
         }
+      }
+
+      const histCols = this.db.prepare("PRAGMA table_info(historical_prices)").all();
+      const histColsSet = new Set(histCols.map(c => c.name));
+      if (!histColsSet.has('adjclose')) {
+        try { this.db.exec('ALTER TABLE historical_prices ADD COLUMN adjclose REAL'); } catch (_) { /* already added */ }
       }
 
       // Índice composto para agregações MIN/MAX/COUNT instantâneas por ativo.
@@ -1582,6 +1589,65 @@ class DB {
       first_date: row.first_date,
       last_date: row.last_date,
       total_candles: row.total_candles
+    };
+  }
+
+  getStockDetailWithLatestPrice(ticker) {
+    if (!ticker) return null;
+    const cleanTicker = String(ticker).trim().toUpperCase();
+
+    // 1. Dados cadastrais
+    const stock = this.db.prepare(`
+      SELECT ticker, name, country, index_name, first_date 
+      FROM stocks 
+      WHERE UPPER(TRIM(ticker)) = ?
+    `).get(cleanTicker);
+
+    // 2. Resumo de datas e contagem
+    const summary = this.db.prepare(`
+      SELECT 
+        MIN(date) AS first_stored_date,
+        MAX(date) AS last_stored_date,
+        COUNT(*) AS total_candles
+      FROM historical_prices 
+      WHERE UPPER(TRIM(ticker)) = ?
+    `).get(cleanTicker);
+
+    // 3. Obter a última vela com ordenação estrita por data DESC
+    let hasAdjClose = false;
+    try {
+      const cols = this.db.prepare("PRAGMA table_info(historical_prices)").all();
+      hasAdjClose = cols.some(c => c.name === 'adjclose');
+    } catch (_) {}
+
+    const adjSelect = hasAdjClose ? 'COALESCE(adjclose, close) AS adjclose' : 'close AS adjclose';
+
+    const latestCandle = this.db.prepare(`
+      SELECT date, open, high, low, close, 
+             ${adjSelect}, volume
+      FROM historical_prices 
+      WHERE UPPER(TRIM(ticker)) = ?
+      ORDER BY date DESC 
+      LIMIT 1
+    `).get(cleanTicker);
+
+    return {
+      ticker: cleanTicker,
+      name: stock?.name || cleanTicker,
+      country: stock?.country || '--',
+      index_name: stock?.index_name || '--',
+      first_date: summary?.first_stored_date || stock?.first_date || null,
+      last_date: summary?.last_stored_date || null,
+      total_candles: summary?.total_candles || 0,
+      latestPrice: latestCandle ? {
+        date: latestCandle.date,
+        close: latestCandle.close,
+        adjclose: latestCandle.adjclose,
+        open: latestCandle.open,
+        high: latestCandle.high,
+        low: latestCandle.low,
+        volume: latestCandle.volume
+      } : null
     };
   }
 

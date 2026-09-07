@@ -899,7 +899,7 @@
   </div>
 
   <div class="modal-backdrop" id="modal-asset-detail" hidden>
-    <div class="modal modal-asset-detail" role="dialog" aria-modal="true" aria-labelledby="asset-detail-title">
+    <div class="modal modal-asset-detail" id="stock-detail-modal" role="dialog" aria-modal="true" aria-labelledby="asset-detail-title">
       <div class="modal-header">
         <div class="modal-title" id="asset-detail-title">
           <span class="asset-detail-ticker" id="asset-detail-ticker">—</span>
@@ -908,6 +908,20 @@
         <button class="modal-close" id="asset-detail-close" aria-label="Fechar">×</button>
       </div>
       <div class="modal-body">
+        <div class="stock-modal-price-box" style="background: #131b2e; border: 1px solid #1e293b; border-radius: 8px; padding: 14px 18px; margin: 15px 0; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="color: #94a3b8; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Último Fecho (Sessão)</div>
+            <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 4px;">
+              <span id="modal-latest-close" style="font-size: 22px; font-weight: 700; color: #f8fafc;">--</span>
+              <span id="modal-latest-adjclose" style="font-size: 12px; color: #64748b;" title="Preço Ajustado a splits/dividendos"></span>
+            </div>
+          </div>
+          <div style="text-align: right;">
+            <div style="color: #94a3b8; font-size: 11px; font-weight: 600; text-transform: uppercase;">Data da Sessão</div>
+            <div id="modal-latest-session-date" style="font-size: 13px; font-weight: 600; color: #38bdf8; margin-top: 4px;">--</div>
+          </div>
+        </div>
+
         <div class="asset-detail-metadata-section" id="asset-detail-metadata-section">
           <div class="asset-detail-section-title-row">
             <div class="asset-detail-section-title">Metadados do Ativo</div>
@@ -971,15 +985,15 @@
             <div class="asset-detail-history-grid">
               <div class="asset-detail-history-card">
                 <span class="asset-detail-history-label">Primeiro Registo</span>
-                <span class="asset-detail-history-value" id="asset-detail-first-date">—</span>
+                <span class="asset-detail-history-value" id="asset-detail-first-date"><span id="modal-first-date">—</span></span>
               </div>
               <div class="asset-detail-history-card">
                 <span class="asset-detail-history-label">Última Atualização</span>
-                <span class="asset-detail-history-value" id="asset-detail-last-date">—</span>
+                <span class="asset-detail-history-value" id="asset-detail-last-date"><span id="modal-last-date">—</span></span>
               </div>
               <div class="asset-detail-history-card">
                 <span class="asset-detail-history-label">Total de Velas</span>
-                <span class="asset-detail-history-value asset-detail-history-candles" id="asset-detail-total-candles">—</span>
+                <span class="asset-detail-history-value asset-detail-history-candles" id="asset-detail-total-candles"><span id="modal-total-candles">—</span></span>
               </div>
             </div>
           </div>

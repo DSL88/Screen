@@ -1599,25 +1599,21 @@ app.whenReady().then(async () => {
     });
 
     ipcMain.handle('get-stock-details', async (_event, payload) => {
-      const ticker = payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '';
-      if (!ticker) return { ok: false, error: 'missing-ticker' };
+      const ticker = typeof payload === 'string'
+        ? payload.toUpperCase().trim()
+        : (payload && payload.ticker ? String(payload.ticker).toUpperCase().trim() : '');
+      if (!ticker) return { success: false, ok: false, error: 'missing-ticker' };
       try {
-        const stockInfo = db.getStockByTicker(ticker) || {};
-        // getStockHistorySummary recalcula o MIN/MAX/COUNT real e auto-corrige
-        // first_date caso esta esteja vazia ou divergente.
-        const historySummary = db.getStockHistorySummary(ticker);
+        const details = db.getStockDetailWithLatestPrice(ticker);
         return {
+          success: true,
           ok: true,
-          ticker,
-          name: stockInfo.name || ticker,
-          country: stockInfo.country || '--',
-          index_name: stockInfo.index_name || '--',
-          first_date: historySummary.first_date,
-          last_date: historySummary.last_date,
-          total_candles: historySummary.total_candles
+          data: details,
+          ...details
         };
-      } catch (err) {
-        return { ok: false, error: err.message || String(err) };
+      } catch (error) {
+        console.error(`Erro ao carregar detalhes do ativo ${ticker}:`, error);
+        return { success: false, ok: false, error: error.message || String(error) };
       }
     });
 

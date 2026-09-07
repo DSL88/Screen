@@ -54,7 +54,7 @@ const apiBridge = {
   importBulk: (data) => ipcRenderer.invoke('import:bulk', data),
   checkHistory: (ticker) => ipcRenderer.invoke('history:check', { ticker }),
   getTickerDetail: (ticker) => ipcRenderer.invoke('ticker:getDetail', { ticker }),
-  getStockDetails: (ticker) => ipcRenderer.invoke('get-stock-details', { ticker }),
+  getStockDetails: (ticker) => ipcRenderer.invoke('get-stock-details', typeof ticker === 'string' ? ticker : (ticker?.ticker || ticker)),
   getStockDividends: (ticker) => ipcRenderer.invoke('get-stock-dividends', ticker),
   downloadStockDividends: (ticker) => ipcRenderer.invoke('download-stock-dividends', ticker),
   syncIndexDataBatch: (params) => ipcRenderer.invoke('sync-index-data-batch', params),

@@ -3962,6 +3962,20 @@
     if (lastEl) lastEl.textContent = '—';
     if (candlesEl) candlesEl.textContent = '—';
 
+    const modalFirstEl = document.getElementById('modal-first-date');
+    const modalLastEl = document.getElementById('modal-last-date');
+    const modalCandlesEl = document.getElementById('modal-total-candles');
+    if (modalFirstEl) modalFirstEl.textContent = '—';
+    if (modalLastEl) modalLastEl.textContent = '—';
+    if (modalCandlesEl) modalCandlesEl.textContent = '—';
+
+    const closeElem = document.getElementById('modal-latest-close');
+    const adjElem = document.getElementById('modal-latest-adjclose');
+    const sessionDateElem = document.getElementById('modal-latest-session-date');
+    if (closeElem) closeElem.textContent = '--';
+    if (adjElem) adjElem.textContent = '';
+    if (sessionDateElem) sessionDateElem.textContent = '--';
+
     if (assetDetailSyncStatus) {
       assetDetailSyncStatus.textContent = '';
       assetDetailSyncStatus.hidden = true;
@@ -4058,19 +4072,171 @@
         renderModalState(false, {});
       }
     }
+
+    // Carregar cotação recente e detalhes auditados da SQLite via getStockDetails
+    try {
+      const api = window.electronAPI || window.api;
+      if (api && typeof api.getStockDetails === 'function') {
+        const detailsRes = await api.getStockDetails(cleanTicker);
+        if (currentAssetTicker === cleanTicker && detailsRes && (detailsRes.success || detailsRes.ok)) {
+          const detailsData = detailsRes.data || detailsRes;
+          renderStockPriceBox(detailsData);
+          if (detailsData.first_date) {
+            const el = document.getElementById('modal-first-date');
+            if (el) el.textContent = formatDate(detailsData.first_date);
+          }
+          if (detailsData.last_date) {
+            const el = document.getElementById('modal-last-date');
+            if (el) el.textContent = formatDate(detailsData.last_date);
+          }
+          if (detailsData.total_candles !== undefined) {
+            const el = document.getElementById('modal-total-candles');
+            if (el) el.textContent = Number(detailsData.total_candles || 0).toLocaleString();
+          }
+        }
+      }
+    } catch (priceErr) {
+      console.error('[openAssetDetailModal] Error fetching stock latest price:', priceErr);
+    }
+  }
+
+  function renderStockPriceBox(data) {
+    const closeElem = document.getElementById('modal-latest-close');
+    const adjElem = document.getElementById('modal-latest-adjclose');
+    const sessionDateElem = document.getElementById('modal-latest-session-date');
+    if (!closeElem) return;
+
+    if (data && data.latestPrice && data.latestPrice.close !== null && data.latestPrice.close !== undefined) {
+      const rawClose = Number(data.latestPrice.close);
+      const adjClose = Number(data.latestPrice.adjclose !== undefined && data.latestPrice.adjclose !== null ? data.latestPrice.adjclose : rawClose);
+
+      closeElem.textContent = `${rawClose.toFixed(2)}`;
+
+      // Se o preço ajustado diferir do nominal (houve splits/dividendos), indicar discretamente
+      if (adjElem) {
+        if (Math.abs(rawClose - adjClose) > 0.01) {
+          adjElem.textContent = `(Adj: ${adjClose.toFixed(2)})`;
+        } else {
+          adjElem.textContent = '';
+        }
+      }
+
+      if (sessionDateElem) sessionDateElem.textContent = formatDate(data.latestPrice.date);
+    } else {
+      closeElem.textContent = 'Sem Cotação';
+      if (adjElem) adjElem.textContent = '';
+      if (sessionDateElem) sessionDateElem.textContent = 'N/D';
+    }
+  }
+
+  async function openStockDetailModal(ticker) {
+    const api = window.electronAPI || window.api;
+    if (!api || typeof api.getStockDetails !== 'function') return;
+    const res = await api.getStockDetails(ticker);
+    if (!res || !res.success || !res.data) return;
+
+    const data = res.data;
+    currentModalStock = data;
+    currentAssetTicker = data.ticker || ticker;
+
+    // Preenchimento dos campos cadastrais existentes
+    if (document.getElementById('edit-stock-name')) {
+      document.getElementById('edit-stock-name').value = data.name || '';
+    }
+    if (document.getElementById('edit-stock-country')) {
+      document.getElementById('edit-stock-country').value = data.country || '';
+    }
+    if (document.getElementById('edit-stock-index')) {
+      document.getElementById('edit-stock-index').value = data.index_name || '';
+    }
+    if (document.getElementById('display-stock-name')) {
+      document.getElementById('display-stock-name').textContent = `Nome: ${data.name || data.ticker}`;
+    }
+    if (document.getElementById('display-stock-country')) {
+      document.getElementById('display-stock-country').textContent = `País: ${data.country || '--'}`;
+    }
+    if (document.getElementById('display-stock-index')) {
+      document.getElementById('display-stock-index').textContent = `Índice: ${data.index_name || '--'}`;
+    }
+
+    // Datas e velas
+    if (document.getElementById('modal-first-date')) {
+      document.getElementById('modal-first-date').textContent = formatDate(data.first_date);
+    }
+    if (document.getElementById('modal-last-date')) {
+      document.getElementById('modal-last-date').textContent = formatDate(data.last_date);
+    }
+    if (document.getElementById('modal-total-candles')) {
+      document.getElementById('modal-total-candles').textContent = Number(data.total_candles || 0).toLocaleString();
+    }
+
+    // Preenchimento do Preço de Fecho da Sessão
+    renderStockPriceBox(data);
+
+    // Exibe o modal e o backdrop
+    const modal = document.getElementById('stock-detail-modal') || document.getElementById('stock-modal') || modalAssetDetail;
+    const backdrop = document.getElementById('modal-asset-detail') || modalAssetDetail;
+    if (backdrop) {
+      backdrop.classList.remove('hidden');
+      backdrop.style.display = 'flex';
+      backdrop.hidden = false;
+    }
+    if (modal) {
+      modal.classList.remove('hidden');
+      modal.style.display = '';
+      modal.hidden = false;
+    }
+  }
+
+  function formatDate(isoStr) {
+    if (!isoStr) return '--';
+    const parts = String(isoStr).slice(0, 10).split('-');
+    return parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : isoStr;
   }
 
   function closeStockModal() {
-    const modal = document.getElementById('stock-detail-modal') || document.getElementById('stock-modal') || modalAssetDetail;
+    // 1. Identificar todos os possíveis elementos do modal e backdrop no DOM
+    const modal = document.getElementById('stock-detail-modal') || 
+                  document.querySelector('.modal-stock-details') ||
+                  document.getElementById('modal-stock-detail') ||
+                  document.getElementById('modal-asset-detail') ||
+                  modalAssetDetail;
+                  
+    const backdrops = document.querySelectorAll(
+      '.modal-backdrop, #modal-asset-detail, #drawer-stochastic-backdrop, #drawer-backdrop, .drawer-backdrop, [id*="backdrop"]'
+    );
+
+    // 2. Ocultar e limpar classes do contentor principal
     if (modal) {
       modal.classList.add('hidden');
+      modal.classList.remove('open', 'active');
       modal.style.display = 'none';
       modal.hidden = true;
     }
+
+    if (modalAssetDetail) {
+      modalAssetDetail.classList.add('hidden');
+      modalAssetDetail.classList.remove('open', 'active');
+      modalAssetDetail.style.display = 'none';
+      modalAssetDetail.hidden = true;
+    }
+
+    // 3. Forçar a ocultação de TODAS as camadas de overlay ativas
+    backdrops.forEach(backdrop => {
+      backdrop.classList.add('hidden');
+      backdrop.classList.remove('open', 'active');
+      backdrop.style.display = 'none';
+      backdrop.hidden = true;
+    });
+
+    // 4. Limpar referência global do ativo inspecionado
     currentModalStock = null;
     currentAssetTicker = null;
     currentModalActiveTicker = null;
     assetSelectedFile = null;
+    if (typeof activeInspectedAsset !== 'undefined') {
+      activeInspectedAsset = null;
+    }
   }
 
   function closeAssetDetailModal() {
@@ -4078,50 +4244,91 @@
   }
 
   async function saveModalDataAndClose() {
-    const ticker = (currentModalStock && currentModalStock.ticker) || currentAssetTicker;
-    if (!ticker) return;
-
-    const nameInput = document.getElementById('edit-stock-name') || document.getElementById('modal-stock-name-input');
-    const countryInput = document.getElementById('edit-stock-country') || document.getElementById('modal-stock-country-input');
-    const indexInput = document.getElementById('edit-stock-index') || document.getElementById('modal-stock-index-input');
-    const customIndexInput = document.getElementById('edit-stock-index-custom') || document.getElementById('modal-index-custom');
-
-    let indexVal = '';
-    if (indexInput) {
-      if (indexInput.value === 'CUSTOM_NEW') {
-        indexVal = customIndexInput ? customIndexInput.value.trim() : '';
-      } else {
-        indexVal = indexInput.value.trim();
-      }
-    }
-
-    const payload = {
-      name: nameInput ? nameInput.value.trim() : (currentModalStock ? currentModalStock.name : ''),
-      country: countryInput ? countryInput.value.trim() : (currentModalStock ? currentModalStock.country : ''),
-      index_name: indexVal || (currentModalStock ? currentModalStock.index_name : '')
-    };
-
     try {
-      // 1. Gravação na base de dados SQLite via IPC
-      const api = window.electronAPI || window.api;
-      if (api && typeof api.updateStockMetadata === 'function') {
-        await api.updateStockMetadata(ticker, payload);
-      }
+      const ticker = (currentModalStock && currentModalStock.ticker) || currentAssetTicker;
+      if (ticker) {
+        const nameInput = document.getElementById('edit-stock-name') || document.getElementById('modal-stock-name-input');
+        const countryInput = document.getElementById('edit-stock-country') || document.getElementById('modal-stock-country-input');
+        const indexInput = document.getElementById('edit-stock-index') || document.getElementById('modal-stock-index-input');
+        const customIndexInput = document.getElementById('edit-stock-index-custom') || document.getElementById('modal-index-custom');
 
-      // 2. Atualizar a tabela/cards visíveis na interface
-      if (typeof refreshMyListTable === 'function') {
-        refreshMyListTable();
-      } else if (typeof loadMyListStocks === 'function') {
-        loadMyListStocks();
-      } else if (typeof reloadMyListFromDatabase === 'function') {
-        await reloadMyListFromDatabase();
-      }
+        let indexVal = '';
+        if (indexInput) {
+          if (indexInput.value === 'CUSTOM_NEW') {
+            indexVal = customIndexInput ? customIndexInput.value.trim() : '';
+          } else {
+            indexVal = indexInput.value.trim();
+          }
+        }
 
-      // 3. Fecho automático da janela pop-up e limpeza de referências
+        const payload = {
+          name: nameInput ? nameInput.value.trim() : (currentModalStock ? currentModalStock.name : ''),
+          country: countryInput ? countryInput.value.trim() : (currentModalStock ? currentModalStock.country : ''),
+          index_name: indexVal || (currentModalStock ? currentModalStock.index_name : '')
+        };
+
+        const api = window.electronAPI || window.api;
+        if (api && typeof api.updateStockMetadata === 'function') {
+          await api.updateStockMetadata(ticker, payload);
+        }
+
+        // Atualizar a vista da lista de forma segura (sem quebrar se a função falhar)
+        try {
+          if (typeof refreshMyListTable === 'function') {
+            await refreshMyListTable();
+          } else if (typeof loadMyListStocks === 'function') {
+            await loadMyListStocks();
+          } else if (typeof reloadMyListFromDatabase === 'function') {
+            await reloadMyListFromDatabase();
+          } else if (typeof renderStocksTable === 'function') {
+            await renderStocksTable();
+          }
+        } catch (tableErr) {
+          console.warn('Erro não crítico ao atualizar a tabela pós-fecho:', tableErr);
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao guardar dados do modal:', error);
+    } finally {
+      // O fecho é SEMPRE executado, mesmo em caso de erro acima
       closeStockModal();
-    } catch (err) {
-      console.error(`[Erro ao gravar ativo ${ticker}]:`, err);
     }
+  }
+
+  // 5. Configuração de Listeners Globais (Escape e Clique no Fundo Escuro)
+  function setupModalClosingGuards() {
+    // Fechar ao clicar no botão X ou Cancelar
+    document.querySelectorAll('#btn-close-modal, .close-btn, #btn-cancel-stock-modal, #asset-detail-close, #btn-cancel-edit-modal').forEach(btn => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        closeStockModal();
+      };
+    });
+
+    // Fechar ao clicar fora (no backdrop escuro)
+    const modalContainer = document.getElementById('stock-detail-modal');
+    const modalBackdrop = document.getElementById('modal-asset-detail');
+    if (modalBackdrop) {
+      modalBackdrop.onclick = (e) => {
+        if (e.target === modalBackdrop) {
+          closeStockModal();
+        }
+      };
+    }
+    if (modalContainer && modalContainer !== modalBackdrop) {
+      modalContainer.onclick = (e) => {
+        if (e.target === modalContainer) {
+          closeStockModal();
+        }
+      };
+    }
+
+    // Fechar pressionando a tecla Escape
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeStockModal();
+      }
+    });
   }
 
   // Associar listener a todos os inputs do formulário do modal:
@@ -4423,10 +4630,11 @@
     });
   }
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modalAssetDetail && !modalAssetDetail.hidden) {
-      closeAssetDetailModal();
+    if (e.key === 'Escape') {
+      closeStockModal();
     }
   });
+  setupModalClosingGuards();
   attachModalEnterKeyListeners();
 
   async function syncAssetYahoo() {
@@ -5717,6 +5925,12 @@
     } catch (err) {
       console.warn('Aviso: Falha ao carregar dados iniciais:', err);
     }
+
+    try {
+      if (typeof setupModalClosingGuards === 'function') setupModalClosingGuards();
+    } catch (err) {
+      console.warn('Aviso: Falha ao associar guardas de fecho do modal:', err);
+    }
   });
 
   // Se o DOM já tiver sido carregado antes do registo do listener, inicializa de imediato
@@ -5726,6 +5940,9 @@
     } catch (err) {
       console.error('❌ Erro imediato ao iniciar navegação de abas:', err);
     }
+    try {
+      if (typeof setupModalClosingGuards === 'function') setupModalClosingGuards();
+    } catch (_) {}
   }
 
   // expõe para o botão "Iniciar Análise" (se o botão usar onclick inline)
@@ -5735,4 +5952,8 @@
   window.openStochasticDrawer = openStochasticDrawer;
   window.closeStochasticDrawer = closeStochasticDrawer;
   window.drawMonteCarloSimulation = drawMonteCarloSimulation;
+  window.openStockDetailModal = openStockDetailModal;
+  window.closeStockModal = closeStockModal;
+  window.setupModalClosingGuards = setupModalClosingGuards;
+  window.formatDate = formatDate;
 })();
