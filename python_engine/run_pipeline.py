@@ -515,11 +515,21 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
         mc_res_item = row.get("mc_results", {})
         tier_info = classify_win_rate_tier(row["mc_win_rate"])
         
-        # Target Price (+4.8%) and Stop Loss (-2.4%)
+        # Projeção direcional: Target Price (+4.8% COMPRA / -4.8% VENDA) e Stop Loss (-2.4% COMPRA / +2.4% VENDA)
         curr_p = float(row["latest_price"])
-        target_p = round(curr_p * (1.0 + 0.048), 2)
+        exp_ret_val = float(mc_res_item.get("expected_return_pct", 0.0))
+        signal_dir = "COMPRA" if exp_ret_val >= 0 else "VENDA"
+        if signal_dir == "COMPRA":
+            target_p = round(curr_p * (1.0 + 0.048), 2)
+            stop_l = round(curr_p * (1.0 - 0.024), 2)
+            target_ret_pct = "+4.8%"
+            stop_loss_pct = "-2.4%"
+        else:
+            target_p = round(curr_p * (1.0 - 0.048), 2)
+            stop_l = round(curr_p * (1.0 + 0.024), 2)
+            target_ret_pct = "-4.8%"
+            stop_loss_pct = "+2.4%"
         cvar_val = float(row["mc_cvar_95"])
-        stop_l = round(curr_p * (1.0 - 0.024), 2)
 
         analyzed_assets.append({
             "ticker": t,
@@ -527,6 +537,7 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
             "country": (meta.get("country") or "").strip() or "Global",
             "index_name": (meta.get("index_name") or "").strip() or "Geral",
             "sector": row["sector"],
+            "signal_direction": signal_dir,
             "market_cap": row["market_cap_str"],
             "market_cap_raw": row["market_cap_raw"],
             "graham_score": row["graham_score"],
@@ -535,8 +546,8 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
             "latest_price": round(curr_p, 2),
             "target_price": target_p,
             "stop_loss": stop_l,
-            "target_return_pct": "+4.8%",
-            "stop_loss_pct": "-2.4%",
+            "target_return_pct": target_ret_pct,
+            "stop_loss_pct": stop_loss_pct,
             "mcginley_status": row["mcginley_status"],
             "markov_bullish_prob": round(float(row["markov_bullish_prob"]), 1),
             "mc_win_rate": round(float(row["mc_win_rate"]), 1),
@@ -788,24 +799,37 @@ def generate_top_investment_recommendations(
         win_rate = float(asset.get('mc_win_rate', asset.get('win_rate_numeric', 50.0)) or 50.0)
         cvar_95 = float(asset.get('mc_cvar_95', asset.get('cvar_95', 3.5)) or 3.5)
         exp_return = float(asset.get('mc_expected_return', asset.get('expected_return', 4.8)) or 4.8)
+        signal_direction = asset.get('signal_direction') or ("COMPRA" if exp_return >= 0 else "VENDA")
         
-        # O ativo deve ter pelo menos 50% de probabilidade de alta no Monte Carlo e retorno positivo
-        if win_rate < 50.0 or exp_return <= 0:
-            continue
+        # O ativo deve ter pelo menos 50% de probabilidade favorável no Monte Carlo e projeção direcional válida
+        if signal_direction == "COMPRA":
+            if win_rate < 50.0 or exp_return <= 0:
+                continue
+            directional_win_rate = win_rate
+        else:
+            directional_win_rate = max(win_rate, 100.0 - win_rate) if win_rate < 50.0 else win_rate
+            if directional_win_rate < 50.0 or exp_return >= 0:
+                continue
 
         # 2. Cálculo do Rácio de Eficiência Estocástica (Retorno / Risk-at-Tail)
-        efficiency_ratio = exp_return / cvar_95 if cvar_95 > 0 else 1.0
+        efficiency_ratio = abs(exp_return) / cvar_95 if cvar_95 > 0 else 1.0
 
         # 3. Score Final de Recomendação
         quality_score = float(asset.get('quality_score', asset.get('graham_score', 50.0)) or 50.0)
-        alpha_score = (quality_score * 0.3) + (win_rate * 0.4) + (efficiency_ratio * 30.0)
+        alpha_score = (quality_score * 0.3) + (directional_win_rate * 0.4) + (efficiency_ratio * 30.0)
 
-        # Projeção exata de Target Price (+4.8%) e Stop Loss (-2.4%)
+        # Projeção de Target Price (+4.8% COMPRA / -4.8% VENDA) e Stop Loss (-2.4% COMPRA / +2.4% VENDA)
         current_price = float(asset.get('current_price', asset.get('latest_price', 100.0)) or 100.0)
-        target_price = current_price * (1.0 + 0.048)
-        stop_loss_price = current_price * (1.0 - 0.024)
+        if signal_direction == "COMPRA":
+            target_price = current_price * (1.0 + 0.048)
+            stop_loss_price = current_price * (1.0 - 0.024)
+            expected_ret_str = f"+{exp_return:.1f}%"
+        else:
+            target_price = current_price * (1.0 - 0.048)
+            stop_loss_price = current_price * (1.0 + 0.024)
+            expected_ret_str = f"{exp_return:.1f}%" if exp_return < 0 else f"-{exp_return:.1f}%"
 
-        tier = classify_win_rate_tier(win_rate)
+        tier = classify_win_rate_tier(directional_win_rate)
 
         eligible_assets.append({
             "ticker": asset.get('ticker', ''),
@@ -813,12 +837,13 @@ def generate_top_investment_recommendations(
             "country": (asset.get('country') or 'Global').strip() or 'Global',
             "index_name": (asset.get('index_name') or asset.get('index') or 'Geral').strip() or 'Geral',
             "sector": asset.get('sector', 'Outros'),
+            "signal_direction": signal_direction,
             "current_price": round(current_price, 2),
             "target_price": round(target_price, 2),
             "stop_loss": round(stop_loss_price, 2),
-            "expected_return_pct": f"+{exp_return:.1f}%",
-            "win_rate_mc": f"{win_rate:.1f}%",
-            "win_rate_numeric": round(win_rate, 2),
+            "expected_return_pct": expected_ret_str,
+            "win_rate_mc": f"{directional_win_rate:.1f}%",
+            "win_rate_numeric": round(directional_win_rate, 2),
             "cvar_risk": f"-{cvar_95:.1f}%",
             "cvar_95": round(cvar_95, 1),
             "graham_score": quality_score,
@@ -827,7 +852,7 @@ def generate_top_investment_recommendations(
             "alpha_score": round(alpha_score, 1),
             "horizon_days": horizon_days,
             "tier": tier,
-            "action": "BUY / LONG",
+            "action": signal_direction,
             "headline": asset.get("headline", ""),
             "divergence": asset.get("divergence", "NEUTRAL"),
             "sentiment_score": asset.get("sentiment_score", 0.0),
@@ -839,10 +864,10 @@ def generate_top_investment_recommendations(
         })
 
     # ORDENAÇÃO DECRESCENTE ESTRITA: do maior para o menor Alpha Score
-    # (patamar de convicção estocástica usado apenas como desempate).
+    # garantindo que o primeiro da lista é estritamente o ativo com maior score de convicção.
     recommended_sorted = sorted(
         eligible_assets,
-        key=lambda x: (x['alpha_score'], x['tier'].get('tier_id', 0)),
+        key=lambda x: x['alpha_score'],
         reverse=True
     )
 

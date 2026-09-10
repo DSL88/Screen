@@ -5533,7 +5533,7 @@
     if (!recommendedAssets || recommendedAssets.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="11" style="text-align: center; color: #94a3b8; padding: 20px;">
+          <td colspan="12" style="text-align: center; color: #94a3b8; padding: 20px;">
             Nenhum ativo cumpriu simultaneamente todos os critérios de convicção estocástica (Win Rate >= 60%) e purificação fatorial.
           </td>
         </tr>`;
@@ -5553,14 +5553,30 @@
     sortedAssets.forEach((asset, index) => {
       const rank = Number(asset.rank) > 0 ? Number(asset.rank) : index + 1;
       const price = Number(asset.current_price || asset.price || asset.latest_price || 0);
-      const targetPrice = price * 1.048;
-      const stopPrice = price * (1 - 0.024);
+
+      // Sentido Direcional (COMPRA ou VENDA)
+      const rawDir = String(asset.signal_direction || asset.direction || asset.action || '').toUpperCase();
+      const isSell = rawDir.includes('VENDA') || rawDir.includes('SELL') || rawDir.includes('SHORT') || Number(asset.mc_expected_return || asset.expected_return || 0) < 0;
+      const direction = isSell ? 'VENDA' : 'COMPRA';
+
+      // Projeção direcional: para VENDA, Target abaixo (-4.8%) e Stop Loss acima (+2.4%)
+      const targetPrice = asset.target_price ? Number(asset.target_price) : (isSell ? price * (1 - 0.048) : price * (1 + 0.048));
+      const stopPrice = asset.stop_loss ? Number(asset.stop_loss) : (isSell ? price * (1 + 0.024) : price * (1 - 0.024));
+
       const winRate = Number(asset.mc_win_rate || asset.winRateMC || asset.win_rate_numeric || 50.0);
       const tierLevel = asset.tier?.level || (winRate >= 70 ? 'Extrema' : winRate >= 65 ? 'Muito Forte' : winRate >= 60 ? 'Forte' : winRate >= 50 ? 'Moderada' : 'Fraca');
 
       const money = (value) => (typeof window.formatPriceWithCurrency === 'function'
         ? window.formatPriceWithCurrency(value, asset)
         : `${Number(value || 0).toFixed(2)} €`);
+
+      const directionBadge = isSell
+        ? `<span class="badge-direction-pill badge-direction-sell" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;">
+            <span style="font-size: 8px;">🔴</span> VENDA
+          </span>`
+        : `<span class="badge-direction-pill badge-direction-buy" style="background: rgba(16, 185, 129, 0.15); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.4); padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;">
+            <span style="font-size: 8px;">🟢</span> COMPRA
+          </span>`;
 
       const tr = document.createElement('tr');
       tr.className = 'table-row-clickable';
@@ -5572,6 +5588,7 @@
 
       tr.innerHTML = `
         <td style="padding: 8px 10px; text-align: center; font-weight: 700; font-size: 11px; color: ${rank <= 3 ? '#38bdf8' : '#64748b'};">#${rank}</td>
+        <td style="padding: 8px 12px; text-align: center;">${directionBadge}</td>
         <td style="padding: 8px 12px;">
           <div style="font-weight: 700; color: #ffffff;">${asset.ticker}</div>
           <div style="font-size: 10px; color: #64748b; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${asset.name || asset.ticker}">${asset.name || asset.ticker}</div>

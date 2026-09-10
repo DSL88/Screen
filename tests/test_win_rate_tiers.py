@@ -218,3 +218,45 @@ def test_recommendations_have_ranking_1_to_n():
     recs = generate_top_investment_recommendations(assets, top_n=20)
     assert [r["rank"] for r in recs] == list(range(1, 19))
     assert recs[0]["alpha_score"] >= recs[-1]["alpha_score"]
+
+
+def test_recommendations_signal_direction_compra_venda():
+    assets = [
+        {
+            "ticker": "BULL1",
+            "current_price": 100.0,
+            "status": "Aprovado",
+            "approved": True,
+            "mc_win_rate": 70.0,
+            "mc_expected_return": 5.0,
+            "mc_cvar_95": 3.0,
+            "quality_score": 80.0,
+        },
+        {
+            "ticker": "BEAR1",
+            "current_price": 200.0,
+            "status": "Aprovado",
+            "approved": True,
+            "mc_win_rate": 30.0,  # 70% directional short win rate
+            "mc_expected_return": -5.0,
+            "mc_cvar_95": 3.0,
+            "quality_score": 80.0,
+        },
+    ]
+    recs = generate_top_investment_recommendations(assets, top_n=20)
+    assert len(recs) == 2
+
+    bull = next(r for r in recs if r["ticker"] == "BULL1")
+    assert bull["signal_direction"] == "COMPRA"
+    assert bull["target_price"] == 104.8  # 100 * 1.048
+    assert bull["stop_loss"] == 97.6    # 100 * (1 - 0.024)
+    assert bull["target_price"] > bull["current_price"]
+    assert bull["stop_loss"] < bull["current_price"]
+
+    bear = next(r for r in recs if r["ticker"] == "BEAR1")
+    assert bear["signal_direction"] == "VENDA"
+    assert bear["target_price"] == 190.4  # 200 * (1 - 0.048)
+    assert bear["stop_loss"] == 204.8    # 200 * (1 + 0.024)
+    assert bear["target_price"] < bear["current_price"]
+    assert bear["stop_loss"] > bear["current_price"]
+

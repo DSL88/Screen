@@ -148,7 +148,26 @@ test('Top 20: ordenação defensiva por Alpha Score decrescente e ranking #1-#20
   assert.match(rendererJs, /#\$\{rank\}/);
 
   const html = fs.readFileSync(path.resolve('renderer/index.html'), 'utf8');
-  assert.match(html, /<th style="padding: 8px 10px; text-align: center;">#<\/th>/);
+  assert.match(html, /<th style="padding: 8px 10px; text-align: center;">(?:RANK \(#\)|#)<\/th>/);
+  assert.match(html, /SENTIDO \(COMPRA \/ VENDA\)/);
+});
+
+test('Tabela Mestra: colunas RANK (#) e SENTIDO (COMPRA / VENDA) com pílulas direcionais', () => {
+  const html = fs.readFileSync(path.resolve('renderer/index.html'), 'utf8');
+  assert.match(html, /RANK \(#\)/);
+  assert.match(html, /SENTIDO \(COMPRA \/ VENDA\)/);
+
+  const rendererJs = fs.readFileSync(path.resolve('renderer/renderer.js'), 'utf8');
+  assert.match(rendererJs, /badge-direction-pill/);
+  assert.match(rendererJs, /badge-direction-buy/);
+  assert.match(rendererJs, /badge-direction-sell/);
+  assert.match(rendererJs, /COMPRA/);
+  assert.match(rendererJs, /VENDA/);
+
+  const quantJs = fs.readFileSync(path.resolve('renderer/quantRenderer.js'), 'utf8');
+  assert.match(quantJs, /badge-direction-pill/);
+  assert.match(quantJs, /badge-direction-buy/);
+  assert.match(quantJs, /badge-direction-sell/);
 });
 
 test('Moeda dinâmica: helper carregado no index.js e aplicado na tabela e no drawer', () => {

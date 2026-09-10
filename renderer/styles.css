@@ -6503,6 +6503,34 @@ tr.empty td .empty-state {
   border: 1px solid rgba(255, 193, 7, 0.4);
 }
 
+/* Pílulas de Sentido Direcional (COMPRA / VENDA) */
+.badge-direction-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.badge-direction-buy {
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #22c55e !important;
+  border: 1px solid rgba(34, 197, 94, 0.4) !important;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.1);
+}
+
+.badge-direction-sell {
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: #f87171 !important;
+  border: 1px solid rgba(239, 68, 68, 0.4) !important;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.1);
+}
+
 .btn-track-action,
 .btn-track,
 .btn-table-action,
