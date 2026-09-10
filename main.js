@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, Menu, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, shell } = require('electron');
 const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const pLimit = require('p-limit');
 const Database = require('./src/db/database');
 const yahooClient = require('./src/data/yahooClient');
 const tickerLists = require('./src/data/tickerLists');
@@ -16,6 +17,10 @@ const { scanStock } = require('./src/scanner');
 const { PythonBridge } = require('./src/services/pythonBridge');
 let quantEngine = null;
 try { quantEngine = require('./src/native'); } catch (_) { quantEngine = null; }
+
+// Pool dedicada do 1º Registo. As funções de rede já partilham `networkLimit`;
+// esta pool apenas limita as tasks em voo (evita deadlock por reentrância).
+const firstRecordsLimit = pLimit(5);
 
 // Pre-calculate mapping from ticker to index ID for fast lookup
 const tickerToIndexMap = {};
@@ -472,15 +477,21 @@ function resolveParams(uiParams) {
   const uiUseRvolGate = uiParams?.useRvolGate ?? uiParams?.rvolGate;
   const uiRvolMin = uiParams?.rvol_min ?? uiParams?.rvolMin;
 
+  const clampNumber = (value, min, max, fallback) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(max, Math.max(min, n));
+  };
+
   return {
-    edge_threshold: uiEdge != null ? Number(uiEdge) : Number(dbParams.edge_threshold),
-    markov_window: uiWindow != null ? Number(uiWindow) : Number(dbParams.markov_window),
-    volume_mult: uiVolume != null ? Number(uiVolume) : Number(dbParams.volume_mult),
-    horizon_days: uiHorizon != null ? Number(uiHorizon) : Number(dbParams.horizon_days),
+    edge_threshold: clampNumber(uiEdge != null ? uiEdge : dbParams.edge_threshold, 0, 1, 0.15),
+    markov_window: Math.round(clampNumber(uiWindow != null ? uiWindow : dbParams.markov_window, 20, 1000, 150)),
+    volume_mult: clampNumber(uiVolume != null ? uiVolume : dbParams.volume_mult, 0, 10, 1.2),
+    horizon_days: Math.round(clampNumber(uiHorizon != null ? uiHorizon : dbParams.horizon_days, 1, 60, 5)),
     useVolFilter: uiUseVolFilter !== undefined ? Boolean(uiUseVolFilter) : true,
     useLatestClosed: uiUseLatestClosed === true,
     useRvolGate: uiUseRvolGate !== undefined ? Boolean(uiUseRvolGate) : true,
-    rvol_min: uiRvolMin != null ? Number(uiRvolMin) : 1.0,
+    rvol_min: clampNumber(uiRvolMin != null ? uiRvolMin : 1.0, 0, 10, 1.0),
     timeframe: uiTimeframe || '1d'
   };
 }
@@ -511,8 +522,21 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      devTools: true
+      devTools: !app.isPackaged
     }
+  });
+
+  // Bloqueia navegação da janela para conteúdo externo/remoto: o preload fica
+  // injetado em qualquer documento carregado, pelo que uma navegação daria
+  // acesso remoto a todo o bridge IPC privilegiado.
+  mainWindow.webContents.on('will-navigate', (event) => {
+    event.preventDefault();
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (typeof url === 'string' && /^https:\/\//i.test(url)) {
+      shell.openExternal(url).catch(() => {});
+    }
+    return { action: 'deny' };
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -1098,8 +1122,15 @@ app.whenReady().then(async () => {
     //  Restantes handlers (sem alterações)
     // ═══════════════════════════════════════════════════════
     ipcMain.handle('ticker:search', async (_event, payload) => {
-      const query = (payload && payload.query) || '';
-      const limit = (payload && payload.limit) || 5;
+      const rawQuery = (payload && payload.query) || '';
+      const query = String(rawQuery).trim().slice(0, 64);
+      if (query.length < 1) {
+        return { ok: true, tickers: [] };
+      }
+      const parsedLimit = Number(payload && payload.limit);
+      const limit = Number.isFinite(parsedLimit)
+        ? Math.min(20, Math.max(1, Math.floor(parsedLimit)))
+        : 5;
       try {
         const tickerResults = await yahooClient.searchTickers(query, limit);
         return { ok: true, tickers: Array.isArray(tickerResults) ? tickerResults : [] };
@@ -1236,7 +1267,22 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('params:set', async (_event, payload) => {
       if (!payload || !payload.key) return { ok: false, error: 'missing-key' };
-      db.setAdaptiveParam(payload.key, payload.value);
+      const clamp = (value, min, max) => {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return null;
+        return Math.round(Math.min(max, Math.max(min, n)) * 1000) / 1000;
+      };
+      const allowed = {
+        edge_threshold: [0, 1],
+        markov_window: [20, 1000],
+        horizon_days: [1, 60],
+        volume_mult: [0, 10]
+      };
+      const range = allowed[payload.key];
+      if (!range) return { ok: false, error: 'invalid-param-key' };
+      const value = clamp(payload.value, range[0], range[1]);
+      if (value === null) return { ok: false, error: 'invalid-param-value' };
+      db.setAdaptiveParam(payload.key, value);
       return { ok: true };
     });
 
@@ -1352,6 +1398,31 @@ app.whenReady().then(async () => {
     // ═══════════════════════════════════════════════════════
     //  IMPORT BULK — Import historical data from CSV/XLSX
     // ═══════════════════════════════════════════════════════
+    // Allowlist de imports: o renderer só pode importar ficheiros que o
+    // utilizador escolheu no dialog nativo (registados aqui) ou dados em
+    // memória. Impede path traversal/leitura arbitrária via `filePath`.
+    const approvedImportPaths = new Set();
+    const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
+    const registerApprovedImportPath = (filePath) => {
+      if (typeof filePath === 'string' && filePath) {
+        approvedImportPaths.add(path.resolve(filePath));
+      }
+    };
+    const validateImportPath = (rawPath) => {
+      if (typeof rawPath !== 'string' || !rawPath) return { ok: false, error: 'missing-filePath' };
+      const resolved = path.resolve(rawPath);
+      if (!approvedImportPaths.has(resolved)) return { ok: false, error: 'file-not-approved' };
+      if (!/\.(csv|xlsx)$/i.test(resolved)) return { ok: false, error: 'unsupported-file-type' };
+      try {
+        const st = fs.statSync(resolved);
+        if (!st.isFile()) return { ok: false, error: 'not-a-regular-file' };
+        if (st.size > MAX_IMPORT_BYTES) return { ok: false, error: 'file-too-large' };
+      } catch (_) {
+        return { ok: false, error: 'file-not-found' };
+      }
+      return { ok: true, filePath: resolved };
+    };
+
     ipcMain.handle('import:bulk', async (_event, payload) => {
       if (!payload || !payload.ticker || (!payload.filePath && !payload.fileData)) {
         return { ok: false, error: 'missing-ticker-or-file' };
@@ -1363,11 +1434,29 @@ app.whenReady().then(async () => {
       let tmpPath = null;
 
       try {
-        let filePath = payload.filePath;
+        let filePath = null;
+
+        // filePath do renderer: só aceite se vier do dialog nativo desta sessão
+        if (payload.filePath) {
+          const pathCheck = validateImportPath(payload.filePath);
+          if (!pathCheck.ok) {
+            return { ok: false, success: false, status: 'failed', error: pathCheck.error };
+          }
+          filePath = pathCheck.filePath;
+        }
 
         // If fileData (binary array) was sent instead of a path, write to temp file
         if (!filePath && payload.fileData && payload.fileName) {
           const ext = path.extname(payload.fileName).toLowerCase();
+          if (ext !== '.csv' && ext !== '.xlsx') {
+            return { ok: false, success: false, status: 'failed', error: 'unsupported-file-type' };
+          }
+          if (!Array.isArray(payload.fileData) && !ArrayBuffer.isView(payload.fileData)) {
+            return { ok: false, success: false, status: 'failed', error: 'invalid-file-data' };
+          }
+          if (payload.fileData.length > MAX_IMPORT_BYTES) {
+            return { ok: false, success: false, status: 'failed', error: 'file-too-large' };
+          }
           tmpPath = path.join(os.tmpdir(), `bulk-import-${Date.now()}${ext}`);
           fs.writeFileSync(tmpPath, Buffer.from(payload.fileData));
           filePath = tmpPath;
@@ -1442,13 +1531,18 @@ app.whenReady().then(async () => {
         return { ok: false, error: 'missing-ticker-or-filePath' };
       }
 
+      const pathCheck = validateImportPath(payload.filePath);
+      if (!pathCheck.ok) {
+        return { ok: false, error: pathCheck.error };
+      }
+
       const ticker = payload.ticker.toUpperCase().trim();
       const lock = beginPipelineOperation('file-import', payload.operationId);
       if (lock.busy) return lock.result;
       const operation = lock.operation;
 
       try {
-        const parseResult = parseFile(payload.filePath);
+        const parseResult = parseFile(pathCheck.filePath);
         if (!parseResult.ok) {
           return { ok: false, error: parseResult.error };
         }
@@ -1517,6 +1611,7 @@ app.whenReady().then(async () => {
       }
 
       const filePath = result.filePaths[0];
+      registerApprovedImportPath(filePath);
       const lock = beginPipelineOperation('file-import', null);
       if (lock.busy) return lock.result;
       const operation = lock.operation;
@@ -1661,7 +1756,14 @@ app.whenReady().then(async () => {
       }
     });
 
+    // Proteção de concorrência: apenas um lote de 1º registo/dividendos pode
+    // correr de cada vez, evitando rajadas de pedidos à Yahoo Finance (429).
+    let batchSyncInProgress = false;
     ipcMain.handle('sync-index-data-batch', async (event, input) => {
+      if (batchSyncInProgress) {
+        return { success: false, message: 'Já existe uma sincronização em lote em curso. Aguarda a conclusão.' };
+      }
+      batchSyncInProgress = true;
       try {
         const { indexFilter, mode = 'BOTH' } = input || {};
         const assets = db.getStocksByIndex(indexFilter);
@@ -1733,6 +1835,8 @@ app.whenReady().then(async () => {
       } catch (error) {
         console.error('Erro na sincronização em lote:', error);
         return { success: false, error: error.message };
+      } finally {
+        batchSyncInProgress = false;
       }
     });
 
@@ -1923,7 +2027,11 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('db:purgeInactive', async (_event, payload) => {
       try {
-        const days = payload && payload.daysCutoff ? Number(payload.daysCutoff) : 60;
+        const raw = payload && payload.daysCutoff != null ? Number(payload.daysCutoff) : 60;
+        if (!Number.isFinite(raw) || raw < 1 || raw > 3650) {
+          return { ok: false, error: 'invalid-cutoff' };
+        }
+        const days = Math.floor(raw);
         const result = db.purgeInactiveStocks(days);
         return { ok: true, ...result };
       } catch (err) {
@@ -2094,6 +2202,58 @@ app.whenReady().then(async () => {
       }
     });
 
+    // Fila sequencial partilhada de cotações recentes (evita 429 do Yahoo).
+    // Usada pelo download em background ("Mais Recente") e pelo handler
+    // síncrono do botão "Sync All".
+    const downloadRecentPricesQueue = async ({ pendingQueue, totalStocks, alreadyUpToDateCount, onProgress }) => {
+      let updatedCount = 0;
+      let savedCandles = 0;
+      let fallbackInitialized = 0;
+      const failedTickers = [];
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      for (let i = 0; i < pendingQueue.length; i++) {
+        const asset = pendingQueue[i];
+        try {
+          const fetchFn = typeof yahooClient.fetchLatestCandlesForSingleTicker === 'function'
+            ? yahooClient.fetchLatestCandlesForSingleTicker
+            : yahooClient.fetchIncrementalCandles;
+          const candles = await fetchFn(asset.ticker, asset.last_date);
+
+          if (candles && candles.length > 0) {
+            if (typeof db.saveSingleAssetCandles === 'function') {
+              db.saveSingleAssetCandles(candles);
+            } else {
+              db.saveBulkIncrementalCandles(candles);
+            }
+            updatedCount++;
+            savedCandles += candles.length;
+            if (!asset.last_date) fallbackInitialized++;
+          }
+        } catch (err) {
+          console.warn(`[Sync Warning] Falha ao sincronizar ${asset.ticker}:`, err.message);
+          failedTickers.push({
+            ticker: asset.ticker,
+            index_name: asset.index_name || '',
+            reason: classifySyncError(err)
+          });
+        }
+
+        if (typeof onProgress === 'function') {
+          onProgress({
+            current: i + 1,
+            total: pendingQueue.length,
+            ticker: asset.ticker,
+            percent: Math.round(((i + 1) / pendingQueue.length) * 100)
+          });
+        }
+
+        if (i < pendingQueue.length - 1) await sleep(100);
+      }
+
+      return { totalStocks, updatedCount, savedCandles, alreadyUpToDateCount, fallbackInitialized, failedTickers };
+    };
+
     ipcMain.handle('sync-start-download', async (event, input = {}) => {
       if (syncRecentInProgress) {
         return { ok: false, error: 'sync-already-in-progress' };
@@ -2145,65 +2305,31 @@ app.whenReady().then(async () => {
       syncRecentInProgress = true;
 
       (async () => {
-        let updatedCount = 0;
-        const failedTickers = [];
-        let fallbackInitialized = 0;
-        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
         try {
-          for (let i = 0; i < totalPending; i++) {
-            const asset = pendingQueue[i];
-            try {
-              const fetchFn = typeof yahooClient.fetchLatestCandlesForSingleTicker === 'function'
-                ? yahooClient.fetchLatestCandlesForSingleTicker
-                : yahooClient.fetchIncrementalCandles;
-              const candles = await fetchFn(asset.ticker, asset.last_date);
+          const summary = await downloadRecentPricesQueue({
+            pendingQueue,
+            totalStocks: allStoredStocks.length,
+            alreadyUpToDateCount,
+            onProgress: (p) => sendEvent('SYNC_RECENT_PROGRESS', p)
+          });
 
-              if (candles && candles.length > 0) {
-                if (typeof db.saveSingleAssetCandles === 'function') {
-                  db.saveSingleAssetCandles(candles);
-                } else {
-                  db.saveBulkIncrementalCandles(candles);
-                }
-                updatedCount++;
-                if (!asset.last_date) fallbackInitialized++;
-              }
-            } catch (err) {
-              console.warn(`[Sync Warning] Falha ao sincronizar ${asset.ticker}:`, err.message);
-              failedTickers.push({
-                ticker: asset.ticker,
-                index_name: asset.index_name || '',
-                reason: classifySyncError(err)
-              });
-            }
-
-            sendEvent('SYNC_RECENT_PROGRESS', {
-              current: i + 1,
-              total: totalPending,
-              ticker: asset.ticker,
-              percent: Math.round(((i + 1) / totalPending) * 100)
-            });
-
-            if (i < totalPending - 1) await sleep(100);
-          }
+          sendEvent('sync-all-done', {
+            totalStocks: summary.totalStocks,
+            total: summary.totalStocks,
+            updatedCount: summary.updatedCount,
+            alreadyUpToDateCount: summary.alreadyUpToDateCount,
+            updated: summary.updatedCount,
+            skipped: summary.alreadyUpToDateCount,
+            fallbackInitialized: summary.fallbackInitialized,
+            failedCount: summary.failedTickers.length,
+            failedTickers: summary.failedTickers,
+            status: 'done'
+          });
         } catch (fatalError) {
           console.error('[Sync Fatal Error]', fatalError);
         } finally {
           syncRecentInProgress = false;
         }
-
-        sendEvent('sync-all-done', {
-          totalStocks: allStoredStocks.length,
-          total: allStoredStocks.length,
-          updatedCount,
-          alreadyUpToDateCount,
-          updated: updatedCount,
-          skipped: alreadyUpToDateCount,
-          fallbackInitialized,
-          failedCount: failedTickers.length,
-          failedTickers,
-          status: 'done'
-        });
       })();
 
       return {
@@ -2213,6 +2339,84 @@ app.whenReady().then(async () => {
         pending: totalPending,
         alreadyUpToDateCount
       };
+    });
+
+    // Handler síncrono do botão "Sync All" da My List: corre a mesma fila
+    // sequencial e só resolve quando termina, devolvendo os totais à UI.
+    ipcMain.handle('sync-all-recent-prices', async (event, input = {}) => {
+      if (syncRecentInProgress) {
+        return { ok: false, error: 'sync-already-in-progress' };
+      }
+
+      const indexFilter = (input && typeof input === 'object')
+        ? (input.indexFilter || input.index || input.indexName || null)
+        : (typeof input === 'string' ? input : null);
+
+      const sender = event && event.sender && !event.sender.isDestroyed()
+        ? event.sender
+        : (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null);
+      const sendEvent = (channel, payload) => {
+        if (sender && !sender.isDestroyed()) sender.send(channel, payload);
+      };
+
+      let allStoredStocks;
+      let expectedTradingDay;
+      try {
+        allStoredStocks = typeof db.auditMyListAssets === 'function'
+          ? db.auditMyListAssets(indexFilter)
+          : db.getMyListAssetsSyncStatus(indexFilter);
+        expectedTradingDay = db.getLastExpectedTradingDay();
+      } catch (err) {
+        return { ok: false, error: err.message || String(err) };
+      }
+
+      if (!allStoredStocks || allStoredStocks.length === 0) {
+        return { ok: true, totalNewCandles: 0, updatedCount: 0, failedCount: 0, message: 'Lista vazia.' };
+      }
+
+      const pendingQueue = [];
+      let alreadyUpToDateCount = 0;
+      for (const asset of allStoredStocks) {
+        if (asset.last_date && expectedTradingDay && asset.last_date >= expectedTradingDay) {
+          alreadyUpToDateCount++;
+        } else {
+          pendingQueue.push(asset);
+        }
+      }
+
+      if (pendingQueue.length === 0) {
+        return {
+          ok: true, totalNewCandles: 0, updatedCount: 0, failedCount: 0, alreadyUpToDateCount,
+          message: 'Lista já estava atualizada. Nenhuma vela nova.'
+        };
+      }
+
+      syncRecentInProgress = true;
+      try {
+        const summary = await downloadRecentPricesQueue({
+          pendingQueue,
+          totalStocks: allStoredStocks.length,
+          alreadyUpToDateCount,
+          onProgress: (p) => sendEvent('SYNC_RECENT_PROGRESS', p)
+        });
+        return {
+          ok: true,
+          success: true,
+          totalNewCandles: summary.savedCandles,
+          updatedCount: summary.updatedCount,
+          failedCount: summary.failedTickers.length,
+          failedTickers: summary.failedTickers,
+          alreadyUpToDateCount: summary.alreadyUpToDateCount,
+          message: summary.savedCandles > 0
+            ? `Lista atualizada com sucesso! ${summary.savedCandles} novas velas gravadas.`
+            : 'Lista já estava atualizada. Nenhuma vela nova.'
+        };
+      } catch (err) {
+        console.error('[sync-all-recent-prices] Error:', err);
+        return { ok: false, error: err.message || String(err) };
+      } finally {
+        syncRecentInProgress = false;
+      }
     });
 
     ipcMain.handle('download-full-history-for-index', async (event, input) => {
@@ -2553,8 +2757,11 @@ app.whenReady().then(async () => {
 
         const total = pending.length;
 
-        // FASE 2: Concorrência Controlada com p-limit(5) e Gravação em Lote
-        const tasks = pending.map((stock) => yahooClient.networkLimit(async () => {
+        // FASE 2: Concorrência Controlada e Gravação em Lote.
+        // Pool dedicada: as funções de rede (`fetchFullHistoryFromIPO`) já
+        // adquirem o `networkLimit` interno; reutilizar o mesmo limiter aqui
+        // causaria deadlock (p-limit não é reentrante).
+        const tasks = pending.map((stock) => firstRecordsLimit(async () => {
           if (isPipelineCancelled(operation)) return;
           const ticker = stock.ticker;
           try {

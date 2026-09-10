@@ -82,6 +82,60 @@ const DB_TIMEOUT_MS = 60000;
 const PROGRESS_THROTTLE_MS = 100;
 const MIN_CANDLES = 20;
 
+// ── Limites de segurança dos parâmetros recebidos por mensagem ──
+const MAX_MC_ITERATIONS = 1000000;
+const MAX_HORIZON_DAYS = 2520;
+
+// Timeout de segurança do cálculo (configurável para testes de resiliência).
+const CALC_TIMEOUT_MS = (() => {
+  const n = Number(process.env.SIMULATION_TIMEOUT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 30 * 60 * 1000;
+})();
+
+// Impede que mcIterations/horizonDays degenerados (Infinity, NaN,
+// strings não numéricas, ≤ 0) cheguem aos motores de simulação.
+// Valores em falta mantêm o default do motor respetivo.
+function sanitizeSimulationParams(params) {
+  const out = { ...(params || {}) };
+
+  if (out.mcIterations != null) {
+    const n = Number(out.mcIterations);
+    if (n === Infinity) out.mcIterations = MAX_MC_ITERATIONS;
+    else if (!Number.isFinite(n) || n <= 0) delete out.mcIterations;
+    else out.mcIterations = Math.min(MAX_MC_ITERATIONS, Math.floor(n));
+  }
+
+  if (out.horizonDays != null) {
+    const n = Number(out.horizonDays);
+    if (n === Infinity) out.horizonDays = MAX_HORIZON_DAYS;
+    else if (!Number.isFinite(n) || n <= 0) delete out.horizonDays;
+    else out.horizonDays = Math.min(MAX_HORIZON_DAYS, Math.floor(n));
+  }
+
+  return out;
+}
+
+// Temporizador de segurança: marca `timedOut` e injeta o runId em
+// `cancelRequested`, o que faz os motores (que verificam
+// `hooks.cancelled`) terminar o loop em vez de ficar sem fim.
+function createCalculationGuard(runId, timeoutMs) {
+  let timedOut = false;
+  let timer = null;
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      if (runId) cancelRequested.add(runId);
+    }, timeoutMs);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+  }
+  return {
+    get timedOut() { return timedOut; },
+    clear() {
+      if (timer) { clearTimeout(timer); timer = null; }
+    }
+  };
+}
+
 const cancelRequested = new Set();
 
 function toISODate(v) {
@@ -111,7 +165,7 @@ function requestDB(type, payload) {
   });
 }
 
-parentPort.on('message', async (msg) => {
+if (parentPort) parentPort.on('message', async (msg) => {
   if (msg.type === 'dbResponse') {
     const req = dbRequests.get(msg.requestId);
     if (req) {
@@ -198,11 +252,11 @@ async function handleStart({ runId, universe, params, dbPath, startDate, endDate
   const list = Array.isArray(universe) ? universe : [];
   const start = toISODate(startDate);
   const end = toISODate(endDate);
-  const simParams = {
+  const simParams = sanitizeSimulationParams({
     ...(params || {}),
     startDate: start,
     endDate: end
-  };
+  });
 
   if (cancelRequested.has(runId)) {
     cancelRequested.delete(runId);
@@ -293,6 +347,8 @@ async function handleStart({ runId, universe, params, dbPath, startDate, endDate
   const useWorkstation = simParams.workstation === true;
   const usePortfolio = simParams.engine === 'portfolio' || simParams.portfolio === true;
 
+  const guard = createCalculationGuard(runId, CALC_TIMEOUT_MS);
+
   const hooks = {
     onProgress(percentOrObj) {
       const percent = typeof percentOrObj === 'number' ? percentOrObj : (percentOrObj && percentOrObj.percent) || 0;
@@ -308,23 +364,40 @@ async function handleStart({ runId, universe, params, dbPath, startDate, endDate
       lastProgressAt = now;
       send({ type: 'simProgress', payload: { runId, percent: lastPercent, message, ticker: lastTicker } });
     },
-    cancelled: () => cancelRequested.has(runId)
+    cancelled: () => guard.timedOut || cancelRequested.has(runId)
   };
 
   let result;
-  if (usePortfolio) {
-    let quantEngine = null;
-    try { quantEngine = require('../native'); } catch (_) {}
-    result = await runPortfolioSimulation({ universe: built, params: simParams, quantEngine, hooks });
-  } else if (useWorkstation) {
-    result = await runWorkstationSimulation({
-      universe: built,
-      params: simParams,
-      fundamentalData: fundamentalData || undefined,
-      hooks
+  try {
+    if (usePortfolio) {
+      let quantEngine = null;
+      try { quantEngine = require('../native'); } catch (_) {}
+      result = await runPortfolioSimulation({ universe: built, params: simParams, quantEngine, hooks });
+    } else if (useWorkstation) {
+      result = await runWorkstationSimulation({
+        universe: built,
+        params: simParams,
+        fundamentalData: fundamentalData || undefined,
+        hooks
+      });
+    } else {
+      result = await runSimulation({ universe: built, params: simParams, hooks });
+    }
+  } finally {
+    guard.clear();
+  }
+
+  if (guard.timedOut) {
+    cancelRequested.delete(runId);
+    send({
+      type: 'simError',
+      payload: {
+        runId,
+        timeout: true,
+        message: `Cálculo excedeu o limite de segurança de ${CALC_TIMEOUT_MS} ms.`
+      }
     });
-  } else {
-    result = await runSimulation({ universe: built, params: simParams, hooks });
+    return;
   }
 
   result.messages = messages.concat(result.messages || []);
@@ -340,3 +413,12 @@ async function handleStart({ runId, universe, params, dbPath, startDate, endDate
 function send(msg) {
   parentPort.postMessage(msg);
 }
+
+// Exportado para testes de resiliência (em worker real não é usado).
+module.exports = {
+  sanitizeSimulationParams,
+  createCalculationGuard,
+  MAX_MC_ITERATIONS,
+  MAX_HORIZON_DAYS,
+  CALC_TIMEOUT_MS
+};

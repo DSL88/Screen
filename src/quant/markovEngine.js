@@ -31,6 +31,31 @@ const VOL_SMA_PERIOD = 20;
 const VWAP_PERIOD = 20;
 const LAPLACE_ALPHA = 0.1;
 
+// C2/A2: sanitização numérica. Não-finitos/≤0 caem no default;
+// os restantes são truncados e limitados ao intervalo pedido.
+function clampInt(v, lo, hi, def) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return def;
+  return Math.min(hi, Math.max(lo, Math.floor(n)));
+}
+
+function clampPeriod(v, def, max) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return def;
+  return Math.min(Math.max(1, Math.floor(n)), Math.max(1, max));
+}
+
+function clampPositive(v, def) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : def;
+}
+
+function clampFraction(v, def) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return def;
+  return Math.min(1, n);
+}
+
 // ── Espaços de estado suportados ────────────────────────────
 //  '9': 3 zonas BB × 3 zonas ADX   (padrão, retrocompatível)
 //  '6': 3 zonas BB × 2 estados de ADX (tendência fraca/forte)
@@ -96,7 +121,8 @@ function buildStateSeries(bbPct, rsi, adx, stateSpace) {
   for (let i = 0; i < n; i++) {
     const bbp = bbPct[i];
     const ax = adx[i];
-    if (bbp == null || ax == null) continue;
+    // M2: NaN não pode ser classificado como estado neutro.
+    if (!Number.isFinite(bbp) || !Number.isFinite(ax)) continue;
 
     if (space === '3') {
       states[i] = bbp < 0.33 ? 0 : (bbp > 0.66 ? 2 : 1);
@@ -282,28 +308,18 @@ function buildStateReturnsMapForCandles(candles, stateSpace) {
 //    manter a classificação bull/bear/neutro estável.
 // ═══════════════════════════════════════════════════════════
 function analyzeSeries(candles, params = {}) {
-  const window = params.markovWindow ?? 150;
-  const volThresh = params.volumeMult ?? 1.2;
-  const horizon = params.horizonDays ?? HORIZON;
+  // A6: entradas não-array devolvem estrutura vazia; velas sem close
+  // finito são descartadas antes de qualquer indicador.
+  candles = Array.isArray(candles)
+    ? candles.filter(c => c && c.close != null && Number.isFinite(Number(c.close)))
+    : [];
+
   const useVolFilter = params.useVolFilter !== undefined ? params.useVolFilter : true;
   const onlyLongs = params.onlyLongs ?? false;
   const stateSpace = params.stateSpace ?? '9';
   const markovOrder = params.markovOrder === 2 ? 2 : 1;
 
-  // ── Períodos dinâmicos (fallbacks = constantes do topo) ──
-  const rsiPeriod = params.rsiPeriod ?? RSI_PERIOD;
-  const adxPeriod = params.adxPeriod ?? ADX_PERIOD;
-  const bbPeriod = params.bbPeriod ?? BB_PERIOD;
-  const bbMult = params.bbMult ?? BB_MULT;
-  const atrPeriod = params.atrPeriod ?? ATR_PERIOD;
-  const atrMult = params.atrMult ?? ATR_MULT;
-  const slPct = params.slPct ?? SL_PCT;
-  const tpPct = params.tpPct ?? TP_PCT;
-
-  // Descarta velas com close null (ainda em formação)
-  candles = candles.filter(c => c && c.close != null);
-
-  if (!candles || candles.length < 60) {
+  if (candles.length < 60) {
     return {
       ticker: null,
       date: null,
@@ -339,6 +355,21 @@ function analyzeSeries(candles, params = {}) {
   const highs = candles.map(c => c.high);
   const lows = candles.map(c => c.low);
   const volumes = candles.map(c => c.volume);
+
+  // ── Parâmetros dinâmicos (C2/A2): não-finitos → default;
+  //    períodos truncados a [1, nº de velas]; stops em (0, 1]. ──
+  const n = candles.length;
+  const window = params.markovWindow ?? 150;
+  const volThresh = params.volumeMult ?? 1.2;
+  const horizon = clampInt(params.horizonDays, 1, 504, HORIZON);
+  const rsiPeriod = clampPeriod(params.rsiPeriod, RSI_PERIOD, n);
+  const adxPeriod = clampPeriod(params.adxPeriod, ADX_PERIOD, n);
+  const bbPeriod = clampPeriod(params.bbPeriod, BB_PERIOD, n);
+  const bbMult = clampPositive(params.bbMult, BB_MULT);
+  const atrPeriod = params.atrPeriod ?? ATR_PERIOD;
+  const atrMult = params.atrMult ?? ATR_MULT;
+  const slPct = clampFraction(params.slPct, SL_PCT);
+  const tpPct = clampFraction(params.tpPct, TP_PCT);
 
   // ── Indicadores ───────────────────────────────────────────
   const rsi = rsiWilder(closes, rsiPeriod);

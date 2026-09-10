@@ -794,7 +794,7 @@
     const rows = (matrixBreakdown && matrixBreakdown.length === 9) ? matrixBreakdown : defaultRows;
     const currPairArr = Array.isArray(currentPair) ? currentPair : [1, 2];
 
-    rows.forEach((r) => {
+    const rowsHtml = rows.map((r) => {
       const isActive = (r.is_current) || (r.s_t2 === currPairArr[0] && r.s_t1 === currPairArr[1]);
       const pBear = (r.prob_bearish * 100).toFixed(1);
       const pNeut = (r.prob_neutral * 100).toFixed(1);
@@ -803,13 +803,14 @@
       const rowLabelClass = isActive ? 'matrix-cell-row-label active-pair' : 'matrix-cell-row-label';
       const highlightClass = isActive ? 'highlight-active' : '';
 
-      container.innerHTML += `
-        <div class="${rowLabelClass}">${isActive ? '👉 ' : ''}${r.from_pair}</div>
+      return `
+        <div class="${rowLabelClass}">${isActive ? '👉 ' : ''}${escapeHtml(r.from_pair)}</div>
         <div class="matrix-cell-prob ${highlightClass}" style="background:rgba(251,113,133,${r.prob_bearish * 0.35 + 0.05}); color:#fb7185;">${pBear}%</div>
         <div class="matrix-cell-prob ${highlightClass}" style="background:rgba(203,213,225,${r.prob_neutral * 0.25 + 0.05}); color:#cbd5e1;">${pNeut}%</div>
         <div class="matrix-cell-prob ${highlightClass}" style="background:rgba(52,211,153,${r.prob_bullish * 0.35 + 0.05}); color:#34d399;">${pBull}%</div>
       `;
-    });
+    }).join('');
+    container.innerHTML += rowsHtml;
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -825,18 +826,20 @@
     tbody.innerHTML = p1.stocks
       .map((s) => {
         const statusClass = s.approved ? 'quant-badge-bull' : 'quant-badge-bear';
-        const formattedCap = typeof s.market_cap === 'number' ? (s.market_cap / 1e9).toFixed(1) + ' B€' : s.market_cap;
+        const formattedCap = typeof s.market_cap === 'number'
+          ? (s.market_cap / 1e9).toFixed(1) + ' B€'
+          : escapeHtml(s.market_cap);
         return `
         <tr>
-          <td><strong>${s.ticker}</strong></td>
-          <td>${s.sector}</td>
+          <td><strong>${escapeHtml(s.ticker)}</strong></td>
+          <td>${escapeHtml(s.sector)}</td>
           <td>${formattedCap}</td>
-          <td><span class="score-pill ${s.quality_score >= 60 ? 'score-high' : 'score-mid'}">${s.quality_score}</span></td>
-          <td class="${parseFloat(s.roa) >= 5.0 ? 'text-bull' : 'text-dim'}">${s.roa}</td>
-          <td>${s.debt_to_equity}</td>
-          <td>${s.earnings_yield}</td>
-          <td>${s.fcf_yield}</td>
-          <td><span class="quant-badge ${statusClass}">${s.status}</span></td>
+          <td><span class="score-pill ${s.quality_score >= 60 ? 'score-high' : 'score-mid'}">${escapeHtml(s.quality_score)}</span></td>
+          <td class="${parseFloat(s.roa) >= 5.0 ? 'text-bull' : 'text-dim'}">${escapeHtml(s.roa)}</td>
+          <td>${escapeHtml(s.debt_to_equity)}</td>
+          <td>${escapeHtml(s.earnings_yield)}</td>
+          <td>${escapeHtml(s.fcf_yield)}</td>
+          <td><span class="quant-badge ${statusClass}">${escapeHtml(s.status)}</span></td>
         </tr>
       `;
       })
@@ -985,11 +988,11 @@
         const reductionPct = (((c.vif_raw - c.vif_purified) / c.vif_raw) * 100).toFixed(1);
         return `
         <tr>
-          <td><strong>${c.feature}</strong></td>
-          <td class="text-bear font-mono">${c.vif_raw}</td>
-          <td class="text-bull font-mono font-bold">${c.vif_purified}</td>
+          <td><strong>${escapeHtml(c.feature)}</strong></td>
+          <td class="text-bear font-mono">${escapeHtml(c.vif_raw)}</td>
+          <td class="text-bull font-mono font-bold">${escapeHtml(c.vif_purified)}</td>
           <td class="text-bull">-${reductionPct}% de redundância</td>
-          <td><span class="quant-badge quant-badge-bull">${c.status}</span></td>
+          <td><span class="quant-badge quant-badge-bull">${escapeHtml(c.status)}</span></td>
         </tr>
       `;
       })

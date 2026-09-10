@@ -10,6 +10,19 @@ try { __nativeForBacktester = require('../native'); } catch (_) {}
 const DEFAULT_WARMUP = 200;
 const DEFAULT_MARKOV_WINDOW = 150;
 const DEFAULT_HORIZON = 5;
+const MAX_HORIZON_DAYS = 2520;
+
+// Normaliza um inteiro positivo com teto, impedindo que NaN/Infinity
+// (p.ex. `horizonDays` vindo de payloads externos) cheguem aos motores.
+// Infinity é limitado ao teto; NaN/strings não numéricas caem no default.
+function clampPositiveInt(v, max, def) {
+  if (v === null || v === undefined || v === '') return def;
+  const n = Number(v);
+  if (Number.isNaN(n)) return def;
+  if (!Number.isFinite(n)) return n > 0 ? max : def;
+  if (n <= 0) return def;
+  return Math.min(max, Math.floor(n));
+}
 
 const SUPPORTED_STATE_SPACES = ['9', '6', '3'];
 const STATE_SPACES_SET = new Set(SUPPORTED_STATE_SPACES);
@@ -102,14 +115,49 @@ function precomputeAssetIndicators(candles, cfg) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Pré-filtro barato (VWAP/RVOL) — Otimização A1 (conservadora)
+//
+//  Só rejeita quando o caminho completo (analyzeSeries + gatekeepers)
+//  rejeitaria de certeza, pelo que os resultados são idênticos:
+//   • VWAP: rejeita apenas `close < vwap` (LONG) / `close > vwap`
+//     (SHORT). O gate real usa `<=`/`>=`, logo este teste é mais
+//     permissivo e nunca elimina um sinal válido.
+//   • RVOL: idêntico ao calculado por `calculateRVOL` na última barra
+//     da série (o pré-cálculo usa a mesma janela de 20 velas).
+//
+//  PENDENTE (fora do âmbito, requer alterar src/quant/**):
+//  `analyzeSeries` e sobretudo `buildStateReturnsMap` dentro do Monte
+//  Carlo continuam a reprocessar a série completa por barra. O MC não
+//  aceita `returnsByState` pré-computado, pelo que a remoção total do
+//  custo O(N²) fica dependente de uma API incremental no markovEngine /
+//  monteCarloEngine.
+// ═══════════════════════════════════════════════════════════
+function cheapSignalPrefilter(precomputed, i, cfg) {
+  if (!precomputed || i < 20) return true;
+  const close = precomputed.closes[i];
+  const vwap = precomputed.vwap[i];
+
+  if (cfg.direction === 'long') {
+    if (cfg.rvolGate && !precomputed.rvolApproved[i]) return false;
+    if (Number.isFinite(close) && Number.isFinite(vwap) && close < vwap) return false;
+  } else if (cfg.direction === 'short') {
+    if (Number.isFinite(close) && Number.isFinite(vwap) && close > vwap) return false;
+  }
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Avaliação de sinal numa barra t (apenas dados até t)
 //
 //  Gatekeepers: direção permitida, probabilidade mínima de
 //  Markov, Monte Carlo e Rolling VWAP(20).  Reutiliza os motores
 //  existentes (markovEngine / monteCarloEngine).
+//
+//  `view` é o prefixo reutilizado candles[0..i] (sem lookahead);
+//  o caller mantém-no incrementalmente para evitar `slice` por barra.
 // ═══════════════════════════════════════════════════════════
-function evaluateSignal(candles, i, cfg) {
-  const slice = candles.slice(0, i + 1);
+function evaluateSignal(view, cfg) {
+  const slice = view;
 
   const result = analyzeSeries(slice, {
     markovWindow: cfg.markovWindow,
@@ -188,6 +236,9 @@ async function runSimulation(options) {
   const onProgress = typeof hooks.onProgress === 'function' ? hooks.onProgress : () => {};
   const onStatus = typeof hooks.onStatus === 'function' ? hooks.onStatus : () => {};
   const isCancelled = typeof hooks.cancelled === 'function' ? hooks.cancelled : () => false;
+  // Apenas para testes de equivalência: desativa as otimizações
+  // conservadoras A1 (pré-filtro VWAP/RVOL e reutilização de prefixo).
+  const referenceMode = hooks.referenceMode === true;
 
   const cfg = {
     direction: params.direction || 'both',
@@ -210,7 +261,7 @@ async function runSimulation(options) {
     slippagePct: Number(params.slippagePct ?? params.slippage) || 0,
     warmup: Number(params.warmup) || DEFAULT_WARMUP,
     markovWindow: Number(params.markovWindow) || DEFAULT_MARKOV_WINDOW,
-    horizonDays: Number(params.horizonDays) || DEFAULT_HORIZON,
+    horizonDays: clampPositiveInt(params.horizonDays, MAX_HORIZON_DAYS, DEFAULT_HORIZON),
     markovOrder: Number(params.markovOrder) === 2 ? 2 : 1,
     stateSpace: (STATE_SPACES_SET.has(String(params.stateSpace)) ? String(params.stateSpace) : '9')
   };
@@ -274,6 +325,9 @@ async function runSimulation(options) {
       startIdx: effectiveStartIdx,
       endIdx,
       ptr: effectiveStartIdx,
+      // Prefixo reutilizado candles[0..ptr] (evita slice por barra).
+      // Inclui o warm-up [0..startIdx] e cresce uma vela por iteração.
+      view: candles.slice(0, effectiveStartIdx),
       precomputed
     });
   }
@@ -453,6 +507,8 @@ async function runSimulation(options) {
     for (const a of assets) {
       while (a.ptr <= a.endIdx && String(a.candles[a.ptr].date) <= date) {
         const c = a.candles[a.ptr];
+        // Prefixo incremental sem lookahead: candles[0..ptr].
+        a.view.push(c);
         const bar = {
           open: Number(c.open),
           high: Number(c.high),
@@ -475,7 +531,11 @@ async function runSimulation(options) {
           if (exit) closePosition(a, pos, exit.price, exit.reason, String(c.date));
         }
 
-        const sig = evaluateSignal(a.candles, a.ptr, cfg);
+        // Otimização A1: o pré-filtro só corta barras que os gatekeepers
+        // reais rejeitariam; em referenceMode avalia-se sempre a slice.
+        const sig = referenceMode
+          ? evaluateSignal(a.view.slice(), cfg)
+          : (cheapSignalPrefilter(a.precomputed, a.ptr, cfg) ? evaluateSignal(a.view, cfg) : null);
         if (sig && a.ptr + 1 <= a.endIdx && String(a.candles[a.ptr + 1].date) <= cfg.endDate) {
           const after = positions.get(a.ticker);
           if (after) {
@@ -707,7 +767,7 @@ class BacktesterEngine {
     this.riskPerTrade = Number(config.riskPerTradePct || 2) / 100;
     this.stopLossPct = Number(config.stopLoss || 2.4) / 100;
     this.takeProfitPct = Number(config.takeProfit || 4.8) / 100;
-    this.horizonDays = Number(config.horizonDays || 35);
+    this.horizonDays = clampPositiveInt(config.horizonDays, MAX_HORIZON_DAYS, 35);
     this.direction = config.direction || 'BOTH';
     this.minMCWinRate = Number(config.minMCWinRate || 50);
     this.minRVOL = (config.minRVOL ?? config.rvolMin) != null ? Number(config.minRVOL ?? config.rvolMin) : 1.0;
@@ -723,6 +783,7 @@ class BacktesterEngine {
     const qe = quantEngine || __nativeForBacktester;
     const n = candles.length;
     const precomputed = precomputeAssetIndicators(candles, { minRVOL: this.minRVOL });
+    const view = candles.slice(0, 200);
     let inPosition = false;
     let currentTrade = null;
     let peakCapital = this.capital;
@@ -730,6 +791,7 @@ class BacktesterEngine {
 
     for (let i = 200; i < n; i++) {
       const currentCandle = candles[i];
+      view.push(currentCandle); // view = candles[0..i], sem lookahead
       if (this.capital > peakCapital) peakCapital = this.capital;
       const currentDrawdown = ((peakCapital - this.capital) / peakCapital) * 100;
       if (currentDrawdown > maxDrawdown) maxDrawdown = currentDrawdown;
@@ -769,7 +831,7 @@ class BacktesterEngine {
           if (!precomputed.rvolApproved[i]) continue;
         }
 
-        const slice = candles.slice(0, i + 1);
+        const slice = view;
         const signal = this.evaluateSignal(slice, qe, targetDirection);
         if (signal && signal.approved) {
           const entryPrice = currentCandle.close;

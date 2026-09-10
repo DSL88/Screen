@@ -184,7 +184,9 @@
     if (cohortDates && cohortDates.length > 0) {
       optionsHtml += `<optgroup label="Coortes Específicas">`;
       cohortDates.forEach((d) => {
-        optionsHtml += `<option value="date_${d}">${d}</option>`;
+        const raw = String(d == null ? '' : d);
+        const safeDate = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : escapeHtml(raw);
+        optionsHtml += `<option value="date_${safeDate}">${escapeHtml(raw)}</option>`;
       });
       optionsHtml += `</optgroup>`;
     }
@@ -225,19 +227,19 @@
 
       return `
         <tr>
-          <td><strong>${t.tier_label}</strong></td>
-          <td class="num-col">${t.suggestions_count}</td>
-          <td class="num-col text-success">${t.targets_hit}</td>
-          <td class="num-col text-danger">${t.stops_hit}</td>
+          <td><strong>${escapeHtml(t.tier_label)}</strong></td>
+          <td class="num-col">${escapeHtml(t.suggestions_count)}</td>
+          <td class="num-col text-success">${escapeHtml(t.targets_hit)}</td>
+          <td class="num-col text-danger">${escapeHtml(t.stops_hit)}</td>
           <td class="num-col ${t.hit_rate_real >= 60 ? 'text-success' : 'text-warning'}">
-            ${t.hit_rate_real}%
+            ${escapeHtml(t.hit_rate_real)}%
           </td>
           <td class="num-col ${retClass}">
-            ${retSign}${t.avg_return}%
+            ${retSign}${escapeHtml(t.avg_return)}%
           </td>
           <td>
             <span class="${diagClass}">
-              ${t.status_calibration}
+              ${escapeHtml(t.status_calibration)}
             </span>
           </td>
         </tr>

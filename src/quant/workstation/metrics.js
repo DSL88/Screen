@@ -91,7 +91,9 @@ function sortinoRatio(returns) {
   if (r.length < 2) return 0;
   const downside = r.filter(x => x < 0);
   if (downside.length === 0) return mean(r) > 0 ? 99.9 : 0;
-  const ds = Math.sqrt(mean(downside.map(x => x * x)));
+  // M8: downside deviation sobre o nº TOTAL de retornos (não apenas
+  // os negativos), evitando sobrestimar o Sortino.
+  const ds = Math.sqrt(downside.reduce((s, x) => s + x * x, 0) / r.length);
   if (ds === 0) return 0;
   return (mean(r) / ds) * Math.sqrt(TRADING_DAYS);
 }

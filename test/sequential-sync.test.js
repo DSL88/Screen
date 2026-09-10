@@ -226,19 +226,19 @@ test('fetchLatestCandlesForSingleTicker sem lastDate usa range=5d', async () => 
   }
 });
 
-test('sync-start-download usa execução sequencial (verificação estática)', () => {
+test('download de cotações recentes usa execução sequencial (verificação estática)', () => {
   const mainPath = path.join(__dirname, '..', 'main.js');
   const content = fs.readFileSync(mainPath, 'utf8');
 
-  const fnStart = content.indexOf('sync-start-download');
-  assert.ok(fnStart !== -1, 'sync-start-download not found in main.js');
+  const fnStart = content.indexOf('downloadRecentPricesQueue');
+  assert.ok(fnStart !== -1, 'downloadRecentPricesQueue not found in main.js');
 
-  const fnBlock = content.slice(fnStart, fnStart + 5000);
+  const fnBlock = content.slice(fnStart, fnStart + 3000);
 
   assert.ok(!fnBlock.includes('Promise.all(tasks)'), 'should NOT contain Promise.all(tasks)');
   assert.ok(
-    /for\s*\(\s*let\s+i\s*=\s*0\s*;\s*i\s*<\s*totalPending/.test(fnBlock),
-    'should contain sequential for loop over totalPending'
+    /for\s*\(\s*let\s+i\s*=\s*0\s*;\s*i\s*<\s*pendingQueue/.test(fnBlock),
+    'should contain sequential for loop over pendingQueue'
   );
   assert.ok(fnBlock.includes('sleep(100)'), 'should contain sleep(100) delay');
   assert.ok(
@@ -249,6 +249,12 @@ test('sync-start-download usa execução sequencial (verificação estática)', 
     fnBlock.includes('saveSingleAssetCandles') || fnBlock.includes('saveBulkIncrementalCandles'),
     'should reference saveSingleAssetCandles or saveBulkIncrementalCandles'
   );
+
+  // O handler de background deve delegar na fila partilhada.
+  const handlerStart = content.indexOf("ipcMain.handle('sync-start-download'");
+  assert.ok(handlerStart !== -1, 'sync-start-download not found in main.js');
+  const handlerBlock = content.slice(handlerStart, handlerStart + 3000);
+  assert.ok(handlerBlock.includes('downloadRecentPricesQueue'), 'sync-start-download deve usar a fila partilhada');
 });
 
 test('sync-start-download retorna started:true e corre download em background', () => {

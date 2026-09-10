@@ -131,11 +131,6 @@ class DB {
           volume        INTEGER NOT NULL,
           PRIMARY KEY (ticker, date)
         );
-        CREATE INDEX IF NOT EXISTS idx_hist_prices_ticker_date ON historical_prices (ticker, date);
-        CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date);
-        CREATE INDEX IF NOT EXISTS idx_historical_prices_ticker_date_asc ON historical_prices (ticker, date ASC);
-        CREATE INDEX IF NOT EXISTS idx_hist_ticker_date_desc ON historical_prices (ticker, date DESC);
-
         CREATE TABLE IF NOT EXISTS stocks (
           ticker      TEXT PRIMARY KEY,
           name        TEXT NOT NULL,
@@ -261,34 +256,8 @@ class DB {
         try { this.db.exec('ALTER TABLE historical_prices ADD COLUMN adjclose REAL'); } catch (_) { /* already added */ }
       }
 
-      // Índice composto para agregações MIN/MAX/COUNT instantâneas por ativo.
-      this.db.exec('CREATE INDEX IF NOT EXISTS idx_hist_prices_ticker_date ON historical_prices (ticker, date)');
-
-      // AUTOCORREÇÃO DA PRIMEIRA DATA HISTÓRICA
-      // Recalcula first_date para ativos na BD com base no MIN(date) real.
-      try {
-        const fixStmt = this.db.prepare(`
-          UPDATE stocks
-          SET first_date = (
-            SELECT MIN(hp.date)
-            FROM historical_prices hp
-            WHERE hp.ticker = stocks.ticker
-          )
-          WHERE EXISTS (
-            SELECT 1
-            FROM historical_prices hp
-            WHERE hp.ticker = stocks.ticker
-          )
-        `);
-        const fixResult = fixStmt.run();
-        if (fixResult.changes > 0) {
-          console.log(`[DB Migration] first_date recalculado para ${fixResult.changes} ativo(s) a partir do MIN(date) real.`);
-        }
-      } catch (err) {
-        console.error('[DB Migration] Falha ao recalcular first_date:', err && err.message ? err.message : err);
-      }
-
-      // Migração com controlo de versão (PRAGMA user_version) para não sobregravar SL/TP em cada sessão.
+      // Migração com controlo de versão (PRAGMA user_version) para não reexecutar
+      // trabalho pesado em cada abertura da BD.
       const userVersion = this.db.pragma('user_version', { simple: true });
       if (userVersion < 1) {
         // Normalização de rótulos antigos em index_name
@@ -313,6 +282,48 @@ class DB {
 
         this._migrateRecalculateSLTP();
         this.db.pragma('user_version = 1');
+      }
+
+      if (userVersion < 2) {
+        // v2: a PK (ticker, date) já cobre as agregações MIN/MAX/COUNT por
+        // ativo; remover os índices redundantes legados (idempotente, também
+        // limpa bases antigas onde foram criados).
+        this.db.exec(`
+          DROP INDEX IF EXISTS idx_hist_prices_ticker_date;
+          DROP INDEX IF EXISTS idx_hist_ticker_date;
+          DROP INDEX IF EXISTS idx_historical_prices_ticker_date_asc;
+          DROP INDEX IF EXISTS idx_hist_ticker_date_desc;
+        `);
+        this.db.pragma('user_version = 2');
+      }
+
+      // Autocorreção da primeira data histórica: sargável (usa a PK) e só
+      // escreve quando o valor persistido difere do MIN(date) real, pelo que
+      // fica sem custo de escrita quando não há alterações.
+      try {
+        const fixResult = this.db.prepare(`
+          UPDATE stocks
+          SET first_date = (
+            SELECT MIN(hp.date)
+            FROM historical_prices hp
+            WHERE hp.ticker = stocks.ticker
+          )
+          WHERE EXISTS (
+            SELECT 1
+            FROM historical_prices hp
+            WHERE hp.ticker = stocks.ticker
+          )
+          AND (stocks.first_date IS NULL OR stocks.first_date <> (
+            SELECT MIN(hp.date)
+            FROM historical_prices hp
+            WHERE hp.ticker = stocks.ticker
+          ))
+        `).run();
+        if (fixResult.changes > 0) {
+          console.log(`[DB Migration] first_date recalculado para ${fixResult.changes} ativo(s) a partir do MIN(date) real.`);
+        }
+      } catch (err) {
+        console.error('[DB Migration] Falha ao recalcular first_date:', err && err.message ? err.message : err);
       }
     });
     tx();
@@ -1573,14 +1584,26 @@ class DB {
     // à migração de arranque e aos saves incrementais).
     if (row.first_date) {
       try {
-        const stock = this.db.prepare(
-          'SELECT first_date FROM stocks WHERE UPPER(TRIM(ticker)) = ?'
+        // Igualdade canónica usa a PK de stocks; o fallback UPPER(TRIM)
+        // apenas cobre linhas legadas por normalizar.
+        let stock = this.db.prepare(
+          'SELECT first_date FROM stocks WHERE ticker = ?'
         ).get(cleanTicker);
+        if (!stock) {
+          stock = this.db.prepare(
+            'SELECT first_date FROM stocks WHERE UPPER(TRIM(ticker)) = ?'
+          ).get(cleanTicker);
+        }
         const stored = stock && stock.first_date ? String(stock.first_date).trim() : '';
         if (!stored || stored !== String(row.first_date).trim()) {
-          this.db.prepare(
-            'UPDATE stocks SET first_date = ? WHERE UPPER(TRIM(ticker)) = ?'
+          const updated = this.db.prepare(
+            'UPDATE stocks SET first_date = ? WHERE ticker = ?'
           ).run(String(row.first_date).trim(), cleanTicker);
+          if ((updated.changes || 0) === 0) {
+            this.db.prepare(
+              'UPDATE stocks SET first_date = ? WHERE UPPER(TRIM(ticker)) = ?'
+            ).run(String(row.first_date).trim(), cleanTicker);
+          }
         }
       } catch (_) { /* não bloqueia a leitura */ }
     }
@@ -1594,24 +1617,47 @@ class DB {
 
   getStockDetailWithLatestPrice(ticker) {
     if (!ticker) return null;
-    const cleanTicker = String(ticker).trim().toUpperCase();
+    const cleanTicker = canonicalTicker(ticker);
 
-    // 1. Dados cadastrais
-    const stock = this.db.prepare(`
+    // 1. Dados cadastrais — match canónico pela PK; fallback UPPER(TRIM)
+    // apenas para linhas legadas sem normalização.
+    let stock = this.db.prepare(`
       SELECT ticker, name, country, index_name, first_date 
       FROM stocks 
-      WHERE UPPER(TRIM(ticker)) = ?
+      WHERE ticker = ?
     `).get(cleanTicker);
+    if (!stock) {
+      stock = this.db.prepare(`
+        SELECT ticker, name, country, index_name, first_date 
+        FROM stocks 
+        WHERE UPPER(TRIM(ticker)) = ?
+      `).get(cleanTicker);
+    }
 
-    // 2. Resumo de datas e contagem
-    const summary = this.db.prepare(`
+    // 2. Resumo de datas e contagem — o parâmetro já vem normalizado, pelo
+    // que a igualdade canónica usa a PK (ticker, date) em vez de forçar um
+    // full scan com UPPER(TRIM(ticker)) = ?. O fallback legado só corre
+    // quando não existe nenhuma linha canónica (caso raro).
+    let summary = this.db.prepare(`
       SELECT 
         MIN(date) AS first_stored_date,
         MAX(date) AS last_stored_date,
         COUNT(*) AS total_candles
       FROM historical_prices 
-      WHERE UPPER(TRIM(ticker)) = ?
+      WHERE ticker = ?
     `).get(cleanTicker);
+    const needsLegacyFallback = !summary || !summary.total_candles;
+    if (needsLegacyFallback) {
+      const legacySummary = this.db.prepare(`
+        SELECT 
+          MIN(date) AS first_stored_date,
+          MAX(date) AS last_stored_date,
+          COUNT(*) AS total_candles
+        FROM historical_prices 
+        WHERE UPPER(TRIM(ticker)) = ?
+      `).get(cleanTicker);
+      if (legacySummary && legacySummary.total_candles) summary = legacySummary;
+    }
 
     // 3. Obter a última vela com ordenação estrita por data DESC
     let hasAdjClose = false;
@@ -1622,14 +1668,33 @@ class DB {
 
     const adjSelect = hasAdjClose ? 'COALESCE(adjclose, close) AS adjclose' : 'close AS adjclose';
 
-    const latestCandle = this.db.prepare(`
+    const latestSql = `
       SELECT date, open, high, low, close, 
              ${adjSelect}, volume
       FROM historical_prices 
-      WHERE UPPER(TRIM(ticker)) = ?
+      WHERE ticker = ?
       ORDER BY date DESC 
       LIMIT 1
-    `).get(cleanTicker);
+    `;
+    let latestCandle = this.db.prepare(latestSql).get(cleanTicker);
+    if (!latestCandle && needsLegacyFallback) {
+      latestCandle = this.db.prepare(`
+        SELECT date, open, high, low, close, 
+               ${adjSelect}, volume
+        FROM historical_prices 
+        WHERE UPPER(TRIM(ticker)) = ?
+        ORDER BY date DESC 
+        LIMIT 1
+      `).get(cleanTicker);
+    }
+
+    // Normaliza valores numéricos para evitar undefined/NaN/strings na
+    // serialização IPC (uma vela sem close válido resulta em "Sem Cotação").
+    const toNum = (value) => {
+      if (value === null || value === undefined || value === '') return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    };
 
     return {
       ticker: cleanTicker,
@@ -1638,15 +1703,15 @@ class DB {
       index_name: stock?.index_name || '--',
       first_date: summary?.first_stored_date || stock?.first_date || null,
       last_date: summary?.last_stored_date || null,
-      total_candles: summary?.total_candles || 0,
+      total_candles: Number(summary?.total_candles || 0),
       latestPrice: latestCandle ? {
-        date: latestCandle.date,
-        close: latestCandle.close,
-        adjclose: latestCandle.adjclose,
-        open: latestCandle.open,
-        high: latestCandle.high,
-        low: latestCandle.low,
-        volume: latestCandle.volume
+        date: latestCandle.date || null,
+        close: toNum(latestCandle.close),
+        adjclose: toNum(latestCandle.adjclose),
+        open: toNum(latestCandle.open),
+        high: toNum(latestCandle.high),
+        low: toNum(latestCandle.low),
+        volume: toNum(latestCandle.volume) ?? 0
       } : null
     };
   }
@@ -1664,13 +1729,10 @@ class DB {
         this.db.exec('ALTER TABLE stocks ADD COLUMN first_date TEXT');
       }
 
-      // Garante o índice composto que acelera as agregações MIN/MAX/COUNT.
-      this.db.exec('CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date)');
-
-      // Passo 1 — correspondência exata de ticker (usa o índice composto;
-      // corre em milissegundos mesmo com milhões de velas). Os tickers são
-      // gravados de forma canónica (UPPER + TRIM) em todos os caminhos de
-      // escrita, pelo que o match exato cobre a esmagadora maioria dos casos.
+      // Passo 1 — correspondência exata de ticker. Sargável: usa a PK
+      // (ticker, date) de historical_prices e só escreve quando o valor
+      // persistido difere do MIN(date) real, pelo que um segundo arranque
+      // sem alterações não gera writes/WAL.
       const fastResult = this.db.prepare(`
         UPDATE stocks
         SET first_date = (
@@ -1683,31 +1745,51 @@ class DB {
           FROM historical_prices hp
           WHERE hp.ticker = stocks.ticker
         )
-      `).run();
-
-      // Passo 2 — resíduos legados cujo ticker diverge em caixa/trim (não
-      // apanhados pelo match exato). Raro, por isso é aceitável pagar a
-      // varredura UPPER(TRIM) apenas nesses ativos.
-      const stragglersResult = this.db.prepare(`
-        UPDATE stocks
-        SET first_date = (
+        AND (stocks.first_date IS NULL OR stocks.first_date <> (
           SELECT MIN(hp.date)
           FROM historical_prices hp
-          WHERE UPPER(TRIM(hp.ticker)) = UPPER(TRIM(stocks.ticker))
-        )
-        WHERE NOT EXISTS (
-          SELECT 1
-          FROM historical_prices hp
           WHERE hp.ticker = stocks.ticker
-        )
-        AND EXISTS (
-          SELECT 1
-          FROM historical_prices hp
-          WHERE UPPER(TRIM(hp.ticker)) = UPPER(TRIM(stocks.ticker))
-        )
+        ))
       `).run();
 
-      const updatedCount = (fastResult.changes || 0) + (stragglersResult.changes || 0);
+      // Passo 2 — resíduos legados cujo ticker diverge em caixa/trim. A
+      // agregação normalizada é materializada uma única vez (scan único de
+      // historical_prices) em vez da subquery correlacionada O(n_stocks
+      // × n_velas) anterior, e fica gated por user_version: os writers
+      // canónicos da aplicação nunca criam novos resíduos, pelo que só corre
+      // na primeira reconciliação de cada base de dados.
+      let stragglersChanges = 0;
+      const userVersion = this.db.pragma('user_version', { simple: true });
+      if (userVersion < 3) {
+        const stragglersResult = this.db.prepare(`
+          WITH normalized AS (
+            SELECT UPPER(TRIM(hp.ticker)) AS ticker, MIN(hp.date) AS min_date
+            FROM historical_prices hp
+            GROUP BY UPPER(TRIM(hp.ticker))
+          )
+          UPDATE stocks
+          SET first_date = (
+            SELECT n.min_date
+            FROM normalized n
+            WHERE n.ticker = stocks.ticker
+          )
+          WHERE NOT EXISTS (
+            SELECT 1 FROM historical_prices hp WHERE hp.ticker = stocks.ticker
+          )
+          AND EXISTS (
+            SELECT 1 FROM normalized n WHERE n.ticker = stocks.ticker
+          )
+          AND (stocks.first_date IS NULL OR stocks.first_date <> (
+            SELECT n.min_date
+            FROM normalized n
+            WHERE n.ticker = stocks.ticker
+          ))
+        `).run();
+        stragglersChanges = stragglersResult.changes || 0;
+        this.db.pragma('user_version = 3');
+      }
+
+      const updatedCount = (fastResult.changes || 0) + stragglersChanges;
       console.log(`[Reconciliação Concluída] Datas de 1º registo corrigidas para ${updatedCount} ativos.`);
       return { success: true, updatedCount };
     } catch (error) {
@@ -1963,11 +2045,25 @@ class DB {
     if (tickers.length === 0) {
       return { isUpdated, maxStoredDate, expectedDate, outdatedTickers: [] };
     }
+    // Uma agregação por chunk (padrão de getHistoricalSummaryBatch) em vez de
+    // um SELECT MAX(date) ... WHERE ticker = ? por ativo (N+1).
+    const lastDateMap = new Map();
+    const CHUNK = 900;
+    for (let i = 0; i < tickers.length; i += CHUNK) {
+      const chunk = tickers.slice(i, i + CHUNK);
+      const summaries = this.getHistoricalSummaryBatch(chunk);
+      for (const ticker of chunk) {
+        const key = canonicalTicker(ticker);
+        const info = summaries[key] || summaries[ticker] || null;
+        const lastDate = info && info.lastDate ? String(info.lastDate).slice(0, 10) : null;
+        lastDateMap.set(ticker, lastDate);
+      }
+    }
+
     let overallMax = maxStoredDate;
     const outdatedTickers = [];
     for (const ticker of tickers) {
-      const r = this.db.prepare('SELECT MAX(date) as last_date FROM historical_prices WHERE ticker = ?').get(ticker);
-      const lastDate = r ? r.last_date : null;
+      const lastDate = lastDateMap.get(ticker) || null;
       if (lastDate && (!overallMax || lastDate > overallMax)) overallMax = lastDate;
       if (!lastDate || lastDate < expectedDate) outdatedTickers.push(ticker);
     }

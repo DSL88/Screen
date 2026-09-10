@@ -23,6 +23,24 @@ const ADX_PERIOD = 14;
 const BB_PERIOD = 30;
 const BB_MULT = 2.0;
 
+const MAX_ITERATIONS = 1_000_000;
+const MAX_DAYS_AHEAD = 2520;
+
+// C1: caps duros contra DoS de cálculo. Não-finitos/≤0 usam o
+// default seguro; restantes são truncados e limitados.
+function sanitizeInt(v, lo, hi, def) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return def;
+  return Math.min(hi, Math.max(lo, Math.floor(n)));
+}
+
+// A2: stops em fração — (0, 1]; inválidos caem no default.
+function sanitizeFraction(v, def) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return def;
+  return Math.min(1, n);
+}
+
 function sampleState(probabilities, rng = Math.random) {
   const r = rng();
   let cumulative = 0;
@@ -215,17 +233,28 @@ function _runOrder2Loop(transitionMatrix, returnsByState, prevState, currentStat
 
 function runMarkovMonteCarloSimulation(transitionMatrix, currentState, candles, currentPrice, options) {
   const opts = options || {};
-  const iterations = opts.iterations || MC_ITERATIONS;
-  const daysAhead = opts.daysAhead || opts.horizon || MC_DAYS_AHEAD;
-  const slPct = opts.slPct != null ? opts.slPct : (opts.sl != null ? opts.sl : SL_PCT);
-  const tpPct = opts.tpPct != null ? opts.tpPct : (opts.tp != null ? opts.tp : TP_PCT);
+  const iterations = sanitizeInt(opts.iterations, 1, MAX_ITERATIONS, MC_ITERATIONS);
+  const daysAhead = sanitizeInt(opts.daysAhead || opts.horizon, 1, MAX_DAYS_AHEAD, MC_DAYS_AHEAD);
+  const slPct = sanitizeFraction(opts.slPct != null ? opts.slPct : (opts.sl != null ? opts.sl : SL_PCT), SL_PCT);
+  const tpPct = sanitizeFraction(opts.tpPct != null ? opts.tpPct : (opts.tp != null ? opts.tp : TP_PCT), TP_PCT);
   const isShort = String(opts.side || 'LONG').toUpperCase() === 'SHORT';
   const stateSpace = opts.stateSpace || '9';
   const isOrder2 = opts.order === 2;
   const prevState = opts.prevState != null ? Number(opts.prevState) : -1;
 
-  if (!transitionMatrix || currentState < 0 || !candles || candles.length < 60 || !currentPrice || currentPrice <= 0) {
-    return { winRate: 0, tpHits: 0, slHits: 0, expired: iterations, isApproved: false, mcTier: 'REJECTED', mcLabel: 'Rejeitado' };
+  const rejected = { winRate: 0, tpHits: 0, slHits: 0, expired: iterations, isApproved: false, mcTier: 'REJECTED', mcLabel: 'Rejeitado' };
+
+  // A6: entradas não-array devolvem estrutura vazia (sem lançar).
+  if (!transitionMatrix || currentState < 0 || !Array.isArray(candles)) {
+    return rejected;
+  }
+
+  // A6: descarta velas sem close finito antes de calcular indicadores
+  // e retornos (a MESMA série filtrada alimenta o MC).
+  candles = candles.filter(c => c && c.close != null && Number.isFinite(Number(c.close)));
+
+  if (candles.length < 60 || !currentPrice || currentPrice <= 0) {
+    return rejected;
   }
 
   const returnsByState = buildStateReturnsMap(candles, stateSpace);

@@ -46,10 +46,34 @@ function maxPositionsForSlot(slotPct) {
   return Math.max(1, Math.floor((1 + 1e-9) / p));
 }
 
+// ── Limites de segurança dos parâmetros ─────────────────────
+const MAX_MC_ITERATIONS = 1000000;
+const MAX_HORIZON_DAYS = 2520;
+const MAX_STOP_LOSS_PCT = 100;
+const MAX_TAKE_PROFIT_PCT = 1000;
+
+function finiteNumber(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 
 class PortfolioBacktester {
   constructor(config = {}) {
-    this.initialCapital = Number(config.initialCapital ?? config.capital) || 10000;
+    const warnings = [];
+    const invalid = (field, fallback) => {
+      warnings.push(`Parâmetro ${field} inválido; normalizado para ${fallback}.`);
+    };
+
+    // ── Capital ──────────────────────────────────────────────
+    const rawCapital = finiteNumber(config.initialCapital ?? config.capital);
+    if (rawCapital == null || rawCapital <= 0) {
+      if (config.initialCapital != null || config.capital != null) invalid('initialCapital', '10000');
+      this.initialCapital = 10000;
+    } else {
+      this.initialCapital = rawCapital;
+    }
     this.cash = this.initialCapital;
 
     // Resolução do slot: aceita preset '2'|'5'|'7.5'|'10'|'15'|'20' (em %),
@@ -58,32 +82,117 @@ class PortfolioBacktester {
       : (config.slotPct != null ? String(Number(config.slotPct) * 100) : null);
     const preset = presetKey && SLOT_DEFINITIONS[presetKey] ? SLOT_DEFINITIONS[presetKey] : null;
 
-    this.positionAllocationPct = config.positionAllocationPct != null ? Number(config.positionAllocationPct)
-      : (config.slotPct != null ? Number(config.slotPct)
-        : (preset ? preset.slotPct : 0.20));
-    this.maxPositions = config.maxPositions != null && Number(config.maxPositions) > 0
-      ? Number(config.maxPositions)
-      : (preset ? preset.maxPositions : maxPositionsForSlot(this.positionAllocationPct));
+    // ── Alocação por trade: fração em (0, 1] ─────────────────
+    let allocation = null;
+    const rawAllocation = config.positionAllocationPct != null
+      ? config.positionAllocationPct
+      : (config.slotPct != null ? config.slotPct : null);
+    if (rawAllocation != null) {
+      const n = finiteNumber(rawAllocation);
+      if (n == null || n <= 0) invalid('positionAllocationPct', preset ? preset.slotPct : 0.20);
+      else if (n > 1) { invalid('positionAllocationPct', 1); allocation = 1; }
+      else allocation = n;
+    }
+    if (allocation == null) allocation = preset ? preset.slotPct : 0.20;
+    this.positionAllocationPct = allocation;
 
-    this.stopLossPct = (Number(config.stopLoss) || 2.4) / 100;
-    this.takeProfitPct = (Number(config.takeProfit) || 4.8) / 100;
-    this.horizonDays = Number(config.horizonDays) || 35;
-    this.minMCWinRate = Number(config.minMCWinRate ?? config.minMC ?? config.mcMin) || 50;
-    this.mcIterations = Number(config.mcIterations) || 1000;
-    this.direction = String(config.direction || 'long').toLowerCase();
-    this.riskPerTradePct = Number(config.riskPerTradePct ?? config.risk) || this.positionAllocationPct * 100;
-    this.warmup = config.warmup != null ? Number(config.warmup) : 200;
-    this.markovWindow = Number(config.markovWindow) || 150;
-    this.minMarkovPct = Number(config.markovMinPct) || 0;
-    this.mcSeed = config.mcSeed != null ? Number(config.mcSeed) : undefined;
+    // ── Máximo de posições: inteiro em [1, 1000] ─────────────
+    const rawMaxPositions = finiteNumber(config.maxPositions);
+    if (rawMaxPositions != null && rawMaxPositions > 0) {
+      this.maxPositions = Math.min(1000, Math.floor(rawMaxPositions));
+    } else {
+      if (config.maxPositions != null) invalid('maxPositions', preset ? preset.maxPositions : maxPositionsForSlot(allocation));
+      this.maxPositions = preset ? preset.maxPositions : maxPositionsForSlot(allocation);
+    }
+
+    // ── Stops: percentagens finitas e positivas ──────────────
+    const rawStopLoss = finiteNumber(config.stopLoss);
+    if (rawStopLoss == null || rawStopLoss <= 0) {
+      if (config.stopLoss != null) invalid('stopLoss', '2.4%');
+      this.stopLossPct = 0.024;
+    } else {
+      this.stopLossPct = Math.min(rawStopLoss, MAX_STOP_LOSS_PCT) / 100;
+    }
+    const rawTakeProfit = finiteNumber(config.takeProfit);
+    if (rawTakeProfit == null || rawTakeProfit <= 0) {
+      if (config.takeProfit != null) invalid('takeProfit', '4.8%');
+      this.takeProfitPct = 0.048;
+    } else {
+      this.takeProfitPct = Math.min(rawTakeProfit, MAX_TAKE_PROFIT_PCT) / 100;
+    }
+
+    // ── Horizonte: inteiro em [1, 2520] dias úteis ───────────
+    const rawHorizon = Number(config.horizonDays);
+    if (config.horizonDays != null && (Number.isNaN(rawHorizon) || rawHorizon <= 0)) {
+      invalid('horizonDays', 35);
+      this.horizonDays = 35;
+    } else if (config.horizonDays == null) {
+      this.horizonDays = 35;
+    } else if (!Number.isFinite(rawHorizon)) {
+      this.horizonDays = rawHorizon > 0 ? MAX_HORIZON_DAYS : 35;
+    } else {
+      this.horizonDays = Math.min(MAX_HORIZON_DAYS, Math.max(1, Math.floor(rawHorizon)));
+    }
+
+    // ── Monte Carlo: inteiro em [1, 1_000_000] ───────────────
+    const rawIterations = Number(config.mcIterations);
+    if (config.mcIterations != null && (Number.isNaN(rawIterations) || rawIterations <= 0)) {
+      invalid('mcIterations', 1000);
+      this.mcIterations = 1000;
+    } else if (config.mcIterations == null) {
+      this.mcIterations = 1000;
+    } else if (!Number.isFinite(rawIterations)) {
+      this.mcIterations = rawIterations > 0 ? MAX_MC_ITERATIONS : 1000;
+    } else {
+      this.mcIterations = Math.min(MAX_MC_ITERATIONS, Math.max(1, Math.floor(rawIterations)));
+    }
+
+    // ── Win-rate mínima: percentagem em [0, 100] ─────────────
+    const rawMinMC = finiteNumber(config.minMCWinRate ?? config.minMC ?? config.mcMin);
+    this.minMCWinRate = rawMinMC == null ? 50 : Math.min(100, Math.max(0, rawMinMC));
+
+    // ── Direção: apenas long | short | both ──────────────────
+    const rawDirection = String(config.direction || 'long').trim().toLowerCase();
+    if (rawDirection === 'long' || rawDirection === 'short' || rawDirection === 'both') {
+      this.direction = rawDirection;
+    } else {
+      invalid('direction', 'long');
+      this.direction = 'long';
+    }
+
+    const rawRisk = finiteNumber(config.riskPerTradePct ?? config.risk);
+    this.riskPerTradePct = rawRisk != null && rawRisk > 0 ? rawRisk : this.positionAllocationPct * 100;
+
+    // ── Warm-up / janela de Markov: inteiros ≥ 0 / > 0 ───────
+    const rawWarmup = finiteNumber(config.warmup);
+    this.warmup = rawWarmup != null && rawWarmup >= 0 ? Math.floor(rawWarmup) : 200;
+    if (config.warmup != null && (rawWarmup == null || rawWarmup < 0)) invalid('warmup', 200);
+
+    const rawMarkovWindow = finiteNumber(config.markovWindow);
+    this.markovWindow = rawMarkovWindow != null && rawMarkovWindow > 0 ? Math.floor(rawMarkovWindow) : 150;
+
+    const rawMinMarkov = finiteNumber(config.markovMinPct);
+    this.minMarkovPct = rawMinMarkov == null ? 0 : Math.min(100, Math.max(0, rawMinMarkov));
+
+    const rawSeed = finiteNumber(config.mcSeed);
+    this.mcSeed = rawSeed != null ? rawSeed : undefined;
     this.mfeMaEEnabled = config.mfeMae !== false;
-    this.minOrderCapital = Number(config.minOrderCapital) || 50; // piso operacional por ordem
 
+    const rawMinOrder = finiteNumber(config.minOrderCapital);
+    this.minOrderCapital = rawMinOrder != null && rawMinOrder > 0 ? rawMinOrder : 50; // piso operacional por ordem
+
+    // ── Custos: finitos e ≥ 0 (percentagem como fornecida) ───
+    const rawCommission = finiteNumber(config.commissionPct ?? config.commission);
+    this.commissionPct = rawCommission != null && rawCommission >= 0 ? rawCommission : 0;
+    if (rawCommission != null && rawCommission < 0) invalid('commission', '0');
+    const rawSlippage = finiteNumber(config.slippagePct ?? config.slippage);
+    this.slippagePct = rawSlippage != null && rawSlippage >= 0 ? rawSlippage : 0;
+    if (rawSlippage != null && rawSlippage < 0) invalid('slippage', '0');
 
     this.openPositions = [];
     this.closedTrades = [];
     this.dailyEquityCurve = [];
-    this.messages = [];
+    this.messages = warnings;
   }
 
   /**
@@ -133,24 +242,38 @@ class PortfolioBacktester {
         }
         const candle = pos.candles[idx];
         pos.daysHeld += 1;
+        const isLong = pos.side !== 'SHORT';
         if (this.mfeMaEEnabled) {
-          const fav = ((candle.high - pos.entryPrice) / pos.entryPrice) * 100;
-          const adv = ((candle.low - pos.entryPrice) / pos.entryPrice) * 100;
+          const fav = isLong
+            ? ((candle.high - pos.entryPrice) / pos.entryPrice) * 100
+            : ((pos.entryPrice - candle.low) / pos.entryPrice) * 100;
+          const adv = isLong
+            ? ((candle.low - pos.entryPrice) / pos.entryPrice) * 100
+            : ((pos.entryPrice - candle.high) / pos.entryPrice) * 100;
           pos.mfe = Math.max(pos.mfe, fav);
           pos.mae = Math.min(pos.mae, adv);
         }
 
         let isClosed = false, exitPrice = 0, exitReason = '';
-        if (candle.high >= pos.tpPrice) { exitPrice = pos.tpPrice; exitReason = 'TAKE_PROFIT'; isClosed = true; }
-        else if (candle.low <= pos.slPrice) { exitPrice = pos.slPrice; exitReason = 'STOP_LOSS'; isClosed = true; }
-        else if (pos.daysHeld >= this.horizonDays) { exitPrice = candle.close; exitReason = 'EXPIRED_HORIZON'; isClosed = true; }
+        if (isLong) {
+          if (candle.high >= pos.tpPrice) { exitPrice = pos.tpPrice; exitReason = 'TAKE_PROFIT'; isClosed = true; }
+          else if (candle.low <= pos.slPrice) { exitPrice = pos.slPrice; exitReason = 'STOP_LOSS'; isClosed = true; }
+        } else {
+          // SHORT: TP abaixo do preço de entrada, SL acima (espelhado do LONG)
+          if (candle.low <= pos.tpPrice) { exitPrice = pos.tpPrice; exitReason = 'TAKE_PROFIT'; isClosed = true; }
+          else if (candle.high >= pos.slPrice) { exitPrice = pos.slPrice; exitReason = 'STOP_LOSS'; isClosed = true; }
+        }
+        if (!isClosed && pos.daysHeld >= this.horizonDays) {
+          exitPrice = candle.close; exitReason = 'EXPIRED_HORIZON'; isClosed = true;
+        }
 
         if (isClosed) {
-          const pnlPct = (exitPrice - pos.entryPrice) / pos.entryPrice;
+          const sign = pos.side === 'SHORT' ? -1 : 1;
+          const pnlPct = ((exitPrice - pos.entryPrice) / pos.entryPrice) * sign;
           const pnlEur = pos.investedAmount * pnlPct;
           this.cash += (pos.investedAmount + pnlEur); // devolve capital + PnL
           this.closedTrades.push({
-            ticker: pos.ticker, name: pos.name, side: 'LONG',
+            ticker: pos.ticker, name: pos.name, side: pos.side,
             entryDate: pos.entryDate, entryPrice: round2(pos.entryPrice),
             exitDate: currentDate, exitPrice: round2(exitPrice),
             reason: exitReason, exitReason,
@@ -174,7 +297,8 @@ class PortfolioBacktester {
       // ── PASSO 2: Equity mark-to-market ──────────────────────
       let openValue = 0;
       for (const pos of this.openPositions) {
-        const ret = (pos.currentPrice - pos.entryPrice) / pos.entryPrice;
+        const rawRet = (pos.currentPrice - pos.entryPrice) / pos.entryPrice;
+        const ret = pos.side === 'SHORT' ? -rawRet : rawRet;
         openValue += pos.investedAmount * (1 + ret);
       }
       const totalEquity = this.cash + openValue;
@@ -205,18 +329,23 @@ class PortfolioBacktester {
         candidates.sort((a, b) => b.evaluation.winRateMC - a.evaluation.winRateMC);
         const toOpen = candidates.slice(0, availableSlots);
         for (const cand of toOpen) {
+          const side = cand.evaluation.side === 'SHORT' ? 'SHORT' : 'LONG';
+          // Sem execução silenciosamente errada: respeita a direção configurada
+          // mesmo quando o gatekeeper é fornecido externamente (ex.: testes).
+          if (side === 'SHORT' && this.direction === 'long') continue;
+          if (side === 'LONG' && this.direction === 'short') continue;
           const allocation = Math.min(targetSlotCapital, this.cash);
           if (allocation < this.minOrderCapital) break; // sem liquidez mínima → aborta a entrada
           this.cash -= allocation;
           const entryPrice = cand.candle.close;
           const pos = {
-            ticker: cand.ticker, name: cand.name, side: 'LONG',
+            ticker: cand.ticker, name: cand.name, side,
             candles: cand.candles,
             entryDate: currentDate, entryPrice, currentPrice: entryPrice,
             investedAmount: allocation,
             shares: allocation / entryPrice,
-            slPrice: entryPrice * (1 - this.stopLossPct),
-            tpPrice: entryPrice * (1 + this.takeProfitPct),
+            slPrice: side === 'SHORT' ? entryPrice * (1 + this.stopLossPct) : entryPrice * (1 - this.stopLossPct),
+            tpPrice: side === 'SHORT' ? entryPrice * (1 - this.takeProfitPct) : entryPrice * (1 + this.takeProfitPct),
             daysHeld: 0, mfe: 0, mae: 0,
             mcWinRate: cand.evaluation.winRateMC, mcTier: cand.evaluation.mcTier
           };
@@ -231,11 +360,12 @@ class PortfolioBacktester {
       const lastDate = allCalendarDates.length ? allCalendarDates[allCalendarDates.length - 1] : null;
       for (const pos of this.openPositions) {
         const exitPrice = pos.currentPrice;
-        const pnlPct = (exitPrice - pos.entryPrice) / pos.entryPrice;
+        const sign = pos.side === 'SHORT' ? -1 : 1;
+        const pnlPct = ((exitPrice - pos.entryPrice) / pos.entryPrice) * sign;
         const pnlEur = pos.investedAmount * pnlPct;
         this.cash += (pos.investedAmount + pnlEur);
         this.closedTrades.push({
-          ticker: pos.ticker, name: pos.name, side: 'LONG',
+          ticker: pos.ticker, name: pos.name, side: pos.side,
           entryDate: pos.entryDate, entryPrice: round2(pos.entryPrice),
           exitDate: lastDate, exitPrice: round2(exitPrice),
           reason: 'FIM_PERIODO', exitReason: 'FIM_PERIODO',
@@ -368,6 +498,10 @@ async function runPortfolioSimulation(options = {}) {
     direction: params.direction || 'long',
     markovWindow: params.markovWindow,
     warmup: params.warmup,
+    mcIterations: params.mcIterations,
+    commission: params.commissionPct ?? params.commission,
+    slippage: params.slippagePct ?? params.slippage,
+    riskPerTradePct: params.riskPerTradePct ?? params.risk,
     mcSeed: params.mcSeed != null ? Number(params.mcSeed) : 42
   };
 

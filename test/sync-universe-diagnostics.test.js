@@ -223,8 +223,8 @@ test('main.js: classifySyncError distingue 429, 404 e timeout', () => {
   assert.match(block, /timeout|ETIMEDOUT|ECONNABORTED/, 'classificação de timeout');
 });
 
-test('main.js: loop sequencial totalPending e pace sleep(100) mantidos', () => {
-  assert.match(mainSrc, /for \(let i = 0; i < totalPending[,;)]/, 'sync-recent deve continuar sequencial');
+test('main.js: loop sequencial e pace sleep(100) mantidos na fila partilhada', () => {
+  assert.match(mainSrc, /for \(let i = 0; i < pendingQueue\.length[,;)]/, 'sync-recent deve continuar sequencial');
   assert.match(mainSrc, /await sleep\(100\)/, 'pace de 100ms entre tickers deve ser preservado');
 });
 
@@ -234,8 +234,8 @@ test('main.js: payload sync-all-done inclui updated, skipped e failedCount', () 
   const block = mainSrc.slice(idx, idx + 900);
   assert.match(block, /updated:/, 'contador de atualizados no payload');
   assert.match(block, /skipped:/, 'contador de ignorados no payload');
-  assert.match(block, /failedCount:\s*failedTickers\.length/, 'failedCount derivado das falhas');
-  assert.match(block, /failedTickers,/, 'lista de falhas viaja no payload');
+  assert.match(block, /failedCount:\s*summary\.failedTickers\.length/, 'failedCount derivado das falhas');
+  assert.match(block, /failedTickers:\s*summary\.failedTickers,/, 'lista de falhas viaja no payload');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

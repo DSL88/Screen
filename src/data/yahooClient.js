@@ -25,6 +25,11 @@ const sleep = ms => new Promise(res => setTimeout(res, ms));
 // substituindo os sleeps pré-fixos longos.
 const networkLimit = pLimit(5);
 
+// Pool dedicada para orquestradores de lote (syncTickersBatch com fetchMethod).
+// NÃO reutilizar `networkLimit` dentro de tasks do próprio limiter: p-limit não
+// é reentrante e o sync ficaria em deadlock quando a pool estivesse saturada.
+const batchLimit = pLimit(5);
+
 // Micro-stagger (50–120ms) apenas para dessincronizar rajadas de tickers
 // que arrancam em simultâneo dentro da própria pool. Não é rate limiting.
 const microStagger = () => sleep(50 + Math.floor(Math.random() * 70));
@@ -824,9 +829,11 @@ async function syncTickersBatch(tickers, options = {}) {
   // Comparação lexicográfica segura para datas 'YYYY-MM-DD'
   const normDay = d => (d ? String(d).slice(0, 10) : null);
 
-  // Spec 1.3: quando fetchMethod é fornecido, orquestração via networkLimit (5 simultâneos)
+  // Spec 1.3: quando fetchMethod é fornecido, orquestração via pool dedicada
+  // (5 simultâneos). As funções de rede finais já adquirem `networkLimit`
+  // internamente; reutilizar o mesmo limiter aqui causaria deadlock.
   if (hasFetchMethod) {
-    const tasks = list.map(ticker => networkLimit(async () => {
+    const tasks = list.map(ticker => batchLimit(async () => {
       try {
         const lastDateRaw = await getLastDate(ticker);
         const lastDate = normDay(lastDateRaw);

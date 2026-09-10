@@ -20,11 +20,16 @@ function sma(values, period) {
   if (n < period || period <= 0) return out;
 
   let sum = 0;
-  for (let i = 0; i < period; i++) sum += values[i];
+  for (let i = 0; i < period; i++) {
+    const v = Number(values[i]);
+    sum += Number.isFinite(v) ? v : 0;
+  }
   out[period - 1] = sum / period;
 
   for (let i = period; i < n; i++) {
-    sum += values[i] - values[i - period];
+    const incoming = Number(values[i]);
+    const outgoing = Number(values[i - period]);
+    sum += (Number.isFinite(incoming) ? incoming : 0) - (Number.isFinite(outgoing) ? outgoing : 0);
     out[i] = sum / period;
   }
   return out;
@@ -40,11 +45,15 @@ function ema(values, period) {
 
   const k = 2 / (period + 1);
   let seed = 0;
-  for (let i = 0; i < period; i++) seed += values[i];
+  for (let i = 0; i < period; i++) {
+    const v = Number(values[i]);
+    seed += Number.isFinite(v) ? v : 0;
+  }
   out[period - 1] = seed / period;
 
   for (let i = period; i < n; i++) {
-    out[i] = values[i] * k + out[i - 1] * (1 - k);
+    const v = Number(values[i]);
+    out[i] = (Number.isFinite(v) ? v : 0) * k + out[i - 1] * (1 - k);
   }
   return out;
 }
@@ -53,34 +62,30 @@ function ema(values, period) {
 //  StdDev – Population standard deviation (N divisor)
 //  Alinhado com ta.stdev() do TradingView (biased=true, default)
 //
-//  Sliding Window O(N): mantém soma e soma dos quadrados
-//  em tempo real, eliminando o loop aninhado O(N × period).
-//  Variância via E[X²] − (E[X])² com guarda numérica.
+//  Cálculo em DOIS PASSOS por janela (média e depois Σ(x−m)²):
+//  estável para valores de grande magnitude com variância pequena,
+//  onde E[X²] − E[X]² sofre cancelamento catastrófico.
 // ═══════════════════════════════════════════════════════════
 function stddev(values, period) {
   const n = values.length;
   const out = new Array(n).fill(null);
   if (n < period || period <= 0) return out;
 
-  let sum = 0;
-  let sumSq = 0;
-
-  for (let i = 0; i < period; i++) {
-    const v = values[i];
-    sum += v;
-    sumSq += v * v;
-  }
-
-  let mean = sum / period;
-  out[period - 1] = Math.sqrt(Math.max(0, sumSq / period - mean * mean));
-
-  for (let i = period; i < n; i++) {
-    const outgoing = values[i - period];
-    const incoming = values[i];
-    sum += incoming - outgoing;
-    sumSq += incoming * incoming - outgoing * outgoing;
-    mean = sum / period;
-    out[i] = Math.sqrt(Math.max(0, sumSq / period - mean * mean));
+  for (let i = period - 1; i < n; i++) {
+    const start = i - period + 1;
+    let sum = 0;
+    for (let j = start; j <= i; j++) {
+      const v = Number(values[j]);
+      sum += Number.isFinite(v) ? v : 0;
+    }
+    const mean = sum / period;
+    let ss = 0;
+    for (let j = start; j <= i; j++) {
+      const v = Number(values[j]);
+      const d = (Number.isFinite(v) ? v : 0) - mean;
+      ss += d * d;
+    }
+    out[i] = Math.sqrt(Math.max(0, ss / period));
   }
 
   return out;

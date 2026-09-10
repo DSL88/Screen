@@ -81,9 +81,9 @@ function findProfile(ticker) {
 }
 
 // Resolve o snapshot point-in-time: escolhe o registo fundamental
-// mais antigo <= year (fallback: mais próximo). `history` é uma
-// lista opcional de { year|date, currentRatio, debtEquity, roa,
-// earningsYield, fcfYield }.
+// mais recente com year <= year pedido. Sem snapshot anterior
+// devolve null (evita lookahead); `history` é uma lista opcional de
+// { year|date, currentRatio, debtEquity, roa, earningsYield, fcfYield }.
 function resolveSnapshot(history, year) {
   if (!Array.isArray(history) || history.length === 0) return null;
   const y = Number(year);
@@ -94,8 +94,7 @@ function resolveSnapshot(history, year) {
   for (const d of dated) {
     if (d.t <= y) best = d.h;
   }
-  if (best) return best;
-  return dated[0].h; // não há registo anterior: usa o mais antigo (sem lookahead futuro)
+  return best; // M3: sem registo <= year → null (sem lookahead futuro)
 }
 
 // Valida solvência a partir de um conjunto de rácios normalizado.

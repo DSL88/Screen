@@ -74,7 +74,8 @@ function evaluateEntrySignal(asset, i, cfg, fundamentalData) {
     side, order: cfg.markovOrder, prevState: result.prevState, stateSpace: cfg.stateSpace,
     seed: cfg.mcSeed
   });
-  if (!mc || mc.winRate < cfg.minWinRateMC) return null;
+  // M1: winRate não finito nunca pode passar o gate (NaN < min é false).
+  if (!mc || !Number.isFinite(mc.winRate) || mc.winRate < cfg.minWinRateMC) return null;
 
   return {
     side, winRateMC: mc.winRate, mcTier: mc.mcTier, atr: result.atr,

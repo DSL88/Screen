@@ -167,7 +167,19 @@
     if (ui.modal) ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) closeSimulationModal(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSimulationModal(); });
     const search = $('ws-trades-search');
-    if (search) search.addEventListener('input', () => renderTradesTable(activeSimulationReport ? activeSimulationReport.trades : []));
+    if (search) {
+      let tradesSearchDebounce = null;
+      search.addEventListener('input', () => {
+        // PENDENTE (A-01): paginação/virtualização do trade log para volumes
+        // muito grandes. Até lá, o filtro é debounced para não reconstruir o
+        // tbody inteiro a cada tecla.
+        if (tradesSearchDebounce) clearTimeout(tradesSearchDebounce);
+        tradesSearchDebounce = setTimeout(() => {
+          tradesSearchDebounce = null;
+          renderTradesTable(activeSimulationReport ? activeSimulationReport.trades : []);
+        }, 150);
+      });
+    }
     const exportBtn = $('btn-export-trades-csv');
     if (exportBtn) exportBtn.addEventListener('click', exportTradesCSV);
     if (ui.modal) {

@@ -36,6 +36,14 @@ function round1(v) { return Math.round((Number(v) || 0) * 10) / 10; }
 function round2(v) { return Math.round((Number(v) || 0) * 100) / 100; }
 function toTime(iso) { return new Date(String(iso).slice(0, 10) + 'T00:00:00Z').getTime(); }
 
+// A3/C1/C2: não-finitos/≤0 caem no default; restantes truncados e
+// limitados. Garante que `Infinity`/1e9 não sobrevivem ao payload.
+function clampInt(v, lo, hi, def) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return def;
+  return Math.min(hi, Math.max(lo, Math.floor(n)));
+}
+
 // ── Resolução de horizonte temporal ────────────────────────
 function resolveDates(params) {
   const endDate = String(params.endDate || '').slice(0, 10);
@@ -164,10 +172,10 @@ async function runWorkstationSimulation(options) {
     slippagePct: Number(params.slippagePct ?? params.slippage) || 0,
     warmup: Number(params.warmup) || DEFAULT_WARMUP,
     markovWindow: Number(params.markovWindow) || 150,
-    horizonDays: Number(params.horizonDays) || 5,
+    horizonDays: clampInt(params.horizonDays, 1, 504, 5),
     markovOrder: Number(params.markovOrder) === 2 ? 2 : 1,
     stateSpace: STATE_SPACES_SET.has(String(params.stateSpace)) ? String(params.stateSpace) : '9',
-    mcIterations: Number(params.mcIterations) || MC_ITERATIONS,
+    mcIterations: clampInt(params.mcIterations, 1, 1_000_000, MC_ITERATIONS),
     mcSeed: Number(params.mcSeed) != null ? Number(params.mcSeed) : 42,
     ffdD: Number(params.ffdD) || 0.4,
     parallelWorkers: Number(params.parallelWorkers) || undefined,

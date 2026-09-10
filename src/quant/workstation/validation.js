@@ -54,6 +54,15 @@ function sharpeRatio(returns) {
   return (mean(returns) / s) * Math.sqrt(TRADING_DAYS);
 }
 
+// C3: Sharpe por-período (NÃO anualizado). O DSR usa a mesma
+// frequência em srHat, srStd e benchmark; misturar srHat anualizado
+// com srStd por-período inflava o z-score e saturava o DSR em 1.
+function sharpePerPeriod(returns) {
+  const s = stdev(returns);
+  if (returns.length < 2 || s === 0) return 0;
+  return mean(returns) / s;
+}
+
 // ── Deflated Sharpe Ratio (probabilidade, 0..1) ────────────
 //    sr_hat observada vs benchmark esperado dado n_trials,
 //    ajustado a assimetria e curtose.
@@ -62,7 +71,7 @@ function deflatedSharpeRatio(returns, nTrials = 10, expectedSR = 0) {
   const T = arr.length;
   if (T < 2) return 0;
 
-  const srHat = sharpeRatio(arr);
+  const srHat = sharpePerPeriod(arr);
   const sk = skewness(arr);
   const ku = kurtosis(arr); // total (excess + 3)
 
@@ -150,7 +159,7 @@ function pboFromCPCV(isMatrix, oosMatrix) {
 function validateStrategy(dailyReturns, { nGroups = 5, kTestGroups = 2, nTrials = 10 } = {}) {
   const r = Array.isArray(dailyReturns) ? dailyReturns.filter(x => Number.isFinite(x)) : [];
   if (r.length < nGroups * 4) {
-    return { valid: false, dsr: 0, pbo: 0, sharpeOOS: sharpeRatio(r), nCombinations: 0, isApproved: false, reason: 'Amostra insuficiente para CPCV' };
+    return { valid: false, dsr: 0, pbo: null, sharpeOOS: sharpeRatio(r), nCombinations: 0, isApproved: false, reason: 'Amostra insuficiente para CPCV' };
   }
   const isSharpes = [];
   const oosSharpes = [];
@@ -167,16 +176,22 @@ function validateStrategy(dailyReturns, { nGroups = 5, kTestGroups = 2, nTrials 
   }
   const meanOos = mean(oosSharpes.map(x => x[0]));
   const dsr = deflatedSharpeRatio(oosFlat.length > 1 ? oosFlat : r, nTrials);
-  const pbo = nCombos >= 2 && isSharpes[0].length >= 2 ? pboFromCPCV(isSharpes, oosSharpes) : 0;
+  // C4: PBO exige ≥2 estratégias por combinação. Com uma única
+  // estratégia a matriz IS/OOS é degenerada e o PBO não é
+  // estimável — devolve null em vez de fabricar 0.
+  const pbo = nCombos >= 2 && isSharpes[0].length >= 2 ? pboFromCPCV(isSharpes, oosSharpes) : null;
   return {
     valid: true,
     nCombinations: nCombos,
     sharpeOOS: round2(meanOos),
     dsr: round4(dsr),
     dsrPercent: round2(dsr * 100),
-    pbo: round4(pbo),
-    pboPercent: round1(pbo * 100),
-    isApproved: dsr > 0.95 && pbo < 0.30
+    pbo: pbo == null ? null : round4(pbo),
+    pboPercent: pbo == null ? null : round1(pbo * 100),
+    // Comportamento documentado: o gate `pbo < 0.30` só é aplicado
+    // quando o PBO é estimável; sem matriz multi-estratégia a
+    // aprovação depende apenas do DSR.
+    isApproved: dsr > 0.95 && (pbo == null || pbo < 0.30)
   };
 }
 

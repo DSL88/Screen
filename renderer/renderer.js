@@ -524,7 +524,8 @@
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function iconSvg(name, cls = '') {
@@ -2166,7 +2167,16 @@
     }
   }
 
+  let rowAppendBuffer = null;
+  let rowFlushScheduled = false;
+  let rowPlaceholdersCleared = false;
+  let renderedRowCount = 0;
+
   function clearTable() {
+    rowAppendBuffer = null;
+    rowFlushScheduled = false;
+    rowPlaceholdersCleared = false;
+    renderedRowCount = 0;
     renderSkeletonRows('results-body', 13, 6);
     scannerRows = []; // Limpar dados armazenados
     currentSort = { column: null, direction: 'asc' }; // Reset ordenação
@@ -2179,27 +2189,52 @@
     return r.mcTier === 'ELITE' || (r.mcWinRate != null && r.mcWinRate >= 65);
   }
 
+  function flushRowBuffer() {
+    rowFlushScheduled = false;
+    if (!rowAppendBuffer) return;
+    const fragment = rowAppendBuffer;
+    rowAppendBuffer = null;
+    body.appendChild(fragment);
+  }
+
+  function scheduleRowFlush() {
+    if (rowFlushScheduled) return;
+    rowFlushScheduled = true;
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(flushRowBuffer);
+    } else {
+      setTimeout(flushRowBuffer, 16);
+    }
+  }
+
   function appendRow(r) {
-    const placeholders = body.querySelectorAll('tr.empty, tr.skeleton-row');
-    if (placeholders.length) placeholders.forEach(el => el.remove());
-    
+    // Os placeholders são removidos no máximo uma vez por scan, em vez de
+    // um querySelectorAll sobre o tbody inteiro por cada linha recebida.
+    if (!rowPlaceholdersCleared) {
+      rowPlaceholdersCleared = true;
+      const placeholders = body.querySelectorAll('tr.empty, tr.skeleton-row');
+      if (placeholders.length) placeholders.forEach(el => el.remove());
+    }
+
     scannerRows.push(r);
-    
-    if (!currentSort.column) {
-      if (passesMcFilter(r)) {
-        renderRowToDOM(r, body.children.length);
-      }
+
+    if (!currentSort.column && passesMcFilter(r)) {
+      renderedRowCount++;
+      if (!rowAppendBuffer) rowAppendBuffer = document.createDocumentFragment();
+      rowAppendBuffer.appendChild(renderRowToDOM(r, renderedRowCount));
+      scheduleRowFlush();
     }
   }
   
   function renderRowToDOM(r, index) {
+    const safeDirection = r.direction === 'VENDA' ? 'VENDA' : r.direction === 'COMPRA' ? 'COMPRA' : '—';
     const tr = document.createElement('tr');
     tr.className = 'flash-in';
     tr.innerHTML = `
       <td class="col-idx">${index}</td>
       <td class="col-ticker ticker">${escapeHtml(r.ticker)}</td>
       <td class="col-name name">${escapeHtml(r.name || '')}</td>
-      <td class="col-dir"><span class="dir-badge dir-${r.direction}">${r.direction}</span></td>
+      <td class="col-dir"><span class="dir-badge dir-${safeDirection}">${safeDirection}</span></td>
       <td class="col-num edge-val">${(r.edge * 100).toFixed(2)}%</td>
       <td class="col-num pStay-val">${(r.pStay * 100).toFixed(2)}%</td>
       <td class="col-vol ${r.volumeValid ? 'vol-yes' : 'vol-no'}">${r.volumeValid ? 'SIM' : 'NÃO'}</td>
@@ -2232,9 +2267,8 @@
         ];
         return '<span class="mc-pill ' + tierClass + '" data-mc-tooltip="' + escapeHtml(tooltipLines.join('\\n')) + '" style="cursor:default">MC: ' + Math.round(wr) + '% (' + tierLabel + ')</span>';
       })() : '—'}</td>
-      <td class="col-action"><button class="btn-investir" data-ticker="${escapeHtml(r.ticker)}" data-nome="${escapeHtml(r.name || '')}" data-direcao="${escapeHtml(r.direction)}" data-preco="${r.close}" data-stop="${r.stopLoss}" data-tp="${r.takeProfit}">Investir</button></td>
+      <td class="col-action"><button class="btn-investir" data-ticker="${escapeHtml(r.ticker)}" data-nome="${escapeHtml(r.name || '')}" data-direcao="${escapeHtml(safeDirection)}" data-preco="${r.close}" data-stop="${r.stopLoss}" data-tp="${r.takeProfit}">Investir</button></td>
     `;
-    body.appendChild(tr);
     tr.querySelector('.btn-investir').addEventListener('click', (e) => {
       e.stopPropagation();
       const btn = e.currentTarget;
@@ -2251,22 +2285,28 @@
       if (e.target.closest('.btn-investir')) return;
       if (r && r.ticker) openAssetDetailModal(r.ticker);
     });
+    return tr;
   }
   
   function renderAllRows() {
     body.innerHTML = '';
+    rowAppendBuffer = null; // descarta lote pendente: as linhas estão em scannerRows
     if (scannerRows.length === 0) {
       body.innerHTML = emptyStateRowHtml(12, 'search', 'Sem resultados', 'Aguardando execução do scanner...');
+      renderedRowCount = 0;
       return;
     }
-    
+
+    const fragment = document.createDocumentFragment();
     let rowIndex = 0;
     scannerRows.forEach((r) => {
       if (passesMcFilter(r)) {
         rowIndex++;
-        renderRowToDOM(r, rowIndex);
+        fragment.appendChild(renderRowToDOM(r, rowIndex));
       }
     });
+    renderedRowCount = rowIndex;
+    body.appendChild(fragment);
   }
   
   function sortByDirection() {
@@ -2542,7 +2582,14 @@
     btnFirstRegisto.addEventListener('click', async (e) => {
       e?.preventDefault?.();
       if (typeof openFirstRecordChoiceModal === 'function') {
-        openFirstRecordChoiceModal();
+        // O botão "1º Registo" abre SEMPRE o modal de escolha (Preços /
+        // Dividendos / Ambos). Nunca cai silenciosamente no fluxo legado.
+        try {
+          openFirstRecordChoiceModal();
+        } catch (openErr) {
+          console.error('[1º Registo] Falha ao abrir o modal de escolha:', openErr);
+          showToast('Não foi possível abrir as opções do 1º Registo.', 'error');
+        }
         return;
       }
       if (isSyncingFirstRegisto) return;
@@ -2622,6 +2669,23 @@
   // --- Mais Recente (sincronizar até à última sessão de mercado) ---
   let isSyncingRecent = false;
   let syncRunningInBackground = false;
+  let syncRecentProgressCleanup = null;
+
+  // Remove o listener de SYNC_RECENT_PROGRESS assim que o fluxo termina
+  // (foreground) ou quando chega o sync-all-done (background). Idempotente:
+  // cliques repetidos não podem acumular listeners.
+  function cleanupSyncRecentProgressListener() {
+    const cleanup = syncRecentProgressCleanup;
+    syncRecentProgressCleanup = null;
+    if (typeof cleanup === 'function') {
+      try {
+        cleanup();
+      } catch (err) {
+        console.warn('Falha ao remover listener de progresso do sync:', err);
+      }
+    }
+  }
+
   async function handleSyncAllRecent() {
     if (isSyncingRecent || syncRunningInBackground) return;
     isSyncingRecent = true;
@@ -2694,12 +2758,14 @@
         if (indexBulkProgressFill) indexBulkProgressFill.style.width = pct + '%';
       };
 
+      cleanupSyncRecentProgressListener();
       let cleanupProgress = null;
       if (window.electronAPI && window.electronAPI.onSyncRecentProgress) {
         cleanupProgress = window.electronAPI.onSyncRecentProgress(progressHandler);
       } else if (window.api && window.api.onSyncRecentProgress) {
         cleanupProgress = window.api.onSyncRecentProgress(progressHandler);
       }
+      syncRecentProgressCleanup = typeof cleanupProgress === 'function' ? cleanupProgress : null;
 
       const downloadFn = (window.electronAPI && window.electronAPI.syncStartDownload)
         || (window.api && window.api.syncStartDownload);
@@ -2738,6 +2804,7 @@
       if (typeof status !== 'undefined' && status) status.textContent = 'Erro na sincronização: ' + (err.message || String(err));
     } finally {
       if (!syncRunningInBackground) {
+        cleanupSyncRecentProgressListener();
         isSyncingRecent = false;
         if (btn) btn.disabled = false;
         mostRecentActive = false;
@@ -2799,10 +2866,10 @@
         const freshness = await window.api.checkListFreshness(null);
         if (freshness && freshness.ok && !freshness.isUpdated && freshness.outdatedTickers && freshness.outdatedTickers.length > 0) {
           const expectedDateFormatted = freshness.expectedDate
-            ? freshness.expectedDate.split('-').reverse().join('-')
+            ? escapeHtml(String(freshness.expectedDate).split('-').reverse().join('-'))
             : '—';
           const maxDateFormatted = freshness.maxStoredDate
-            ? freshness.maxStoredDate.split('-').reverse().join('-')
+            ? escapeHtml(String(freshness.maxStoredDate).split('-').reverse().join('-'))
             : '—';
           freshnessBannerMessage.innerHTML =
             `${iconSvg('alert-triangle')} A sua base de dados local tem cotações pendentes de atualização ` +
@@ -3931,7 +3998,27 @@
     renderModalState(!!(summary && summary.hasData), summary || {});
   }
 
-  async function openAssetDetailModal(ticker) {
+  // Mostra atomicamente o backdrop e o cartão interior do modal de detalhe.
+  // O cartão herda `hidden`/`display:none` do fecho anterior, pelo que abrir
+  // apenas o backdrop deixaria o ecrã preso na máscara escura.
+  function showStockModal() {
+    const backdrop = document.getElementById('modal-asset-detail') || modalAssetDetail;
+    const card = document.getElementById('stock-detail-modal') ||
+                 (backdrop ? backdrop.querySelector('.modal-asset-detail') : null);
+
+    if (backdrop) {
+      backdrop.classList.remove('hidden');
+      backdrop.hidden = false;
+      backdrop.style.display = 'flex';
+    }
+    if (card) {
+      card.classList.remove('hidden');
+      card.hidden = false;
+      card.style.display = '';
+    }
+  }
+
+  async function openAssetDetailModalInternal(ticker) {
     if (!modalAssetDetail || !ticker) return;
     const cleanTicker = String(ticker).toUpperCase().trim();
 
@@ -4016,9 +4103,7 @@
     if (uploadZone) uploadZone.style.display = 'none';
     if (historySummaryZone) historySummaryZone.style.display = 'none';
 
-    modalAssetDetail.hidden = false;
-    modalAssetDetail.style.display = '';
-    modalAssetDetail.classList.remove('hidden');
+    showStockModal();
     attachModalEnterKeyListeners();
 
     // 4. Query IPC database for currentAssetTicker specifically
@@ -4100,15 +4185,36 @@
     }
   }
 
+  // Wrapper estritamente seguro: qualquer falha inesperada (mesmo síncrona ou
+  // fora dos try/catch internos) liberta de imediato o backdrop/preço, para
+  // que o ecrã nunca fique bloqueado pela máscara escura.
+  async function openAssetDetailModal(ticker) {
+    try {
+      await openAssetDetailModalInternal(ticker);
+    } catch (error) {
+      console.error(`[Erro ao abrir modal do ativo ${ticker}]:`, error);
+      closeStockModal();
+      if (typeof showToast === 'function') {
+        showToast(`Erro ao carregar ativo ${ticker}: ${error.message}`, 'error');
+      } else {
+        alert(`Não foi possível abrir o ativo ${ticker}: ${error.message}`);
+      }
+    }
+  }
+
   function renderStockPriceBox(data) {
     const closeElem = document.getElementById('modal-latest-close');
     const adjElem = document.getElementById('modal-latest-adjclose');
     const sessionDateElem = document.getElementById('modal-latest-session-date');
     if (!closeElem) return;
 
-    if (data && data.latestPrice && data.latestPrice.close !== null && data.latestPrice.close !== undefined) {
-      const rawClose = Number(data.latestPrice.close);
-      const adjClose = Number(data.latestPrice.adjclose !== undefined && data.latestPrice.adjclose !== null ? data.latestPrice.adjclose : rawClose);
+    const latest = data && data.latestPrice ? data.latestPrice : null;
+    const rawClose = latest ? Number(latest.close) : NaN;
+    const hasPrice = !!latest && latest.close !== null && latest.close !== undefined && Number.isFinite(rawClose);
+
+    if (hasPrice) {
+      const rawAdj = latest.adjclose !== undefined && latest.adjclose !== null ? Number(latest.adjclose) : rawClose;
+      const adjClose = Number.isFinite(rawAdj) ? rawAdj : rawClose;
 
       closeElem.textContent = `${rawClose.toFixed(2)}`;
 
@@ -4121,7 +4227,7 @@
         }
       }
 
-      if (sessionDateElem) sessionDateElem.textContent = formatDate(data.latestPrice.date);
+      if (sessionDateElem) sessionDateElem.textContent = formatDate(latest.date);
     } else {
       closeElem.textContent = 'Sem Cotação';
       if (adjElem) adjElem.textContent = '';
@@ -4129,90 +4235,104 @@
     }
   }
 
+  // Abertura estritamente segura do modal do ativo: valida a resposta IPC,
+  // preenche campos de forma defensiva e exibe backdrop + cartão em conjunto.
+  // Em qualquer falha, o backdrop é removido de imediato (nunca fica preso).
   async function openStockDetailModal(ticker) {
-    const api = window.electronAPI || window.api;
-    if (!api || typeof api.getStockDetails !== 'function') return;
-    const res = await api.getStockDetails(ticker);
-    if (!res || !res.success || !res.data) return;
+    if (!ticker) return;
 
-    const data = res.data;
-    currentModalStock = data;
-    currentAssetTicker = data.ticker || ticker;
+    const modalBackdrop = document.getElementById('modal-asset-detail') || modalAssetDetail;
+    const modalCard = document.getElementById('stock-detail-modal') ||
+                      (modalBackdrop ? modalBackdrop.querySelector('.modal-asset-detail') : null);
 
-    // Preenchimento dos campos cadastrais existentes
-    if (document.getElementById('edit-stock-name')) {
-      document.getElementById('edit-stock-name').value = data.name || '';
-    }
-    if (document.getElementById('edit-stock-country')) {
-      document.getElementById('edit-stock-country').value = data.country || '';
-    }
-    if (document.getElementById('edit-stock-index')) {
-      document.getElementById('edit-stock-index').value = data.index_name || '';
-    }
-    if (document.getElementById('display-stock-name')) {
-      document.getElementById('display-stock-name').textContent = `Nome: ${data.name || data.ticker}`;
-    }
-    if (document.getElementById('display-stock-country')) {
-      document.getElementById('display-stock-country').textContent = `País: ${data.country || '--'}`;
-    }
-    if (document.getElementById('display-stock-index')) {
-      document.getElementById('display-stock-index').textContent = `Índice: ${data.index_name || '--'}`;
+    if (!modalBackdrop && !modalCard) {
+      console.error('[Modal] Elemento #stock-detail-modal não existe no DOM.');
+      return;
     }
 
-    // Datas e velas
-    if (document.getElementById('modal-first-date')) {
-      document.getElementById('modal-first-date').textContent = formatDate(data.first_date);
-    }
-    if (document.getElementById('modal-last-date')) {
-      document.getElementById('modal-last-date').textContent = formatDate(data.last_date);
-    }
-    if (document.getElementById('modal-total-candles')) {
-      document.getElementById('modal-total-candles').textContent = Number(data.total_candles || 0).toLocaleString();
-    }
+    try {
+      // 1. Consulta segura dos detalhes via IPC
+      const api = window.electronAPI || window.api;
+      if (!api || typeof api.getStockDetails !== 'function') {
+        throw new Error('API getStockDetails indisponível.');
+      }
 
-    // Preenchimento do Preço de Fecho da Sessão
-    renderStockPriceBox(data);
+      const cleanTicker = String(ticker).trim().toUpperCase();
+      const res = await api.getStockDetails(cleanTicker);
 
-    // Exibe o modal e o backdrop
-    const modal = document.getElementById('stock-detail-modal') || document.getElementById('stock-modal') || modalAssetDetail;
-    const backdrop = document.getElementById('modal-asset-detail') || modalAssetDetail;
-    if (backdrop) {
-      backdrop.classList.remove('hidden');
-      backdrop.style.display = 'flex';
-      backdrop.hidden = false;
-    }
-    if (modal) {
-      modal.classList.remove('hidden');
-      modal.style.display = '';
-      modal.hidden = false;
+      if (!res || (!res.success && !res.ok) || !res.data) {
+        throw new Error((res && res.error) || 'Não foi possível carregar os detalhes do ativo.');
+      }
+
+      const data = res.data || {};
+      currentModalStock = data;
+      currentAssetTicker = data.ticker || cleanTicker;
+      currentModalActiveTicker = currentAssetTicker;
+
+      // 2. Preenchimento defensivo dos campos de metadados
+      const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.value = val !== undefined && val !== null ? val : '';
+      };
+
+      const setText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text !== undefined && text !== null ? text : '--';
+      };
+
+      setText('asset-detail-ticker', data.ticker || cleanTicker);
+      setText('asset-detail-name', data.name || '');
+      setVal('edit-stock-name', data.name || '');
+      setVal('edit-stock-country', data.country || '');
+      setVal('edit-stock-index', data.index_name || '');
+      setText('display-stock-name', `Nome: ${data.name || data.ticker || cleanTicker}`);
+      setText('display-stock-country', `País: ${data.country || '--'}`);
+      setText('display-stock-index', `Índice: ${data.index_name || '--'}`);
+
+      setText('modal-first-date', formatDate(data.first_date));
+      setText('modal-last-date', formatDate(data.last_date));
+      setText('modal-total-candles', Number(data.total_candles || 0).toLocaleString());
+
+      // 3. Preenchimento do preço de fecho com proteção contra nulos
+      renderStockPriceBox(data);
+
+      // 4. Exibição coordenada e atómica (backdrop + cartão interior)
+      showStockModal();
+      attachModalEnterKeyListeners();
+    } catch (error) {
+      console.error(`[Erro ao abrir modal do ativo ${ticker}]:`, error);
+
+      // GARANTIA: se houver erro, remove imediatamente o backdrop para não congelar o ecrã
+      closeStockModal();
+
+      if (typeof showToast === 'function') {
+        showToast(`Erro ao carregar ativo ${ticker}: ${error.message}`, 'error');
+      } else {
+        alert(`Não foi possível abrir o ativo ${ticker}: ${error.message}`);
+      }
     }
   }
 
   function formatDate(isoStr) {
-    if (!isoStr) return '--';
-    const parts = String(isoStr).slice(0, 10).split('-');
-    return parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : isoStr;
+    if (isoStr === null || isoStr === undefined || isoStr === '') return '--';
+    const str = String(isoStr);
+    const parts = str.slice(0, 10).split('-');
+    return parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : str;
   }
 
   function closeStockModal() {
-    // 1. Identificar todos os possíveis elementos do modal e backdrop no DOM
-    const modal = document.getElementById('stock-detail-modal') || 
-                  document.querySelector('.modal-stock-details') ||
-                  document.getElementById('modal-stock-detail') ||
-                  document.getElementById('modal-asset-detail') ||
-                  modalAssetDetail;
-                  
+    // 1. Identificar todas as camadas de overlay ativas no DOM
     const backdrops = document.querySelectorAll(
       '.modal-backdrop, #modal-asset-detail, #drawer-stochastic-backdrop, #drawer-backdrop, .drawer-backdrop, [id*="backdrop"]'
     );
 
-    // 2. Ocultar e limpar classes do contentor principal
-    if (modal) {
-      modal.classList.add('hidden');
-      modal.classList.remove('open', 'active');
-      modal.style.display = 'none';
-      modal.hidden = true;
-    }
+    // 2. Forçar a ocultação de TODAS as camadas de overlay ativas
+    backdrops.forEach(backdrop => {
+      backdrop.classList.add('hidden');
+      backdrop.classList.remove('open', 'active');
+      backdrop.style.display = 'none';
+      backdrop.hidden = true;
+    });
 
     if (modalAssetDetail) {
       modalAssetDetail.classList.add('hidden');
@@ -4221,12 +4341,18 @@
       modalAssetDetail.hidden = true;
     }
 
-    // 3. Forçar a ocultação de TODAS as camadas de overlay ativas
-    backdrops.forEach(backdrop => {
-      backdrop.classList.add('hidden');
-      backdrop.classList.remove('open', 'active');
-      backdrop.style.display = 'none';
-      backdrop.hidden = true;
+    // 3. Repor o cartão interior no estado visível padrão. Sem este reset, o
+    // `hidden`/`display:none` do fecho anterior era herdado na abertura
+    // seguinte, deixando o ecrã preso apenas na máscara escura.
+    const modalCards = document.querySelectorAll(
+      '#stock-detail-modal, .modal-stock-details, #modal-stock-detail, .modal.modal-asset-detail'
+    );
+    modalCards.forEach(card => {
+      if (card === modalAssetDetail || card.classList.contains('modal-backdrop')) return;
+      card.classList.remove('hidden');
+      card.classList.remove('open', 'active');
+      card.style.display = '';
+      card.hidden = false;
     });
 
     // 4. Limpar referência global do ativo inspecionado
@@ -4839,6 +4965,12 @@
   const btnChoicePrices = document.getElementById('btn-choice-prices-only');
   const btnChoiceDividends = document.getElementById('btn-choice-dividends-only');
   const btnChoiceBoth = document.getElementById('btn-choice-both');
+  // Impede execuções concorrentes do mesmo lote (proteção anti-429).
+  let batchDownloadInProgress = false;
+
+  function isFirstRecordChoiceOpen() {
+    return !!(modalChoice && !modalChoice.classList.contains('hidden'));
+  }
 
   function openFirstRecordChoiceModal() {
     if (!modalChoice) return;
@@ -4879,20 +5011,42 @@
     modalChoice.querySelectorAll('.choice-option-btn').forEach(btn => btn.disabled = false);
 
     modalChoice.classList.remove('hidden');
+    modalChoice.hidden = false;
     modalChoice.style.display = 'flex';
   }
 
   function closeFirstRecordChoiceModal() {
-    if (modalChoice) {
-      modalChoice.classList.add('hidden');
-      modalChoice.style.display = 'none';
-    }
+    if (!modalChoice) return;
+    modalChoice.classList.add('hidden');
+    modalChoice.hidden = true;
+    modalChoice.style.display = 'none';
+    // Nenhum overlay residual pode ficar a bloquear a interface.
+    modalChoice.style.pointerEvents = '';
   }
 
   if (btnCloseChoice) btnCloseChoice.addEventListener('click', closeFirstRecordChoiceModal);
   if (btnCancelChoice) btnCancelChoice.addEventListener('click', closeFirstRecordChoiceModal);
 
+  // Fechar ao clicar fora do cartão (no backdrop escuro)
+  if (modalChoice) {
+    modalChoice.addEventListener('click', (e) => {
+      if (e.target === modalChoice) closeFirstRecordChoiceModal();
+    });
+  }
+
+  // Fechar com a tecla Escape (só quando este modal está aberto, sem interferir
+  // com as guardas globais do modal de detalhe do ativo).
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isFirstRecordChoiceOpen()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      closeFirstRecordChoiceModal();
+    }
+  });
+
   async function executeBatchDownload(mode) {
+    if (batchDownloadInProgress) return;
+
     const selectedIndex = (typeof getSelectedIndexDbName === 'function' ? getSelectedIndexDbName() : null)
       || (document.getElementById('select-index-bulk-fetch')?.value)
       || (document.getElementById('select-index')?.value)
@@ -4904,6 +5058,7 @@
     const optionButtons = modalChoice ? modalChoice.querySelectorAll('.choice-option-btn') : [];
 
     // Bloquear botões enquanto descarrega
+    batchDownloadInProgress = true;
     optionButtons.forEach(b => b.disabled = true);
     if (progressBox) {
       progressBox.classList.remove('hidden');
@@ -4913,18 +5068,26 @@
     if (statusText) statusText.textContent = 'A auditar ativos no SQLite...';
     if (progressBar) progressBar.style.width = '0%';
 
+    let completed = false;
     try {
       const api = window.electronAPI || window.api;
+      if (!api || typeof api.syncIndexDataBatch !== 'function') {
+        throw new Error('Canal IPC syncIndexDataBatch indisponível.');
+      }
+
       const result = await api.syncIndexDataBatch({
         indexFilter: selectedIndex,
         mode: mode // 'PRICES_ONLY', 'DIVIDENDS_ONLY' ou 'BOTH'
       });
 
       if (result && result.success) {
+        completed = true;
         if (statusText) statusText.textContent = `✅ Concluído! ${result.updatedCount} ativos processados.`;
+        if (counterText && result.total) counterText.textContent = `${result.updatedCount} / ${result.total}`;
         if (progressBar) progressBar.style.width = '100%';
 
         setTimeout(async () => {
+          batchDownloadInProgress = false;
           closeFirstRecordChoiceModal();
           if (typeof reloadMyListFromDatabase === 'function') await reloadMyListFromDatabase();
           if (typeof refreshIndexStatusBadge === 'function') await refreshIndexStatusBadge();
@@ -4933,13 +5096,19 @@
         }, 900);
       } else {
         const errMsg = (result && (result.message || result.error)) || 'Aviso durante o download';
+        if (statusText) statusText.textContent = `⚠️ ${errMsg}`;
         alert(`Aviso durante o download: ${errMsg}`);
-        optionButtons.forEach(b => b.disabled = false);
       }
     } catch (err) {
       console.error('Erro na sincronização em lote:', err);
-      if (statusText) statusText.textContent = '❌ Erro durante o processo.';
-      optionButtons.forEach(b => b.disabled = false);
+      if (statusText) statusText.textContent = '❌ Erro: ' + (err.message || String(err));
+    } finally {
+      // Em caso de sucesso os botões permanecem bloqueados até o modal fechar;
+      // em qualquer falha voltam a ficar disponíveis para nova tentativa.
+      if (!completed) {
+        batchDownloadInProgress = false;
+        optionButtons.forEach(b => b.disabled = false);
+      }
     }
   }
 
@@ -5145,6 +5314,8 @@
 
   subscribeApiEvent('on', 'sync-all-done', async (p) => {
     if (!p) return;
+    // Caminho de background: o listener de progresso só é removido aqui.
+    cleanupSyncRecentProgressListener();
     syncRunningInBackground = false;
     isSyncingRecent = false;
     mostRecentActive = false;
@@ -5504,6 +5675,7 @@
   // function per subscription, so a reopened/hot-reloaded window cannot
   // accumulate callbacks or update detached DOM.
   window.addEventListener('beforeunload', () => {
+    cleanupSyncRecentProgressListener();
     for (const unsubscribe of apiUnsubscribers.splice(0)) {
       try { unsubscribe(); } catch (_) { /* window is already closing */ }
     }
@@ -5565,6 +5737,10 @@
 
       const winRate = Number(asset.mc_win_rate || asset.winRateMC || asset.win_rate_numeric || 50.0);
       const tierLevel = asset.tier?.level || (winRate >= 70 ? 'Extrema' : winRate >= 65 ? 'Muito Forte' : winRate >= 60 ? 'Forte' : winRate >= 50 ? 'Moderada' : 'Fraca');
+      const safeTicker = escapeHtml(asset.ticker || '');
+      const safeName = escapeHtml(asset.name || asset.ticker || '');
+      const safeSector = escapeHtml(asset.sector || 'Outros');
+      const safeTierLevel = escapeHtml(tierLevel);
 
       const money = (value) => (typeof window.formatPriceWithCurrency === 'function'
         ? window.formatPriceWithCurrency(value, asset)
@@ -5590,16 +5766,16 @@
         <td style="padding: 8px 10px; text-align: center; font-weight: 700; font-size: 11px; color: ${rank <= 3 ? '#38bdf8' : '#64748b'};">#${rank}</td>
         <td style="padding: 8px 12px; text-align: center;">${directionBadge}</td>
         <td style="padding: 8px 12px;">
-          <div style="font-weight: 700; color: #ffffff;">${asset.ticker}</div>
-          <div style="font-size: 10px; color: #64748b; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${asset.name || asset.ticker}">${asset.name || asset.ticker}</div>
+          <div style="font-weight: 700; color: #ffffff;">${safeTicker}</div>
+          <div style="font-size: 10px; color: #64748b; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${safeName}">${safeName}</div>
         </td>
-        <td style="padding: 8px 12px; color: #94a3b8;">${asset.sector || 'Outros'}</td>
+        <td style="padding: 8px 12px; color: #94a3b8;">${safeSector}</td>
         <td style="padding: 8px 12px; text-align: right; color: #f1f5f9; font-variant-numeric: tabular-nums;">${money(price)}</td>
         <td style="padding: 8px 12px; text-align: right; color: #34d399; font-weight: 600; font-variant-numeric: tabular-nums;">${money(targetPrice)}</td>
         <td style="padding: 8px 12px; text-align: right; color: #f87171; font-weight: 600; font-variant-numeric: tabular-nums;">${money(stopPrice)}</td>
         <td style="padding: 8px 12px; text-align: center;">
           <span style="background: rgba(37, 99, 235, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 3px 10px; border-radius: 9999px; font-size: 11px; font-weight: 600;">
-            ${winRate.toFixed(1)}% ${tierLevel}
+            ${winRate.toFixed(1)}% ${safeTierLevel}
           </span>
         </td>
         <td style="padding: 8px 12px; text-align: right; color: #cbd5e1; font-variant-numeric: tabular-nums;">
@@ -6006,6 +6182,8 @@
   window.drawMonteCarloSimulation = drawMonteCarloSimulation;
   window.openStockDetailModal = openStockDetailModal;
   window.closeStockModal = closeStockModal;
+  window.openFirstRecordChoiceModal = openFirstRecordChoiceModal;
+  window.closeFirstRecordChoiceModal = closeFirstRecordChoiceModal;
   window.setupModalClosingGuards = setupModalClosingGuards;
   window.formatDate = formatDate;
 })();

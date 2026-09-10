@@ -1514,7 +1514,14 @@ app.whenReady().then(async () => {
       }
     });
 
+    // Proteção de concorrência: apenas um lote de 1º registo/dividendos pode
+    // correr de cada vez, evitando rajadas de pedidos à Yahoo Finance (429).
+    let batchSyncInProgress = false;
     ipcMain.handle('sync-index-data-batch', async (event, input) => {
+      if (batchSyncInProgress) {
+        return { success: false, message: 'Já existe uma sincronização em lote em curso. Aguarda a conclusão.' };
+      }
+      batchSyncInProgress = true;
       try {
         const { indexFilter, mode = 'BOTH' } = input || {};
         const assets = db.getStocksByIndex(indexFilter);
@@ -1586,6 +1593,8 @@ app.whenReady().then(async () => {
       } catch (error) {
         console.error('Erro na sincronização em lote:', error);
         return { success: false, error: error.message };
+      } finally {
+        batchSyncInProgress = false;
       }
     });
 

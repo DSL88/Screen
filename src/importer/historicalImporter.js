@@ -4,6 +4,19 @@ const readline = require('readline');
 
 const REQUIRED_COLUMNS = ['date', 'open', 'high', 'low', 'close', 'volume'];
 
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_XLSX_ROWS = 200000;
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function isUnsafeKey(key) {
+  return typeof key !== 'string' || UNSAFE_KEYS.has(key);
+}
+
+function safeGet(row, key) {
+  if (!row || typeof row !== 'object' || isUnsafeKey(key)) return undefined;
+  return Object.prototype.hasOwnProperty.call(row, key) ? row[key] : undefined;
+}
+
 // Aliases normalizados (minúsculas, sem acentos) por coluna canónica.
 // Aceita cabeçalhos em Português e Inglês.
 const COLUMN_ALIASES = {
@@ -17,6 +30,7 @@ const COLUMN_ALIASES = {
 };
 
 function normalizeHeader(header) {
+  if (typeof header !== 'string' || isUnsafeKey(header.trim())) return '';
   return header.trim()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -54,9 +68,13 @@ function toNumber(value) {
 }
 
 function excelDateToJSDate(serial) {
+  if (typeof serial !== 'number' || !Number.isFinite(serial) || serial <= 0 || serial >= 2958466) {
+    return null;
+  }
   const utc_days = Math.floor(serial - 25569);
   const utc_value = utc_days * 86400;
   const date_info = new Date(utc_value * 1000);
+  if (isNaN(date_info.getTime())) return null;
   return date_info.toISOString().slice(0, 10);
 }
 
@@ -67,6 +85,7 @@ function padDate(y, m, d) {
 function normalizeDate(dateStr) {
   if (!dateStr) return null;
   if (typeof dateStr === 'number') {
+    if (!Number.isFinite(dateStr)) return null;
     return excelDateToJSDate(dateStr);
   }
   if (typeof dateStr !== 'string') return null;
@@ -117,6 +136,14 @@ function normalizeDate(dateStr) {
   }
 
   if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+
+  // Rejeita datas calendaristicamente inválidas (ex.: 2024-02-31) em vez de
+  // as deixar rolar silenciosamente para o mês seguinte.
+  const check = new Date(Date.UTC(y, m - 1, d));
+  if (check.getUTCFullYear() !== y || check.getUTCMonth() !== m - 1 || check.getUTCDate() !== d) {
+    return null;
+  }
+
   return padDate(y, m, d);
 }
 
@@ -183,16 +210,27 @@ function parseCSV(filePath) {
 
 function parseXLSX(filePath) {
   const xlsx = require('xlsx');
-  const workbook = xlsx.readFile(filePath);
+  // Opções restritas: sem fórmulas/VBA/HTML, leitura densa e cap de linhas
+  // (mitiga zip bombs e expansão de memória desproporcional ao ficheiro).
+  const workbook = xlsx.readFile(filePath, {
+    sheetRows: MAX_XLSX_ROWS,
+    cellFormula: false,
+    cellHTML: false,
+    bookVBA: false,
+    dense: true
+  });
   const sheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[sheetName];
-  const data = xlsx.utils.sheet_to_json(worksheet, { defval: '' });
+  if (!worksheet) {
+    return { ok: false, error: 'XLSX file has no sheets' };
+  }
+  const data = xlsx.utils.sheet_to_json(worksheet, { defval: '', blankrows: false });
 
   if (!data.length) {
     return { ok: false, error: 'XLSX file has no data rows' };
   }
 
-  const headers = Object.keys(data[0]);
+  const headers = Object.keys(data[0]).filter(h => !isUnsafeKey(h));
   for (const required of REQUIRED_COLUMNS) {
     const found = headers.some(h => columnAliases(required).includes(normalizeHeader(h)));
     if (!found) {
@@ -201,10 +239,10 @@ function parseXLSX(filePath) {
   }
 
   const normalizedData = data.map(row => {
-    const normalized = {};
+    const normalized = Object.create(null);
     for (const required of REQUIRED_COLUMNS) {
       const key = headers.find(h => columnAliases(required).includes(normalizeHeader(h)));
-      normalized[required] = row[key];
+      normalized[required] = key === undefined ? undefined : safeGet(row, key);
     }
     return normalized;
   });
@@ -213,6 +251,10 @@ function parseXLSX(filePath) {
 }
 
 function cleanRow(row) {
+  if (!row || typeof row !== 'object') {
+    return null;
+  }
+
   const normalizedDate = normalizeDate(row.date);
   if (!normalizedDate) {
     return null;
@@ -242,22 +284,51 @@ function cleanRow(row) {
   };
 }
 
-function parseFile(filePath) {
+// Validação de entrada partilhada por parseFile e importFromCsvFile:
+// caminho string, ficheiro regular existente, extensão suportada e tamanho
+// máximo (evita carregar ficheiros arbitrariamente grandes em memória).
+function validateInputFile(filePath) {
+  if (typeof filePath !== 'string' || !filePath.trim()) {
+    return { ok: false, error: 'Invalid file path' };
+  }
+
+  let stat;
   try {
-    if (!fs.existsSync(filePath)) {
+    stat = fs.statSync(filePath);
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
       return { ok: false, error: 'File not found' };
     }
+    return { ok: false, error: 'Unable to read file' };
+  }
 
-    const ext = path.extname(filePath).toLowerCase();
-    let result;
+  if (!stat.isFile()) {
+    return { ok: false, error: 'Input path is not a regular file' };
+  }
 
-    if (ext === '.csv') {
-      result = parseCSV(filePath);
-    } else if (ext === '.xlsx') {
-      result = parseXLSX(filePath);
-    } else {
-      return { ok: false, error: 'Unsupported file format. Use .csv or .xlsx' };
+  if (stat.size > MAX_FILE_BYTES) {
+    return {
+      ok: false,
+      error: `File too large: limit is ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))} MB`
+    };
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext !== '.csv' && ext !== '.xlsx') {
+    return { ok: false, error: 'Unsupported file format. Use .csv or .xlsx' };
+  }
+
+  return { ok: true, ext };
+}
+
+function parseFile(filePath) {
+  try {
+    const validation = validateInputFile(filePath);
+    if (!validation.ok) {
+      return validation;
     }
+
+    const result = validation.ext === '.csv' ? parseCSV(filePath) : parseXLSX(filePath);
 
     if (!result.ok) {
       return result;
@@ -275,7 +346,7 @@ function parseFile(filePath) {
       return { ok: false, error: 'No valid data rows found' };
     }
 
-    candles.sort((a, b) => new Date(a.date) - new Date(b.date));
+    candles.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
     return { ok: true, candles };
   } catch (err) {
@@ -285,18 +356,35 @@ function parseFile(filePath) {
 
 const REQUIRED_IMPORT_COLUMNS = ['ticker', 'date', 'open', 'high', 'low', 'close', 'volume'];
 
+const TICKER_PATTERN = /^\^?[A-Z0-9._-]{1,24}$/;
+
+function normalizeTicker(value) {
+  if (typeof value !== 'string') return null;
+  const ticker = value.trim().toUpperCase();
+  return TICKER_PATTERN.test(ticker) ? ticker : null;
+}
+
+// O parsing corre fora de qualquer transação; as velas válidas são depois
+// gravadas numa única transação síncrona do better-sqlite3 (batch API),
+// garantindo rollback atómico sem manter um BEGIN aberto através de `await`.
 async function importFromCsvFile(filePath, db) {
-  if (!fs.existsSync(filePath)) {
-    return { ok: false, error: 'File not found' };
+  const validation = validateInputFile(filePath);
+  if (!validation.ok) {
+    return validation;
+  }
+  if (validation.ext !== '.csv') {
+    return { ok: false, error: 'Unsupported file format. Use .csv' };
+  }
+  if (!db || typeof db.saveBulkHistoricalCandles !== 'function') {
+    return { ok: false, error: 'Database unavailable' };
   }
 
-  const colMap = {};
-  let inserted = 0;
+  const colMap = Object.create(null);
+  const candles = [];
   let skipped = 0;
   let headerParsed = false;
   let firstDate = null;
   let lastDate = null;
-  let stmt;
   let delimiter = ',';
   let colCount = 0;
 
@@ -304,12 +392,6 @@ async function importFromCsvFile(filePath, db) {
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
   try {
-    db.db.exec('BEGIN TRANSACTION');
-
-    stmt = db.db.prepare(
-      'INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    );
-
     for await (const line of rl) {
       if (!line.trim()) continue;
 
@@ -323,7 +405,6 @@ async function importFromCsvFile(filePath, db) {
         for (const col of REQUIRED_IMPORT_COLUMNS) {
           const idx = values.findIndex(v => columnAliases(col).includes(normalizeHeader(v)));
           if (idx === -1) {
-            db.db.exec('ROLLBACK');
             return { ok: false, error: `Missing required column: ${col}` };
           }
           colMap[col] = idx;
@@ -343,11 +424,11 @@ async function importFromCsvFile(filePath, db) {
         values.length = colCount;
       }
 
-      const ticker = (values[colMap.ticker] || '').trim().toUpperCase();
+      const ticker = normalizeTicker(values[colMap.ticker]);
       const date = normalizeDate(values[colMap.date]);
       const closeNum = toNumber(values[colMap.close]);
 
-      if (!ticker || !date || isNaN(closeNum)) {
+      if (!ticker || !date || !Number.isFinite(closeNum)) {
         skipped++;
         continue;
       }
@@ -357,26 +438,31 @@ async function importFromCsvFile(filePath, db) {
       const low = toNumber(values[colMap.low]);
       const volume = parseInt(String(values[colMap.volume] || '').replace(/[.,]/g, ''), 10);
 
-      if ([open, high, low, volume].some(v => isNaN(v))) {
+      if (![open, high, low, volume].every(Number.isFinite)) {
         skipped++;
         continue;
       }
 
-      stmt.run(ticker, date, open, high, low, closeNum, volume);
-      inserted++;
+      candles.push({ ticker, date, open, high, low, close: closeNum, volume });
 
       if (!firstDate || date < firstDate) firstDate = date;
       if (!lastDate || date > lastDate) lastDate = date;
     }
-
-    db.db.exec('COMMIT');
-    return { ok: true, inserted, skipped, firstDate, lastDate };
   } catch (err) {
-    try { db.db.exec('ROLLBACK'); } catch (_) {}
     return { ok: false, error: err.message };
   } finally {
     stream.close();
   }
+
+  if (candles.length) {
+    try {
+      db.saveBulkHistoricalCandles(candles);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  return { ok: true, inserted: candles.length, skipped, firstDate, lastDate };
 }
 
 module.exports = { parseFile, importFromCsvFile };
