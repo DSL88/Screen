@@ -5612,16 +5612,24 @@
           ${asset.purified_alpha_score != null ? Number(asset.purified_alpha_score).toFixed(1) : (asset.alpha_score != null ? Number(asset.alpha_score).toFixed(1) : '70.0')}
         </td>
         <td style="padding: 8px 12px; text-align: center;">
-          <button class="btn-track-pill btn-track btn-save-track" onclick="event.stopPropagation(); saveToTracker('${asset.ticker}')" style="background: #1e2538; border: 1px solid #333d59; color: #cbd5e1; border-radius: 9999px; height: 28px; padding: 0 14px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+          <button class="btn-track-pill btn-track btn-save-track" style="background: #1e2538; border: 1px solid #333d59; color: #cbd5e1; border-radius: 9999px; height: 28px; padding: 0 14px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
             📌 Guardar &amp; Rastrear
           </button>
         </td>
       `;
 
-      tr.onclick = (e) => {
+      const trackBtn = tr.querySelector('.btn-save-track');
+      if (trackBtn) {
+        trackBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          saveToTracker(asset.ticker);
+        });
+      }
+
+      tr.addEventListener('click', (e) => {
         if (e.target.closest('button')) return;
         openStochasticDrawer(asset);
-      };
+      });
 
       tbody.appendChild(tr);
     });
@@ -5811,6 +5819,33 @@
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeStochasticDrawer();
   });
+
+  // Controlos de fecho do Drawer (botão X e backdrop) compatíveis com CSP
+  const setupDrawerCloseListeners = () => {
+    const closeBtn = document.getElementById('drawer-close-btn');
+    const backdrop = document.getElementById('drawer-backdrop') || document.getElementById('stochastic-drawer-backdrop');
+    if (closeBtn && !closeBtn.__boundCloseRenderer) {
+      closeBtn.__boundCloseRenderer = true;
+      closeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeStochasticDrawer();
+      });
+    }
+    if (backdrop && !backdrop.__boundCloseRenderer) {
+      backdrop.__boundCloseRenderer = true;
+      backdrop.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeStochasticDrawer();
+      });
+    }
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupDrawerCloseListeners);
+  } else {
+    setupDrawerCloseListeners();
+  }
 
   /**
    * Renderizador de Trajetórias Estocásticas em Canvas 2D

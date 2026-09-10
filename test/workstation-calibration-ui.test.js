@@ -107,11 +107,13 @@ test('Stochastic Drawer: elementos, estilização e renderizador Canvas presente
 test('Drawer Lateral: botão X fecha (id, stopPropagation, Esc, backdrop) sem overlays a bloquear', () => {
   const html = fs.readFileSync(path.resolve('renderer/index.html'), 'utf8');
 
-  // Botão X com id estável (alinhado com quantRenderer) e stopPropagation
-  assert.match(html, /id=["']drawer-close-btn["'][^>]*onclick=["'][^"']*stopPropagation[^"']*closeStochasticDrawer/);
+  // Botão X com id estável e sem inline handler (estrita conformidade com CSP script-src 'self')
+  assert.match(html, /id=["']drawer-close-btn["']/);
+  assert.doesNotMatch(html, /id=["']drawer-close-btn["'][^>]*onclick=/);
 
-  // Backdrop clicável também para propagação
-  assert.match(html, /id=["']drawer-backdrop["'][^>]*onclick=["'][^"']*stopPropagation[^"']*closeStochasticDrawer/);
+  // Backdrop clicável com id estável e sem inline handler
+  assert.match(html, /id=["']drawer-backdrop["']/);
+  assert.doesNotMatch(html, /id=["']drawer-backdrop["'][^>]*onclick=/);
 
   // Conteúdo do drawer é preenchido por elementos estáticos (sem innerHTML no cabeçalho que destruiria o X)
   assert.doesNotMatch(html, /stochastic-drawer[\s\S]{0,200}innerHTML/);

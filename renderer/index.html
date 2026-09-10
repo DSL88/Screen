@@ -1593,7 +1593,7 @@
     <!--  DRAWER LATERAL DE INSPEÇÃO ESTOCÁSTICA (OFF-CANVAS)       -->
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- OVERLAY / BACKDROP ESCURO -->
-    <div id="drawer-backdrop" class="drawer-backdrop hidden" onclick="event.preventDefault(); event.stopPropagation(); closeStochasticDrawer()"></div>
+    <div id="drawer-backdrop" class="drawer-backdrop hidden"></div>
 
     <!-- GAVETA LATERAL RETRÁTIL (DRAWER) -->
     <aside id="stochastic-drawer" class="stochastic-drawer" aria-hidden="true">
@@ -1612,7 +1612,7 @@
           </div>
           <p id="drawer-subtitle">Simulação Monte Carlo Regime-Switching • H=35 Dias Úteis</p>
         </div>
-        <button id="drawer-close-btn" type="button" class="drawer-close-btn" onclick="event.preventDefault(); event.stopPropagation(); closeStochasticDrawer()" aria-label="Fechar painel" title="Fechar (Esc)">✕</button>
+        <button id="drawer-close-btn" type="button" class="drawer-close-btn" aria-label="Fechar painel" title="Fechar (Esc)">✕</button>
       </header>
 
       <!-- CORPO COM SCROLL INTERNO -->
