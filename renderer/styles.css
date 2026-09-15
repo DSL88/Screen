@@ -1334,9 +1334,11 @@ body {
 /* ── Tab Navigation ── */
 .tab-nav {
   display: flex;
-  gap: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   background: var(--bg-elev);
-  padding: 0 32px;
+  padding: 8px 32px;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -1344,10 +1346,14 @@ body {
   flex-shrink: 0;
 }
 .tab-btn {
-  padding: 14px 22px;
+  padding: 0 20px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
   color: var(--text-mute);
   font-family: var(--font);
   font-size: 13px;
@@ -1356,25 +1362,17 @@ body {
   transition: all var(--duration) var(--ease);
   -webkit-app-region: no-drag;
   position: relative;
+  white-space: nowrap;
 }
 .tab-btn:hover {
   color: var(--text-dim);
+  background: var(--surface-2);
 }
 .tab-btn.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+  border-color: var(--accent);
   font-weight: 600;
-}
-.tab-btn.active::after {
-  content: "";
-  position: absolute;
-  bottom: -1px;
-  left: 20%;
-  right: 20%;
-  height: 2px;
-  background: var(--accent);
-  box-shadow: 0 0 12px var(--accent-glow);
-  border-radius: 1px;
 }
 .tab-pane, .tab-content {
   display: none;
@@ -3771,7 +3769,7 @@ select.param-input option {
 .choice-option-btn {
   background: #162032;
   border: 1px solid #283548;
-  border-radius: 14px;
+  border-radius: var(--radius-pill);
   padding: 13px 16px;
   text-align: left;
   cursor: pointer;
@@ -6932,10 +6930,11 @@ tr.empty td .empty-state {
   white-space: nowrap !important;
 }
 
-/* Preservar abas da barra superior */
+/* Abas da barra superior: pílulas com estado ativo destacado */
 .tab-btn {
-  border-radius: 0 !important;
-  height: auto !important;
+  border-radius: var(--radius-pill) !important;
+  height: 38px !important;
+  padding: 0 20px !important;
 }
 
 /* Botão Primário (Executar Motor Quantitativo) */
@@ -7214,4 +7213,126 @@ tr.empty td .empty-state {
   opacity: 0 !important;
   visibility: hidden !important;
   pointer-events: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   NORMALIZAÇÃO FINAL DE BOTÕES — PÍLULA + ALINHAMENTO
+   ───────────────────────────────────────────────────────────
+   Tier A · Ações de texto: pílula 999px, 38px, inline-flex centrado
+   Tier B · Ações de ícone: pílula 999px, 28×28, inline-flex centrado
+   Tier C · Cartões-opção (multilinha): pílula, largura total
+   Exceção documentada: .tab-btn mantém o underline de navegação
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Tier A: botões de ação (texto) ── */
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-success,
+.btn-danger-ghost,
+.btn-investir,
+.btn-reanalisar,
+.btn-primary-action,
+.btn-secondary-action,
+.btn-view-full-report,
+.btn-cancel,
+.btn-cancel-operation,
+.btn-run-engine,
+.btn-unified-quant,
+.btn-quant,
+.btn-quant-primary,
+.action-bar button,
+.action-bar .btn,
+.toolbar-btn,
+.quant-subnav-btn,
+.horizon-btn,
+.btn-track,
+.btn-save-track,
+.btn-track-action,
+.btn-table-action,
+.sim-page-btn,
+.link-btn,
+.modal-search-add-btn,
+.modal-result-open,
+.suggestion-add,
+.shortcut-result-add,
+.shortcuts-search-btn,
+.import-cancel-btn,
+.btn-track-full,
+.asset-detail-edit-btn,
+.asset-detail-sync-btn,
+.asset-detail-save-metadata-btn,
+.asset-detail-full-download-btn,
+.asset-detail-delete-btn,
+.asset-detail-download-dividends-btn,
+#btn-download-dividends,
+#btn-cancel-choice-modal {
+  border-radius: var(--radius-pill) !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  padding: 0 20px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+/* ── Tier B: botões de ícone ── */
+.modal-close,
+.btn-close-modal,
+#btn-close-choice-modal,
+.drawer-close-btn,
+#toggle-sidebar-btn,
+.file-upload-remove,
+.wl-remove,
+.portfolio-row-remove {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: var(--radius-pill) !important;
+  line-height: 1 !important;
+}
+
+/* ── Tier C: cartões-opção multilinha (modal 1º Registo) ── */
+.choice-option-btn,
+#btn-choice-prices-only,
+#btn-choice-dividends-only,
+#btn-choice-both {
+  width: 100% !important;
+  min-height: 48px !important;
+  padding: 12px 24px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  text-align: left !important;
+  border-radius: var(--radius-pill) !important;
+}
+
+/* ── Alinhamento à esquerda (campos e menus, não centrados) ── */
+.search-trigger {
+  height: 38px !important;
+  min-height: 38px !important;
+  padding: 0 12px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  border-radius: var(--radius-pill) !important;
+}
+
+.index-action-item {
+  height: 38px !important;
+  min-height: 38px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  border-radius: var(--radius-pill) !important;
 }
