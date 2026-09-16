@@ -680,6 +680,26 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('export-recommendations-tracker-batch', async (_event, assets) => {
+      try {
+        if (!Array.isArray(assets) || assets.length === 0) {
+          return { success: false, message: 'Nenhum ativo fornecido para exportação.' };
+        }
+        if (!db) {
+          return { success: false, message: 'Base de dados não inicializada.' };
+        }
+        const insertedCount = db.saveRecommendationsBatchToTracker(assets);
+        return {
+          success: true,
+          insertedCount: insertedCount,
+          totalReceived: assets.length
+        };
+      } catch (error) {
+        console.error('Erro no handler export-recommendations-tracker-batch:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
     ipcMain.handle('simulation:start', async (_event, payload) => {
       if (!mainWindow) return { ok: false, error: 'window-unavailable' };
       if (activeSimulationRunId) return { ok: false, error: 'simulation-in-progress' };

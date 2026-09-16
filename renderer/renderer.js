@@ -5702,14 +5702,19 @@
     if (!tbody) return;
     tbody.innerHTML = '';
 
+    window.currentTopRecommendations = recommendedAssets || [];
+
     if (!recommendedAssets || recommendedAssets.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="12" style="text-align: center; color: #94a3b8; padding: 20px;">
+          <td colspan="13" style="text-align: center; color: #94a3b8; padding: 20px;">
             Nenhum ativo cumpriu simultaneamente todos os critérios de convicção estocástica (Win Rate >= 60%) e purificação fatorial.
           </td>
         </tr>`;
       if (countBadge) countBadge.textContent = '0 Ativos';
+      if (typeof window.updateExportButtonState === 'function') {
+        window.updateExportButtonState();
+      }
       return;
     }
 
@@ -5717,6 +5722,8 @@
     const sortedAssets = [...recommendedAssets]
       .sort((a, b) => Number(b.alpha_score || 0) - Number(a.alpha_score || 0))
       .slice(0, 20);
+
+    window.currentTopRecommendations = sortedAssets;
 
     if (countBadge) {
       countBadge.textContent = `Top ${sortedAssets.length} Melhores Ativos (Ordenados do Maior para o Menor)`;
@@ -5763,6 +5770,9 @@
       tr.onmouseout = () => tr.style.background = 'transparent';
 
       tr.innerHTML = `
+        <td style="padding: 8px 12px; text-align: center;">
+          <input type="checkbox" class="check-recommendation-item" data-ticker="${safeTicker}" checked style="cursor: pointer; width: 15px; height: 15px; accent-color: #3b82f6;">
+        </td>
         <td style="padding: 8px 10px; text-align: center; font-weight: 700; font-size: 11px; color: ${rank <= 3 ? '#38bdf8' : '#64748b'};">#${rank}</td>
         <td style="padding: 8px 12px; text-align: center;">${directionBadge}</td>
         <td style="padding: 8px 12px;">
@@ -5794,6 +5804,16 @@
         </td>
       `;
 
+      const check = tr.querySelector('.check-recommendation-item');
+      if (check) {
+        check.onclick = (e) => {
+          e.stopPropagation();
+          if (typeof window.updateExportButtonState === 'function') {
+            window.updateExportButtonState();
+          }
+        };
+      }
+
       const trackBtn = tr.querySelector('.btn-save-track');
       if (trackBtn) {
         trackBtn.addEventListener('click', (e) => {
@@ -5803,12 +5823,16 @@
       }
 
       tr.addEventListener('click', (e) => {
-        if (e.target.closest('button')) return;
+        if (e.target.closest('button') || e.target.closest('input[type="checkbox"]')) return;
         openStochasticDrawer(asset);
       });
 
       tbody.appendChild(tr);
     });
+
+    if (typeof window.updateExportButtonState === 'function') {
+      window.updateExportButtonState();
+    }
   }
 
   async function saveToTracker(ticker) {
@@ -5852,6 +5876,93 @@
         btn.disabled = false;
         btn.textContent = '❌ Erro';
       }
+    }
+  }
+
+  function setupMasterCheckboxHandlers() {
+    const masterCheck = document.getElementById('checkbox-master-recommendations');
+    const btnExport = document.getElementById('btn-export-tracker-batch');
+    const countSpan = document.getElementById('tracker-selected-count');
+
+    if (masterCheck) {
+      masterCheck.checked = true;
+      masterCheck.onchange = (e) => {
+        const isChecked = e.target.checked;
+        document.querySelectorAll('.check-recommendation-item').forEach(cb => {
+          cb.checked = isChecked;
+        });
+        if (typeof window.updateExportButtonState === 'function') {
+          window.updateExportButtonState();
+        }
+      };
+    }
+
+    window.updateExportButtonState = function() {
+      const totalBoxes = document.querySelectorAll('.check-recommendation-item');
+      const checkedBoxes = document.querySelectorAll('.check-recommendation-item:checked');
+      const selectedCount = checkedBoxes.length;
+
+      if (countSpan) countSpan.textContent = selectedCount;
+
+      if (btnExport) {
+        if (selectedCount > 0) {
+          btnExport.style.display = 'inline-flex';
+        } else {
+          btnExport.style.display = 'none';
+        }
+      }
+
+      if (masterCheck && totalBoxes.length > 0) {
+        masterCheck.checked = checkedBoxes.length === totalBoxes.length;
+        masterCheck.indeterminate = checkedBoxes.length > 0 && checkedBoxes.length < totalBoxes.length;
+      }
+    };
+
+    if (btnExport) {
+      btnExport.onclick = async () => {
+        const checkedTickers = Array.from(document.querySelectorAll('.check-recommendation-item:checked'))
+          .map(cb => cb.dataset.ticker);
+
+        if (checkedTickers.length === 0) return;
+
+        const assetsToExport = (window.currentTopRecommendations || [])
+          .filter(asset => checkedTickers.includes(asset.ticker));
+
+        btnExport.disabled = true;
+        btnExport.innerHTML = `<span>⏳ A exportar ${assetsToExport.length} ativos...</span>`;
+
+        try {
+          const api = window.electronAPI || window.api || window.quantAPI;
+          if (!api || typeof api.exportRecommendationsToTrackerBatch !== 'function') {
+            throw new Error('Canal IPC exportRecommendationsToTrackerBatch não disponível.');
+          }
+          const response = await api.exportRecommendationsToTrackerBatch(assetsToExport);
+          if (response && response.success) {
+            alert(`✅ Sucesso: ${response.insertedCount} recomendações exportadas para a aba de Monitorização!`);
+            if (typeof loadTrackerData === 'function') {
+              loadTrackerData();
+            } else if (typeof window.loadTrackerData === 'function') {
+              window.loadTrackerData();
+            }
+          } else {
+            alert(`⚠️ Aviso: ${response?.message || 'Falha ao exportar ativos.'}`);
+          }
+        } catch (err) {
+          console.error('Erro na exportação para o tracker:', err);
+          alert('❌ Ocorreu um erro ao comunicar com a base de dados.');
+        } finally {
+          btnExport.disabled = false;
+          if (typeof window.updateExportButtonState === 'function') {
+            window.updateExportButtonState();
+          }
+        }
+      };
+    }
+  }
+
+  function loadTrackerData() {
+    if (window.quantTracker && typeof window.quantTracker.loadTrackerDashboard === 'function') {
+      window.quantTracker.loadTrackerDashboard();
     }
   }
 
@@ -6159,6 +6270,12 @@
     } catch (err) {
       console.warn('Aviso: Falha ao associar guardas de fecho do modal:', err);
     }
+
+    try {
+      if (typeof setupMasterCheckboxHandlers === 'function') setupMasterCheckboxHandlers();
+    } catch (err) {
+      console.warn('Aviso: Falha ao configurar handlers de checkbox master:', err);
+    }
   });
 
   // Se o DOM já tiver sido carregado antes do registo do listener, inicializa de imediato
@@ -6171,12 +6288,17 @@
     try {
       if (typeof setupModalClosingGuards === 'function') setupModalClosingGuards();
     } catch (_) {}
+    try {
+      if (typeof setupMasterCheckboxHandlers === 'function') setupMasterCheckboxHandlers();
+    } catch (_) {}
   }
 
   // expõe para o botão "Iniciar Análise" (se o botão usar onclick inline)
   window.handleIniciarAnaliseScanner = handleIniciarAnaliseScanner;
   window.renderTopRecommendations = renderTopRecommendations;
   window.saveToTracker = saveToTracker;
+  window.setupMasterCheckboxHandlers = setupMasterCheckboxHandlers;
+  window.loadTrackerData = loadTrackerData;
   window.openStochasticDrawer = openStochasticDrawer;
   window.closeStochasticDrawer = closeStochasticDrawer;
   window.drawMonteCarloSimulation = drawMonteCarloSimulation;

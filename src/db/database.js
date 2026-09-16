@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const Database = require('better-sqlite3');
 const { getLastExpectedTradingDay } = require('../utils/dateUtils');
 const { WORLD_INDICES } = require('../data/tickerLists');
@@ -186,6 +187,31 @@ class DB {
         );
         CREATE INDEX IF NOT EXISTS idx_div_ticker ON historical_dividends(ticker);
         CREATE INDEX IF NOT EXISTS idx_div_ticker_date ON historical_dividends(ticker, date);
+
+        CREATE TABLE IF NOT EXISTS alphaquant_history_tracker (
+          id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+          ticker              TEXT NOT NULL,
+          company_name        TEXT,
+          country             TEXT,
+          sector              TEXT,
+          direction           TEXT NOT NULL,
+          entry_price         REAL NOT NULL,
+          target_price        REAL NOT NULL,
+          stop_loss           REAL NOT NULL,
+          current_price       REAL,
+          win_rate_mc         REAL,
+          cvar_95             REAL,
+          graham_score        REAL,
+          alpha_score         REAL,
+          recommendation_date TEXT NOT NULL,
+          status              TEXT DEFAULT 'PENDING',
+          exit_date           TEXT,
+          exit_price          REAL,
+          pnl_pct             REAL,
+          created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(ticker, recommendation_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tracker_ticker_date ON alphaquant_history_tracker(ticker, recommendation_date);
       `);
 
       const cols = this.db.prepare("PRAGMA table_info(historical_signals)").all();
@@ -2393,6 +2419,151 @@ class DB {
       totalAmount: Number(totalAmount.toFixed(4)),
       lastDividend: lastDividend
     };
+  }
+
+  saveRecommendationsBatchToTracker(assets) {
+    if (!Array.isArray(assets) || assets.length === 0) return 0;
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const insertStmt = this.db.prepare(`
+      INSERT INTO alphaquant_history_tracker (
+        ticker,
+        company_name,
+        country,
+        sector,
+        direction,
+        entry_price,
+        target_price,
+        stop_loss,
+        current_price,
+        win_rate_mc,
+        cvar_95,
+        graham_score,
+        alpha_score,
+        recommendation_date,
+        status
+      ) VALUES (
+        @ticker,
+        @company_name,
+        @country,
+        @sector,
+        @direction,
+        @entry_price,
+        @target_price,
+        @stop_loss,
+        @entry_price,
+        @win_rate_mc,
+        @cvar_95,
+        @graham_score,
+        @alpha_score,
+        @recommendation_date,
+        'PENDING'
+      )
+      ON CONFLICT(ticker, recommendation_date) DO UPDATE SET
+        entry_price = excluded.entry_price,
+        target_price = excluded.target_price,
+        stop_loss = excluded.stop_loss,
+        win_rate_mc = excluded.win_rate_mc,
+        alpha_score = excluded.alpha_score
+    `);
+
+    const runBatchTransaction = this.db.transaction((items) => {
+      let count = 0;
+      for (const item of items) {
+        insertStmt.run({
+          ticker: item.ticker,
+          company_name: item.name || item.company_name || item.ticker,
+          country: item.country || 'Global',
+          sector: item.sector || 'Geral',
+          direction: item.signal_direction || item.direction || 'COMPRA',
+          entry_price: Number(item.current_price || item.price || 0),
+          target_price: Number(item.target_price || 0),
+          stop_loss: Number(item.stop_loss || 0),
+          win_rate_mc: Number(item.win_rate_mc || item.winRateMC || 0),
+          cvar_95: Number(item.cvar_95 || 0),
+          graham_score: Number(item.graham_score || item.quality_score || 0),
+          alpha_score: Number(item.alpha_score || 0),
+          recommendation_date: todayStr
+        });
+        count++;
+      }
+      return count;
+    });
+
+    const insertedCount = runBatchTransaction(assets);
+
+    try {
+      this._syncBatchToQuantTrackerDb(assets, todayStr);
+    } catch (_) {}
+
+    return insertedCount;
+  }
+
+  _syncBatchToQuantTrackerDb(assets, todayStr) {
+    const quantTrackerPath = process.env.QUANT_TRACKER_DB_PATH || path.resolve(process.cwd(), 'quant_tracker.db');
+    if (!fs.existsSync(quantTrackerPath)) return;
+    let trackerDb = null;
+    try {
+      trackerDb = new Database(quantTrackerPath);
+      const tableInfo = trackerDb.prepare("PRAGMA table_info(alphaquant_history_tracker)").all();
+      const colNames = new Set(tableInfo.map(c => c.name));
+      if (!colNames.has('company_name')) {
+        try { trackerDb.exec("ALTER TABLE alphaquant_history_tracker ADD COLUMN company_name TEXT;"); } catch (_) {}
+      }
+      if (!colNames.has('country')) {
+        try { trackerDb.exec("ALTER TABLE alphaquant_history_tracker ADD COLUMN country TEXT;"); } catch (_) {}
+      }
+      if (!colNames.has('direction')) {
+        try { trackerDb.exec("ALTER TABLE alphaquant_history_tracker ADD COLUMN direction TEXT;"); } catch (_) {}
+      }
+      if (!colNames.has('cvar_95')) {
+        try { trackerDb.exec("ALTER TABLE alphaquant_history_tracker ADD COLUMN cvar_95 REAL;"); } catch (_) {}
+      }
+      if (!colNames.has('graham_score')) {
+        try { trackerDb.exec("ALTER TABLE alphaquant_history_tracker ADD COLUMN graham_score REAL;"); } catch (_) {}
+      }
+
+      const hasTracked = trackerDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tracked_recommendations'").get();
+      const insertTracked = hasTracked ? trackerDb.prepare(`
+        INSERT INTO tracked_recommendations (
+          ticker, sector, entry_date, recommendation_date, entry_price, target_price,
+          stop_loss, stop_loss_price, horizon_days, predicted_win_rate, mc_win_rate,
+          mc_tier_label, alpha_score, current_price, max_favorable_excursion, max_adverse_excursion, status
+        ) VALUES (
+          @ticker, @sector, @rec_date, @rec_date, @entry_price, @target_price,
+          @stop_loss, @stop_loss, 35, @win_rate_mc, @win_rate_mc,
+          @tier_label, @alpha_score, @entry_price, 0.0, 0.0, 'PENDENTE'
+        )
+      `) : null;
+
+      const tx = trackerDb.transaction((items) => {
+        for (const item of items) {
+          const winRate = Number(item.win_rate_mc || item.winRateMC || 50.0);
+          const tierLabel = winRate >= 70 ? 'Extrema (70%+)' : winRate >= 65 ? 'Muito Forte (65-69%)' : winRate >= 60 ? 'Forte (60-64%)' : winRate >= 55 ? 'Favorável (55-59%)' : winRate >= 50 ? 'Moderada (50-54%)' : 'Fraca (<50%)';
+          if (insertTracked) {
+            try {
+              insertTracked.run({
+                ticker: item.ticker,
+                sector: item.sector || 'Geral',
+                rec_date: todayStr,
+                entry_price: Number(item.current_price || item.price || 0),
+                target_price: Number(item.target_price || 0),
+                stop_loss: Number(item.stop_loss || 0),
+                win_rate_mc: winRate,
+                tier_label: tierLabel,
+                alpha_score: Number(item.alpha_score || 0)
+              });
+            } catch (_) {}
+          }
+        }
+      });
+      tx(assets);
+    } catch (_) {
+    } finally {
+      if (trackerDb) {
+        try { trackerDb.close(); } catch (_) {}
+      }
+    }
   }
 
   close() {

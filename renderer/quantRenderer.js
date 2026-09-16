@@ -386,14 +386,19 @@
     if (!tbody) return;
     tbody.innerHTML = '';
 
+    window.currentTopRecommendations = assetsList || [];
+
     if (!assetsList || assetsList.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="12" style="text-align:center; color:#eab308; padding:28px;">
+          <td colspan="13" style="text-align:center; color:#eab308; padding:28px;">
             Nenhum ativo cumpriu os critérios estocásticos e de solvência neste momento.
           </td>
         </tr>`;
       if (countBadge) countBadge.textContent = '0 Ativos';
+      if (typeof window.updateExportButtonState === 'function') {
+        window.updateExportButtonState();
+      }
       return;
     }
 
@@ -401,6 +406,8 @@
     const sortedAssets = [...assetsList]
       .sort((a, b) => Number(b.alpha_score || 0) - Number(a.alpha_score || 0))
       .slice(0, 20);
+
+    window.currentTopRecommendations = sortedAssets;
 
     if (countBadge) countBadge.textContent = `Top ${sortedAssets.length} Melhores Ativos (Ordenados do Maior para o Menor)`;
 
@@ -458,6 +465,9 @@
       tr._assetData = asset;
 
       tr.innerHTML = `
+        <td style="padding: 8px 12px; text-align: center;">
+          <input type="checkbox" class="check-recommendation-item" data-ticker="${safeTicker}" checked style="cursor: pointer; width: 15px; height: 15px; accent-color: #3b82f6;">
+        </td>
         <td style="text-align:center; font-weight:700; font-size:11px; color:${rank <= 3 ? '#38bdf8' : '#64748b'};">
           #${rank}
         </td>
@@ -490,12 +500,22 @@
         </td>
       `;
 
+      const check = tr.querySelector('.check-recommendation-item');
+      if (check) {
+        check.onclick = (e) => {
+          e.stopPropagation();
+          if (typeof window.updateExportButtonState === 'function') {
+            window.updateExportButtonState();
+          }
+        };
+      }
+
       const trackBtn = tr.querySelector('.btn-save-track');
       if (trackBtn) trackBtn._assetData = asset;
 
       // Clique na linha para abrir o drawer
       tr.addEventListener('click', (e) => {
-        if (e.target.closest('.btn-save-track')) return;
+        if (e.target.closest('.btn-save-track') || e.target.closest('input[type="checkbox"]')) return;
         document.querySelectorAll('.table-master-quant tbody tr').forEach(r => r.classList.remove('selected'));
         tr.classList.add('selected');
         openStochasticDrawer(asset);
@@ -527,6 +547,10 @@
         }
       });
     });
+
+    if (typeof window.updateExportButtonState === 'function') {
+      window.updateExportButtonState();
+    }
   }
 
   function classifyWinRateTier(winRate) {
