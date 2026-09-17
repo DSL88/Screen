@@ -5695,7 +5695,7 @@
     return res;
   }
   // ── 7. WORKSTATION: TABELA MESTRA DE RECOMENDAÇÕES (TOP BUY LIST) ──
-  function renderTopRecommendations(recommendedAssets) {
+  function renderTopRecommendations(recommendedAssets, allAnalyzedAssets) {
     const tbody = document.getElementById('tbody-top-recommendations') || document.getElementById('master-recommendations-tbody');
     const countBadge = document.getElementById('badge-top-count') || document.getElementById('master-table-count');
     
@@ -5703,6 +5703,7 @@
     tbody.innerHTML = '';
 
     window.currentTopRecommendations = recommendedAssets || [];
+    window.currentAllAnalyzedAssets = allAnalyzedAssets || window.currentAllAnalyzedAssets || [];
 
     if (!recommendedAssets || recommendedAssets.length === 0) {
       tbody.innerHTML = `
@@ -5881,8 +5882,10 @@
 
   function setupMasterCheckboxHandlers() {
     const masterCheck = document.getElementById('checkbox-master-recommendations');
-    const btnExport = document.getElementById('btn-export-tracker-batch');
+    const btnExport = document.getElementById('btn-export-tracker-batch') || document.getElementById('btn-export-top20-tracker');
     const countSpan = document.getElementById('tracker-selected-count');
+    const btnExportAll = document.getElementById('btn-export-all-tracker');
+    const totalAnalyzedBadge = document.getElementById('total-analyzed-badge');
 
     if (masterCheck) {
       masterCheck.checked = true;
@@ -5909,6 +5912,17 @@
           btnExport.style.display = 'inline-flex';
         } else {
           btnExport.style.display = 'none';
+        }
+      }
+
+      const totalAllAnalyzed = (window.currentAllAnalyzedAssets || []).length;
+      if (totalAnalyzedBadge) totalAnalyzedBadge.textContent = totalAllAnalyzed;
+
+      if (btnExportAll) {
+        if (totalAllAnalyzed > 0) {
+          btnExportAll.style.display = 'inline-flex';
+        } else {
+          btnExportAll.style.display = 'none';
         }
       }
 
@@ -5952,6 +5966,50 @@
           alert('❌ Ocorreu um erro ao comunicar com a base de dados.');
         } finally {
           btnExport.disabled = false;
+          if (typeof window.updateExportButtonState === 'function') {
+            window.updateExportButtonState();
+          }
+        }
+      };
+    }
+
+    if (btnExportAll) {
+      btnExportAll.onclick = async () => {
+        const assets = window.currentAllAnalyzedAssets || [];
+        if (assets.length === 0) {
+          alert('Nenhum ativo analisado disponível para exportar.');
+          return;
+        }
+
+        if (!confirm(`Deseja exportar todas as ${assets.length} análises para a aba de Monitorização de Investimentos?`)) {
+          return;
+        }
+
+        btnExportAll.disabled = true;
+        btnExportAll.innerHTML = `<span>⏳ A gravar ${assets.length} ativos na base de dados...</span>`;
+
+        try {
+          const api = window.electronAPI || window.api || window.quantAPI;
+          if (!api || typeof api.exportRecommendationsToTrackerBatch !== 'function') {
+            throw new Error('Canal IPC exportRecommendationsToTrackerBatch não disponível.');
+          }
+          const res = await api.exportRecommendationsToTrackerBatch(assets);
+          if (res && res.success) {
+            alert(`✅ Sucesso! Foram adicionadas/atualizadas ${res.insertedCount} análises na Monitorização.`);
+            if (typeof loadTrackerData === 'function') {
+              loadTrackerData();
+            } else if (typeof window.loadTrackerData === 'function') {
+              window.loadTrackerData();
+            }
+          } else {
+            alert(`⚠️ Aviso: ${res?.message || 'Erro ao processar lote.'}`);
+          }
+        } catch (err) {
+          console.error('Erro na exportação em lote:', err);
+          alert('❌ Ocorreu um erro ao comunicar com a base de dados.');
+        } finally {
+          btnExportAll.disabled = false;
+          btnExportAll.innerHTML = `<span>🚀 Exportar Todas as Análises (${assets.length}) para Monitorização</span>`;
           if (typeof window.updateExportButtonState === 'function') {
             window.updateExportButtonState();
           }

@@ -666,6 +666,8 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
         horizon_days=horizon_markov,
     )
 
+    pipeline_res = build_pipeline_output(analyzed_assets, horizon_days=horizon_markov)
+
     output_payload = {
         "success": True,
         "pipeline_name": "Alpha Quant Engine (Yahoo Finance + Markov + Monte Carlo + Fases 1-6)",
@@ -673,6 +675,8 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
         "summary": summary,
         "assets": analyzed_assets,
         "top_recommendations": recommendations,
+        "all_analyzed_assets": pipeline_res["all_analyzed_assets"],
+        "total_analyzed_count": pipeline_res["total_analyzed_count"],
         "phases": {
             "phase_1_fundamentals": {
                 "phase": 1,
@@ -768,6 +772,76 @@ def classify_win_rate_tier(win_rate: float) -> dict:
         return {"level": "Moderada (50-54%)", "color": "#ffc107", "badge": "bg-warning text-dark", "tier_id": 1}
     else:
         return {"level": "Fraca (<50%)", "color": "#dc3545", "badge": "bg-danger", "tier_id": 0}
+
+
+def build_pipeline_output(processed_assets: List[Dict[str, Any]], horizon_days: int = 35) -> Dict[str, Any]:
+    all_analyzed = []
+    
+    for asset in processed_assets:
+        current_price = float(asset.get('current_price', asset.get('price', asset.get('latest_price', 0.0))) or 0.0)
+        if current_price <= 0:
+            continue
+
+        win_rate = float(asset.get('mc_win_rate', asset.get('winRateMC', asset.get('win_rate_numeric', 50.0))) or 50.0)
+        cvar_95 = float(asset.get('cvar_95', asset.get('mc_cvar_95', 5.0)) or 5.0)
+        exp_return = float(asset.get('expected_return', asset.get('mc_expected_return', 0.0)) or 0.0)
+        quality_score = float(asset.get('quality_score', asset.get('graham_score', 50.0)) or 50.0)
+        
+        # Determina a direção estatística
+        signal_dir = asset.get('signal_direction')
+        if signal_dir in ('COMPRA', 'VENDA'):
+            direction = signal_dir
+        elif exp_return >= 0:
+            direction = "COMPRA"
+        else:
+            direction = "VENDA"
+
+        if direction == "COMPRA":
+            target_p = current_price * 1.048  # +4.8%
+            stop_p = current_price * (1.0 - 0.024)  # -2.4%
+        else:
+            target_p = current_price * (1.0 - 0.048)  # -4.8%
+            stop_p = current_price * (1.0 + 0.024)  # +2.4%
+
+        efficiency_ratio = abs(exp_return) / cvar_95 if cvar_95 > 0 else 1.0
+        alpha_score = float(asset.get('purified_alpha_score', asset.get('alpha_score', 0.0)) or 0.0)
+        if alpha_score <= 0:
+            alpha_score = (quality_score * 0.3) + (win_rate * 0.4) + (efficiency_ratio * 30.0)
+
+        ticker_raw = str(asset.get('ticker') or '').strip()
+        ticker_val = ticker_raw.upper()
+
+        snapshot = {
+            "ticker": ticker_val,
+            "company_name": (asset.get('name') or asset.get('company_name') or ticker_val).strip(),
+            "name": (asset.get('name') or asset.get('company_name') or ticker_val).strip(),
+            "country": (asset.get('country') or 'Global').strip() or 'Global',
+            "sector": asset.get('sector', 'Geral'),
+            "direction": direction,
+            "signal_direction": direction,
+            "current_price": round(current_price, 2),
+            "target_price": round(target_p, 2),
+            "stop_loss": round(stop_p, 2),
+            "win_rate_mc": round(win_rate, 1),
+            "cvar_95": round(cvar_95, 1),
+            "graham_score": round(quality_score, 1),
+            "alpha_score": round(alpha_score, 1),
+            "status_eligibility": asset.get('status', 'Analisado'),
+            "horizon_days": horizon_days
+        }
+        all_analyzed.append(snapshot)
+
+    # Ordena todos pelo Alpha Score decrescente
+    all_analyzed_sorted = sorted(all_analyzed, key=lambda x: x['alpha_score'], reverse=True)
+
+    # Top 20 para visualização humana no ecrã principal
+    top_20 = all_analyzed_sorted[:20]
+
+    return {
+        "top_recommendations": top_20,
+        "all_analyzed_assets": all_analyzed_sorted,
+        "total_analyzed_count": len(all_analyzed_sorted)
+    }
 
 
 def generate_top_investment_recommendations(
@@ -876,6 +950,7 @@ def generate_top_investment_recommendations(
         limit = 20
     else:
         limit = max(15, min(int(top_n), 20))
+
     top_assets = recommended_sorted[:limit]
 
     # Atribuir posição de ranking (#1 ao #20) já na origem, para o frontend não reordenar.

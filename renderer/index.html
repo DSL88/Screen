@@ -242,9 +242,16 @@
             </div>
 
             <div style="display: flex; align-items: center; gap: 10px;">
-              <button id="btn-export-tracker-batch" type="button" class="btn-pill" style="display: none; background: #059669; hover: #047857; color: #ffffff; border: 1px solid #10b981; padding: 6px 16px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; align-items: center; gap: 6px;">
-                <span>📥 Exportar (<span id="tracker-selected-count">0</span>) para Monitorização</span>
+              <!-- Botão A: Exportar Selecionados (Top 20) -->
+              <button id="btn-export-tracker-batch" type="button" class="btn-pill" style="display: none; background: #1e293b; color: #38bdf8; border: 1px solid #0284c7; padding: 6px 14px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; align-items: center; gap: 6px;">
+                <span>📥 Exportar (<span id="tracker-selected-count">0</span>) Selecionados</span>
               </button>
+
+              <!-- Botão B: Exportar TODO o Universo Analisado (100+ / 700+ ativos) -->
+              <button id="btn-export-all-tracker" type="button" class="btn-pill" style="display: none; background: #059669; color: #ffffff; border: 1px solid #10b981; padding: 6px 16px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; align-items: center; gap: 6px;">
+                <span>🚀 Exportar Todas as Análises (<span id="total-analyzed-badge">0</span>) para Monitorização</span>
+              </button>
+
               <span style="font-size: 11px; color: #64748b;">
                 💡 Clica numa linha para abrir a inspeção estocástica lateral
               </span>

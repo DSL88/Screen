@@ -305,10 +305,14 @@
   }
 
   function renderFullWorkstationReport(data) {
+    window.lastPipelineResult = data;
     const summary = data.summary || {};
     const phases = data.phases || {};
     const assets = data.assets || [];
     const recs = data.top_recommendations || assets.filter(a => a.approved || a.status === 'Aprovado');
+
+    window.currentTopRecommendations = data.top_recommendations || recs || [];
+    window.currentAllAnalyzedAssets = data.all_analyzed_assets || data.assets || assets || [];
 
     // 1. Dashboard de KPIs Globais (Grid de 4 Cartões Simétricos)
     updateGlobalSymmetricKPIs(summary, phases);
@@ -322,6 +326,10 @@
       window.renderTopRecommendations(recList);
     } else {
       renderMasterRecommendationsTable(recList);
+    }
+
+    if (typeof window.updateExportButtonState === 'function') {
+      window.updateExportButtonState();
     }
 
     // 3. Renderizar Fases Detalhadas

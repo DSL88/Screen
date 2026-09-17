@@ -17,6 +17,10 @@ test('HTML: Elementos de Checkbox Master e Botão de Exportação em Lote presen
   assert.match(html, /id=["']btn-export-tracker-batch["']/);
   assert.match(html, /id=["']tracker-selected-count["']/);
 
+  // Botão de exportação de todo o universo analisado
+  assert.match(html, /id=["']btn-export-all-tracker["']/);
+  assert.match(html, /id=["']total-analyzed-badge["']/);
+
   // Checkbox Master no thead
   assert.match(html, /id=["']checkbox-master-recommendations["']/);
   assert.match(html, /<th[^>]*>\s*<input type="checkbox" id="checkbox-master-recommendations"/);
@@ -76,6 +80,9 @@ test('Database: Criação da tabela alphaquant_history_tracker e inserção ató
     const inserted = db.saveRecommendationsBatchToTracker(sampleAssets);
     assert.equal(inserted, 2, 'Deve ter inserido 2 registos');
 
+    // Alias saveBatchToTracker
+    assert.equal(typeof db.saveBatchToTracker, 'function');
+
     const rows = db.db.prepare('SELECT * FROM alphaquant_history_tracker ORDER BY ticker ASC').all();
     assert.equal(rows.length, 2);
     assert.equal(rows[0].ticker, 'AAPL');
@@ -92,10 +99,10 @@ test('Database: Criação da tabela alphaquant_history_tracker e inserção ató
         name: 'Apple Inc. Updated',
         country: 'US',
         sector: 'Technology',
-        direction: 'COMPRA',
+        direction: 'VENDA',
         current_price: 235.00,
-        target_price: 246.00,
-        stop_loss: 229.00,
+        target_price: 223.72,
+        stop_loss: 240.64,
         win_rate_mc: 75.0,
         cvar_95: 3.1,
         graham_score: 80.0,
@@ -103,12 +110,13 @@ test('Database: Criação da tabela alphaquant_history_tracker e inserção ató
       }
     ];
 
-    const updatedCount = db.saveRecommendationsBatchToTracker(updatedAssets);
+    const updatedCount = db.saveBatchToTracker(updatedAssets);
     assert.equal(updatedCount, 1);
 
     const rowsAfterUpdate = db.db.prepare('SELECT * FROM alphaquant_history_tracker WHERE ticker = ?').all('AAPL');
     assert.equal(rowsAfterUpdate.length, 1, 'Não deve criar linha duplicada para o mesmo ticker e dia');
     assert.equal(rowsAfterUpdate[0].entry_price, 235.00, 'Preço de entrada deve ser atualizado pelo ON CONFLICT');
+    assert.equal(rowsAfterUpdate[0].direction, 'VENDA', 'Direção deve ser atualizada pelo ON CONFLICT');
     assert.equal(rowsAfterUpdate[0].alpha_score, 90.0, 'Alpha score deve ser atualizado pelo ON CONFLICT');
 
     db.close();
@@ -117,7 +125,14 @@ test('Database: Criação da tabela alphaquant_history_tracker e inserção ató
   }
 });
 
-test('Renderer: Lógica de seleção individual, master checkbox e handlers associados', () => {
+test('Python Engine: Função build_pipeline_output e retorno de all_analyzed_assets', () => {
+  const pyCode = read('python_engine/run_pipeline.py');
+  assert.match(pyCode, /def build_pipeline_output/);
+  assert.match(pyCode, /"all_analyzed_assets":\s*all_analyzed_sorted/);
+  assert.match(pyCode, /"total_analyzed_count":\s*len\(all_analyzed_sorted\)/);
+});
+
+test('Renderer: Lógica de seleção individual, exportação integral e handlers associados', () => {
   const rendererJs = read('renderer/renderer.js');
   const quantJs = read('renderer/quantRenderer.js');
 
@@ -125,12 +140,15 @@ test('Renderer: Lógica de seleção individual, master checkbox e handlers asso
   assert.match(rendererJs, /function setupMasterCheckboxHandlers/);
   assert.match(rendererJs, /window\.setupMasterCheckboxHandlers = setupMasterCheckboxHandlers/);
   assert.match(rendererJs, /window\.currentTopRecommendations =/);
+  assert.match(rendererJs, /window\.currentAllAnalyzedAssets =/);
   assert.match(rendererJs, /class="check-recommendation-item"/);
   assert.match(rendererJs, /data-ticker=/);
   assert.match(rendererJs, /updateExportButtonState/);
+  assert.match(rendererJs, /btn-export-all-tracker/);
 
   // Verificação no quantRenderer.js
   assert.match(quantJs, /window\.currentTopRecommendations =/);
+  assert.match(quantJs, /window\.currentAllAnalyzedAssets =/);
   assert.match(quantJs, /class="check-recommendation-item"/);
   assert.match(quantJs, /updateExportButtonState/);
 });

@@ -2463,8 +2463,12 @@ class DB {
         entry_price = excluded.entry_price,
         target_price = excluded.target_price,
         stop_loss = excluded.stop_loss,
+        current_price = excluded.current_price,
         win_rate_mc = excluded.win_rate_mc,
-        alpha_score = excluded.alpha_score
+        cvar_95 = excluded.cvar_95,
+        graham_score = excluded.graham_score,
+        alpha_score = excluded.alpha_score,
+        direction = excluded.direction
     `);
 
     const runBatchTransaction = this.db.transaction((items) => {
@@ -2497,6 +2501,10 @@ class DB {
     } catch (_) {}
 
     return insertedCount;
+  }
+
+  saveBatchToTracker(assets) {
+    return this.saveRecommendationsBatchToTracker(assets);
   }
 
   _syncBatchToQuantTrackerDb(assets, todayStr) {
