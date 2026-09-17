@@ -700,6 +700,42 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('export-split-analysis', async (event, { top20, remaining } = {}) => {
+      try {
+        if (!db) {
+          return { success: false, error: 'Base de dados não inicializada.' };
+        }
+        const savedTop = db.saveTop20ToTracker(top20 || []);
+        const savedRemaining = db.saveRemainingToMonitoring(remaining || []);
+        return {
+          success: true,
+          savedTop20Count: savedTop,
+          savedRemainingCount: savedRemaining
+        };
+      } catch (err) {
+        console.error('Erro ao exportar análise dividida:', err);
+        return { success: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('get-top20-tracker', async (_event, date = null) => {
+      try {
+        if (!db) return { success: false, error: 'Base de dados não inicializada.' };
+        return { success: true, data: db.getTop20Tracker(date) };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('get-monitoring-universe', async (_event, date = null) => {
+      try {
+        if (!db) return { success: false, error: 'Base de dados não inicializada.' };
+        return { success: true, data: db.getMonitoringUniverse(date) };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    });
+
     ipcMain.handle('simulation:start', async (_event, payload) => {
       if (!mainWindow) return { ok: false, error: 'window-unavailable' };
       if (activeSimulationRunId) return { ok: false, error: 'simulation-in-progress' };

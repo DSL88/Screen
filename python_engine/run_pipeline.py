@@ -666,7 +666,11 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
         horizon_days=horizon_markov,
     )
 
+    split_res = split_analysis_results(analyzed_assets, horizon_days=horizon_markov)
     pipeline_res = build_pipeline_output(analyzed_assets, horizon_days=horizon_markov)
+
+    # Garante que a Tabela Mestra traz os 20 melhores sem estrangulamento precoce
+    final_top_20 = split_res["top_20"] if len(recommendations) < 20 else recommendations[:20]
 
     output_payload = {
         "success": True,
@@ -674,7 +678,10 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
         "timestamp": pd.Timestamp.now().isoformat(),
         "summary": summary,
         "assets": analyzed_assets,
-        "top_recommendations": recommendations,
+        "top_20": split_res["top_20"],
+        "remaining_analyzed": split_res["remaining_analyzed"],
+        "total_analyzed": split_res["total_analyzed"],
+        "top_recommendations": final_top_20,
         "all_analyzed_assets": pipeline_res["all_analyzed_assets"],
         "total_analyzed_count": pipeline_res["total_analyzed_count"],
         "phases": {
@@ -772,6 +779,85 @@ def classify_win_rate_tier(win_rate: float) -> dict:
         return {"level": "Moderada (50-54%)", "color": "#ffc107", "badge": "bg-warning text-dark", "tier_id": 1}
     else:
         return {"level": "Fraca (<50%)", "color": "#dc3545", "badge": "bg-danger", "tier_id": 0}
+
+
+def split_analysis_results(processed_assets: List[Dict[str, Any]], horizon_days: int = 35) -> Dict[str, Any]:
+    """
+    Separa estritamente o universo analisado em dois blocos:
+    - top_20: Os 20 ativos mais bem qualificados ordenados por Alpha Score decrescente.
+    - remaining_analyzed: Todos os restantes ativos analisados para monitorização contínua e auto-aprendizagem.
+    """
+    all_scored = []
+    
+    for asset in processed_assets:
+        current_price = float(asset.get('current_price', asset.get('price', asset.get('latest_price', 0.0))) or 0.0)
+        if current_price <= 0:
+            continue
+
+        win_rate = float(asset.get('mc_win_rate', asset.get('winRateMC', asset.get('win_rate_numeric', 50.0))) or 50.0)
+        cvar_95 = float(asset.get('cvar_95', asset.get('mc_cvar_95', 5.0)) or 5.0)
+        exp_return = float(asset.get('expected_return', asset.get('mc_expected_return', 0.0)) or 0.0)
+        quality_score = float(asset.get('quality_score', asset.get('graham_score', 50.0)) or 50.0)
+
+        # Sentido e preços projetados
+        signal_dir = asset.get('signal_direction')
+        if signal_dir in ('COMPRA', 'VENDA'):
+            direction = signal_dir
+        elif exp_return >= 0:
+            direction = "COMPRA"
+        else:
+            direction = "VENDA"
+
+        if direction == "COMPRA":
+            target_p = current_price * 1.048
+            stop_p = current_price * (1.0 - 0.024)
+        else:
+            target_p = current_price * (1.0 - 0.048)
+            stop_p = current_price * (1.0 + 0.024)
+
+        efficiency = abs(exp_return) / cvar_95 if cvar_95 > 0 else 1.0
+        # Fórmula de Alpha Score para ordenação
+        alpha = float(asset.get('purified_alpha_score', asset.get('alpha_score', 0.0)) or 0.0)
+        if alpha <= 0:
+            alpha = (quality_score * 0.3) + (win_rate * 0.4) + (efficiency * 30.0)
+
+        ticker_raw = str(asset.get('ticker') or '').strip().upper()
+
+        item = {
+            "ticker": ticker_raw,
+            "company_name": (asset.get('name') or asset.get('company_name') or ticker_raw).strip(),
+            "name": (asset.get('name') or asset.get('company_name') or ticker_raw).strip(),
+            "country": (asset.get('country') or 'Global').strip() or 'Global',
+            "sector": asset.get('sector', 'Geral'),
+            "direction": direction,
+            "signal_direction": direction,
+            "current_price": round(current_price, 2),
+            "target_price": round(target_p, 2),
+            "stop_loss": round(stop_p, 2),
+            "win_rate_mc": round(win_rate, 1),
+            "cvar_95": round(cvar_95, 1),
+            "graham_score": round(quality_score, 1),
+            "alpha_score": round(alpha, 1),
+            "status_eligibility": asset.get('status', 'Analisado'),
+            "horizon_days": horizon_days
+        }
+        all_scored.append(item)
+
+    # Ordenação estrita do melhor para o pior
+    all_scored_sorted = sorted(all_scored, key=lambda x: x['alpha_score'], reverse=True)
+
+    # Separação exata: Top 20 vs Restante Universo
+    top_20 = all_scored_sorted[:20]
+    remaining = all_scored_sorted[20:]
+
+    for idx, r in enumerate(top_20, start=1):
+        r["rank"] = idx
+
+    return {
+        "top_20": top_20,
+        "remaining_analyzed": remaining,
+        "total_analyzed": len(all_scored_sorted)
+    }
 
 
 def build_pipeline_output(processed_assets: List[Dict[str, Any]], horizon_days: int = 35) -> Dict[str, Any]:

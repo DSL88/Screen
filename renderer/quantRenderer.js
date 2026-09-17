@@ -309,17 +309,20 @@
     const summary = data.summary || {};
     const phases = data.phases || {};
     const assets = data.assets || [];
-    const recs = data.top_recommendations || assets.filter(a => a.approved || a.status === 'Aprovado');
+    const splitTop20 = data.top_20 || (data.top_recommendations ? data.top_recommendations.slice(0, 20) : []);
+    const splitRemaining = data.remaining_analyzed || (data.all_analyzed_assets ? data.all_analyzed_assets.slice(20) : []);
 
-    window.currentTopRecommendations = data.top_recommendations || recs || [];
+    window.currentAnalysisTop20 = splitTop20;
+    window.currentAnalysisRemaining = splitRemaining;
+    window.currentTopRecommendations = splitTop20.length > 0 ? splitTop20 : (data.top_recommendations || recs || []);
     window.currentAllAnalyzedAssets = data.all_analyzed_assets || data.assets || assets || [];
 
     // 1. Dashboard de KPIs Globais (Grid de 4 Cartões Simétricos)
     updateGlobalSymmetricKPIs(summary, phases);
 
     // 2. Tabela Mestra de Recomendações (Top Buy List)
-    const recList = (data.top_recommendations && data.top_recommendations.length > 0)
-      ? data.top_recommendations
+    const recList = window.currentTopRecommendations.length > 0
+      ? window.currentTopRecommendations
       : (recs.length > 0 ? recs : assets);
 
     if (typeof window.renderTopRecommendations === 'function') {

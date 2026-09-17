@@ -252,6 +252,11 @@
                 <span>🚀 Exportar Todas as Análises (<span id="total-analyzed-badge">0</span>) para Monitorização</span>
               </button>
 
+              <!-- Botão C: Guardar Top 20 no Tracker & Restantes na Monitorização -->
+              <button id="btn-export-split-workflow" type="button" class="btn-pill" style="display: none; background: #0284c7; color: #ffffff; border: 1px solid #38bdf8; padding: 6px 16px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; align-items: center; gap: 6px;">
+                <span>🚀 Guardar Top 20 no Tracker &amp; Restantes (<span id="count-remaining">0</span>) na Monitorização</span>
+              </button>
+
               <span style="font-size: 11px; color: #64748b;">
                 💡 Clica numa linha para abrir a inspeção estocástica lateral
               </span>
@@ -661,7 +666,51 @@
               </tr>
             </tbody>
           </table>
+        </section>
 
+        <!-- SECÇÃO: UNIVERSO DE MONITORIZAÇÃO (AUTO-APRENDIZAGEM DO MODELO) -->
+        <section class="results" style="margin-top: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 0 4px;">
+            <div>
+              <h2 style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin: 0; display: flex; align-items: center; gap: 8px;">
+                <span>🌐 Universo Global de Análises (<span id="monitoring-universe-count">0</span> Ativos)</span>
+              </h2>
+              <p style="font-size: 12px; color: #94a3b8; margin: 2px 0 0 0;">
+                Registo contínuo de todos os ativos analisados para avaliação de alvos e auto-calibração estocástica do modelo.
+              </p>
+            </div>
+            <button id="btn-refresh-monitoring-universe" type="button" class="btn-secondary" style="font-size: 12px; padding: 5px 12px;">
+              <span>🔄 Atualizar Universo</span>
+            </button>
+          </div>
+
+          <table class="results-table portfolio-table" id="table-monitoring-universe">
+            <thead>
+              <tr>
+                <th class="col-ticker">Ticker</th>
+                <th class="col-name">Empresa</th>
+                <th class="col-country">País</th>
+                <th class="col-sector">Setor</th>
+                <th class="col-dir">Sentido</th>
+                <th class="col-num">Entrada</th>
+                <th class="col-num">Target</th>
+                <th class="col-num">Stop Loss</th>
+                <th class="col-num">Win Rate MC</th>
+                <th class="col-num">CVaR 95%</th>
+                <th class="col-num">Graham Score</th>
+                <th class="col-num">Alpha Score</th>
+                <th class="col-date">Data Análise</th>
+                <th class="col-status">Estado</th>
+              </tr>
+            </thead>
+            <tbody id="monitoring-universe-tbody">
+              <tr class="empty">
+                <td colspan="14" style="text-align: center; color: #94a3b8; padding: 24px;">
+                  Nenhum ativo gravado no Universo de Monitorização ainda. Execute o motor quantitativo e clique em "Guardar Top 20 no Tracker & Restantes na Monitorização".
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </section>
       </div>
 

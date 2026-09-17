@@ -212,6 +212,55 @@ class DB {
           UNIQUE(ticker, recommendation_date)
         );
         CREATE INDEX IF NOT EXISTS idx_tracker_ticker_date ON alphaquant_history_tracker(ticker, recommendation_date);
+
+        CREATE TABLE IF NOT EXISTS alphaquant_top20_tracker (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ticker TEXT NOT NULL,
+          company_name TEXT,
+          country TEXT,
+          sector TEXT,
+          direction TEXT NOT NULL,
+          entry_price REAL NOT NULL,
+          target_price REAL NOT NULL,
+          stop_loss REAL NOT NULL,
+          current_price REAL,
+          win_rate_mc REAL,
+          cvar_95 REAL,
+          alpha_score REAL,
+          recommendation_date TEXT NOT NULL,
+          status TEXT DEFAULT 'PENDENTE',
+          exit_date TEXT,
+          exit_price REAL,
+          pnl_pct REAL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(ticker, recommendation_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_top20_ticker_date ON alphaquant_top20_tracker(ticker, recommendation_date);
+
+        CREATE TABLE IF NOT EXISTS investment_monitoring_universe (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ticker TEXT NOT NULL,
+          company_name TEXT,
+          country TEXT,
+          sector TEXT,
+          direction TEXT NOT NULL,
+          entry_price REAL NOT NULL,
+          target_price REAL NOT NULL,
+          stop_loss REAL NOT NULL,
+          current_price REAL,
+          win_rate_mc REAL,
+          cvar_95 REAL,
+          graham_score REAL,
+          alpha_score REAL,
+          analysis_date TEXT NOT NULL,
+          status TEXT DEFAULT 'MONITORIZANDO',
+          exit_date TEXT,
+          exit_price REAL,
+          pnl_pct REAL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(ticker, analysis_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_monitoring_ticker_date ON investment_monitoring_universe(ticker, analysis_date);
       `);
 
       const cols = this.db.prepare("PRAGMA table_info(historical_signals)").all();
@@ -2506,6 +2555,130 @@ class DB {
   saveBatchToTracker(assets) {
     return this.saveRecommendationsBatchToTracker(assets);
   }
+
+  saveTop20ToTracker(top20List) {
+    if (!Array.isArray(top20List) || top20List.length === 0) return 0;
+    const today = new Date().toISOString().split('T')[0];
+    const stmt = this.db.prepare(`
+      INSERT INTO alphaquant_top20_tracker (
+        ticker, company_name, country, sector, direction,
+        entry_price, target_price, stop_loss, current_price,
+        win_rate_mc, cvar_95, alpha_score, recommendation_date
+      ) VALUES (
+        @ticker, @company_name, @country, @sector, @direction,
+        @current_price, @target_price, @stop_loss, @current_price,
+        @win_rate_mc, @cvar_95, @alpha_score, @date
+      )
+      ON CONFLICT(ticker, recommendation_date) DO UPDATE SET
+        entry_price = excluded.entry_price,
+        target_price = excluded.target_price,
+        stop_loss = excluded.stop_loss,
+        current_price = excluded.current_price,
+        win_rate_mc = excluded.win_rate_mc,
+        cvar_95 = excluded.cvar_95,
+        alpha_score = excluded.alpha_score,
+        direction = excluded.direction;
+    `);
+
+    const tx = this.db.transaction((items) => {
+      let count = 0;
+      for (const item of items) {
+        if (!item || !item.ticker) continue;
+        stmt.run({
+          ticker: String(item.ticker).trim().toUpperCase(),
+          company_name: item.company_name || item.name || item.ticker,
+          country: item.country || 'Global',
+          sector: item.sector || 'Geral',
+          direction: item.direction || item.signal_direction || 'COMPRA',
+          current_price: Number(item.current_price || item.price || item.latest_price || 0),
+          target_price: Number(item.target_price || 0),
+          stop_loss: Number(item.stop_loss || 0),
+          win_rate_mc: Number(item.win_rate_mc || item.winRateMC || 50),
+          cvar_95: Number(item.cvar_95 || 5),
+          alpha_score: Number(item.alpha_score || 0),
+          date: today
+        });
+        count++;
+      }
+      return count;
+    });
+
+    const savedCount = tx(top20List);
+
+    // Sincroniza também com o tracker canónico / quant_tracker.db
+    try {
+      this.saveRecommendationsBatchToTracker(top20List);
+    } catch (_) {}
+
+    return savedCount;
+  }
+
+  saveRemainingToMonitoring(remainingList) {
+    if (!Array.isArray(remainingList) || remainingList.length === 0) return 0;
+    const today = new Date().toISOString().split('T')[0];
+    const stmt = this.db.prepare(`
+      INSERT INTO investment_monitoring_universe (
+        ticker, company_name, country, sector, direction,
+        entry_price, target_price, stop_loss, current_price,
+        win_rate_mc, cvar_95, graham_score, alpha_score, analysis_date
+      ) VALUES (
+        @ticker, @company_name, @country, @sector, @direction,
+        @current_price, @target_price, @stop_loss, @current_price,
+        @win_rate_mc, @cvar_95, @graham_score, @alpha_score, @date
+      )
+      ON CONFLICT(ticker, analysis_date) DO UPDATE SET
+        entry_price = excluded.entry_price,
+        target_price = excluded.target_price,
+        stop_loss = excluded.stop_loss,
+        current_price = excluded.current_price,
+        win_rate_mc = excluded.win_rate_mc,
+        cvar_95 = excluded.cvar_95,
+        graham_score = excluded.graham_score,
+        alpha_score = excluded.alpha_score,
+        direction = excluded.direction;
+    `);
+
+    const tx = this.db.transaction((items) => {
+      let count = 0;
+      for (const item of items) {
+        if (!item || !item.ticker) continue;
+        stmt.run({
+          ticker: String(item.ticker).trim().toUpperCase(),
+          company_name: item.company_name || item.name || item.ticker,
+          country: item.country || 'Global',
+          sector: item.sector || 'Geral',
+          direction: item.direction || item.signal_direction || 'COMPRA',
+          current_price: Number(item.current_price || item.price || item.latest_price || 0),
+          target_price: Number(item.target_price || 0),
+          stop_loss: Number(item.stop_loss || 0),
+          win_rate_mc: Number(item.win_rate_mc || item.winRateMC || 50),
+          cvar_95: Number(item.cvar_95 || 5),
+          graham_score: Number(item.graham_score || item.quality_score || 50),
+          alpha_score: Number(item.alpha_score || 0),
+          date: today
+        });
+        count++;
+      }
+      return count;
+    });
+
+    return tx(remainingList);
+  }
+
+  getTop20Tracker(date = null) {
+    if (date) {
+      return this.db.prepare('SELECT * FROM alphaquant_top20_tracker WHERE recommendation_date = ? ORDER BY alpha_score DESC').all(date);
+    }
+    return this.db.prepare('SELECT * FROM alphaquant_top20_tracker ORDER BY recommendation_date DESC, alpha_score DESC LIMIT 100').all();
+  }
+
+  getMonitoringUniverse(date = null) {
+    if (date) {
+      return this.db.prepare('SELECT * FROM investment_monitoring_universe WHERE analysis_date = ? ORDER BY alpha_score DESC').all(date);
+    }
+    return this.db.prepare('SELECT * FROM investment_monitoring_universe ORDER BY analysis_date DESC, alpha_score DESC LIMIT 1000').all();
+  }
+
 
   _syncBatchToQuantTrackerDb(assets, todayStr) {
     const quantTrackerPath = process.env.QUANT_TRACKER_DB_PATH || path.resolve(process.cwd(), 'quant_tracker.db');

@@ -3446,6 +3446,10 @@
       portfolioStatus.textContent = lastActiveTrades.length > 0
         ? `${lastActiveTrades.length} posição(ões) ativa(s) em monitorização.${hasStates ? ' (última reanálise aplicada)' : ''}`
         : 'Posições ativas abertas a partir dos sinais do scanner.';
+
+      if (typeof loadMonitoringUniverseData === 'function') {
+        loadMonitoringUniverseData();
+      }
     } catch (err) {
       portfolioStatus.textContent = 'Erro: ' + (err.message || String(err));
     }
@@ -3615,6 +3619,66 @@
   const portfolioTab = document.querySelector('.tab-btn[data-tab="portfolio"]');
   if (portfolioTab) {
     portfolioTab.addEventListener('click', loadPortfolio);
+  }
+
+  async function loadMonitoringUniverseData() {
+    const tbody = document.getElementById('monitoring-universe-tbody');
+    const badge = document.getElementById('monitoring-universe-count');
+    if (!tbody) return;
+
+    try {
+      const api = window.electronAPI || window.api || window.quantAPI;
+      if (!api || typeof api.getMonitoringUniverse !== 'function') return;
+      const res = await api.getMonitoringUniverse();
+      if (!res || !res.success || !Array.isArray(res.data)) return;
+
+      const rows = res.data;
+      if (badge) badge.textContent = rows.length;
+
+      if (rows.length === 0) {
+        tbody.innerHTML = `
+          <tr class="empty">
+            <td colspan="14" style="text-align: center; color: #94a3b8; padding: 24px;">
+              Nenhum ativo gravado no Universo de Monitorização ainda. Execute o motor quantitativo e clique em "Guardar Top 20 no Tracker & Restantes na Monitorização".
+            </td>
+          </tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map(item => {
+        const isBuy = item.direction === 'COMPRA';
+        const dirBadge = isBuy
+          ? '<span style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid #10b981; padding: 2px 8px; border-radius: 9999px; font-weight: 700; font-size: 11px;">COMPRA</span>'
+          : '<span style="background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid #ef4444; padding: 2px 8px; border-radius: 9999px; font-weight: 700; font-size: 11px;">VENDA</span>';
+
+        return `
+          <tr style="border-bottom: 1px solid #1e2538; height: 36px;">
+            <td style="font-weight: 700; color: #38bdf8;">${escapeHtml(item.ticker)}</td>
+            <td style="color: #cbd5e1; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.company_name || item.ticker)}</td>
+            <td>${escapeHtml(item.country || 'Global')}</td>
+            <td>${escapeHtml(item.sector || 'Geral')}</td>
+            <td style="text-align: center;">${dirBadge}</td>
+            <td class="col-num" style="color: #f8fafc; font-weight: 600;">${Number(item.entry_price || 0).toFixed(2)}</td>
+            <td class="col-num" style="color: #10b981; font-weight: 600;">${Number(item.target_price || 0).toFixed(2)}</td>
+            <td class="col-num" style="color: #ef4444; font-weight: 600;">${Number(item.stop_loss || 0).toFixed(2)}</td>
+            <td class="col-num" style="color: #38bdf8;">${Number(item.win_rate_mc || 0).toFixed(1)}%</td>
+            <td class="col-num" style="color: #fb923c;">-${Number(item.cvar_95 || 0).toFixed(1)}%</td>
+            <td class="col-num">${Number(item.graham_score || 0).toFixed(1)}</td>
+            <td class="col-num" style="font-weight: 700; color: #a855f7;">${Number(item.alpha_score || 0).toFixed(1)}</td>
+            <td style="color: #94a3b8; font-size: 11px;">${escapeHtml(item.analysis_date || '')}</td>
+            <td><span class="portfolio-status-badge portfolio-status-aberto" style="font-size: 10px;">${escapeHtml(item.status || 'MONITORIZANDO')}</span></td>
+          </tr>
+        `;
+      }).join('');
+    } catch (e) {
+      console.error('Erro ao carregar universo de monitorização:', e);
+    }
+  }
+  window.loadMonitoringUniverseData = loadMonitoringUniverseData;
+
+  const btnRefreshMonitoringUniverse = document.getElementById('btn-refresh-monitoring-universe');
+  if (btnRefreshMonitoringUniverse) {
+    btnRefreshMonitoringUniverse.addEventListener('click', loadMonitoringUniverseData);
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -5704,6 +5768,12 @@
 
     window.currentTopRecommendations = recommendedAssets || [];
     window.currentAllAnalyzedAssets = allAnalyzedAssets || window.currentAllAnalyzedAssets || [];
+    if (!window.currentAnalysisTop20 || window.currentAnalysisTop20.length === 0) {
+      window.currentAnalysisTop20 = (recommendedAssets || []).slice(0, 20);
+    }
+    if (!window.currentAnalysisRemaining || window.currentAnalysisRemaining.length === 0) {
+      window.currentAnalysisRemaining = (window.currentAllAnalyzedAssets || []).slice(20);
+    }
 
     if (!recommendedAssets || recommendedAssets.length === 0) {
       tbody.innerHTML = `
@@ -5725,6 +5795,7 @@
       .slice(0, 20);
 
     window.currentTopRecommendations = sortedAssets;
+    window.currentAnalysisTop20 = sortedAssets;
 
     if (countBadge) {
       countBadge.textContent = `Top ${sortedAssets.length} Melhores Ativos (Ordenados do Maior para o Menor)`;
@@ -5926,6 +5997,20 @@
         }
       }
 
+      const btnSplit = document.getElementById('btn-export-split-workflow');
+      const countRemainingBadge = document.getElementById('count-remaining');
+      const remainingCount = (window.currentAnalysisRemaining || []).length;
+      if (countRemainingBadge) countRemainingBadge.textContent = remainingCount;
+
+      if (btnSplit) {
+        const top20Count = (window.currentAnalysisTop20 || window.currentTopRecommendations || []).length;
+        if (top20Count > 0 || remainingCount > 0) {
+          btnSplit.style.display = 'inline-flex';
+        } else {
+          btnSplit.style.display = 'none';
+        }
+      }
+
       if (masterCheck && totalBoxes.length > 0) {
         masterCheck.checked = checkedBoxes.length === totalBoxes.length;
         masterCheck.indeterminate = checkedBoxes.length > 0 && checkedBoxes.length < totalBoxes.length;
@@ -6001,6 +6086,9 @@
             } else if (typeof window.loadTrackerData === 'function') {
               window.loadTrackerData();
             }
+            if (typeof loadMonitoringUniverseData === 'function') {
+              loadMonitoringUniverseData();
+            }
           } else {
             alert(`⚠️ Aviso: ${res?.message || 'Erro ao processar lote.'}`);
           }
@@ -6010,6 +6098,52 @@
         } finally {
           btnExportAll.disabled = false;
           btnExportAll.innerHTML = `<span>🚀 Exportar Todas as Análises (${assets.length}) para Monitorização</span>`;
+          if (typeof window.updateExportButtonState === 'function') {
+            window.updateExportButtonState();
+          }
+        }
+      };
+    }
+
+    const btnSplit = document.getElementById('btn-export-split-workflow');
+    if (btnSplit) {
+      btnSplit.onclick = async () => {
+        btnSplit.disabled = true;
+        btnSplit.innerHTML = '<span>⏳ A processar e gravar nas respetivas abas...</span>';
+
+        const top20List = window.currentAnalysisTop20 || (window.currentTopRecommendations || []).slice(0, 20);
+        const remainingList = window.currentAnalysisRemaining || (window.currentAllAnalyzedAssets || []).slice(20);
+
+        const payload = {
+          top20: top20List,
+          remaining: remainingList
+        };
+
+        try {
+          const api = window.electronAPI || window.api || window.quantAPI;
+          if (!api || typeof api.exportSplitAnalysis !== 'function') {
+            throw new Error('Canal IPC exportSplitAnalysis não disponível.');
+          }
+          const res = await api.exportSplitAnalysis(payload);
+          if (res && res.success) {
+            alert(`✅ Sucesso!\n- Top 20 guardados na aba "AlphaQuant Tracker & Performance"\n- ${res.savedRemainingCount} ativos guardados na aba "Monitorização de Investimentos" para auto-aprendizagem do modelo.`);
+            if (typeof loadTrackerData === 'function') {
+              loadTrackerData();
+            } else if (typeof window.loadTrackerData === 'function') {
+              window.loadTrackerData();
+            }
+            if (typeof loadMonitoringUniverseData === 'function') {
+              loadMonitoringUniverseData();
+            }
+          } else {
+            alert(`Erro: ${res?.error || res?.message || 'Falha ao guardar os registos.'}`);
+          }
+        } catch (err) {
+          console.error('Erro na exportação dividida:', err);
+          alert(`Erro: ${err.message || 'Falha ao guardar os registos.'}`);
+        } finally {
+          btnSplit.disabled = false;
+          btnSplit.innerHTML = `<span>🚀 Guardar Top 20 no Tracker &amp; Restantes (<span id="count-remaining">${(window.currentAnalysisRemaining || []).length}</span>) na Monitorização</span>`;
           if (typeof window.updateExportButtonState === 'function') {
             window.updateExportButtonState();
           }
