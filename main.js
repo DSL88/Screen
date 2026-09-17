@@ -773,6 +773,40 @@ app.whenReady().then(async () => {
       }
     });
 
+    // CANAL EXCLUSIVO DA MONITORIZAÇÃO (Aba 3) — nunca toca no Tracker.
+    ipcMain.handle('save-monitoring-universe-batch', async (_event, assets = []) => {
+      try {
+        if (!db) {
+          return { success: false, error: 'Base de dados não inicializada.' };
+        }
+        console.log(`[IPC Monitorização] A receber ${assets?.length || 0} ativos para investment_monitoring_universe.`);
+        const count = typeof db.saveToMonitoringUniverseOnly === 'function'
+          ? db.saveToMonitoringUniverseOnly(Array.isArray(assets) ? assets : [])
+          : db.saveQualifiedToMonitoring(Array.isArray(assets) ? assets : []);
+        return { success: true, count };
+      } catch (err) {
+        console.error('[IPC Monitorização Error]:', err);
+        return { success: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('get-monitoring-universe-records', async () => {
+      try {
+        if (!db) {
+          return { success: false, error: 'Base de dados não inicializada.', records: [], kpis: {} };
+        }
+        const records = typeof db.getMonitoringUniverseRecords === 'function'
+          ? db.getMonitoringUniverseRecords()
+          : [];
+        const data = typeof db.getAllMonitoringData === 'function' ? db.getAllMonitoringData() : {};
+        const analytics = typeof db.getMonitoringAnalytics === 'function' ? db.getMonitoringAnalytics() : {};
+        return { success: true, records, kpis: data.kpis || {}, analytics };
+      } catch (err) {
+        console.error('Erro em get-monitoring-universe-records:', err);
+        return { success: false, error: err.message, records: [], kpis: {} };
+      }
+    });
+
     ipcMain.handle('evaluate-monitoring-daily', async () => {
       try {
         if (!db) {
@@ -790,13 +824,14 @@ app.whenReady().then(async () => {
     ipcMain.handle('get-monitoring-data', async () => {
       try {
         if (!db) {
-          return { success: false, error: 'Base de dados não inicializada.' };
+          return { success: false, error: 'Base de dados não inicializada.', records: [], kpis: {} };
         }
-        const analytics = db.getMonitoringAnalytics();
-        return { success: true, analytics };
+        const data = typeof db.getAllMonitoringData === 'function' ? db.getAllMonitoringData() : {};
+        const analytics = typeof db.getMonitoringAnalytics === 'function' ? db.getMonitoringAnalytics() : {};
+        return { success: true, ...data, analytics }; // return { success: true, analytics };
       } catch (err) {
-        console.error('Erro ao obter dados de monitorização:', err);
-        return { success: false, error: err.message };
+        console.error('Erro em get-monitoring-data:', err);
+        return { success: false, error: err.message, records: [], kpis: {} };
       }
     });
 

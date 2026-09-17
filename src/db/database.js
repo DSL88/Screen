@@ -75,6 +75,7 @@ class DB {
     this.db.pragma('temp_store = MEMORY');
     this.db.pragma('foreign_keys = ON');
     this._migrate();
+    this._sanitizeTrackerPollution();
     this._seedParams();
     // Statements quentes compilados uma única vez, com o schema já migrado.
     this._prepareStatements();
@@ -2686,6 +2687,15 @@ class DB {
     return this.saveQualifiedToMonitoring(assetsList);
   }
 
+  /**
+   * Canal dedicado e exclusivo da aba "Monitorização de Investimentos" (Aba 3).
+   * Grava ESTRITAMENTE em investment_monitoring_universe — nunca em
+   * alphaquant_history_tracker/alphaquant_top20_tracker nem no quant_tracker.db.
+   */
+  saveToMonitoringUniverseOnly(assetsList) {
+    return this.saveQualifiedToMonitoring(assetsList);
+  }
+
   getTop20Tracker(date = null) {
     if (date) {
       return this.db.prepare('SELECT * FROM alphaquant_top20_tracker WHERE recommendation_date = ? ORDER BY alpha_score DESC').all(date);
@@ -2698,6 +2708,17 @@ class DB {
       return this.db.prepare('SELECT * FROM investment_monitoring_universe WHERE analysis_date = ? ORDER BY alpha_score DESC').all(date);
     }
     return this.db.prepare('SELECT * FROM investment_monitoring_universe ORDER BY analysis_date DESC, alpha_score DESC LIMIT 1000').all();
+  }
+
+  /**
+   * Leitura exclusiva da aba "Monitorização de Investimentos" (Aba 3):
+   * todos os registos do universo de monitorização, nunca do Tracker.
+   */
+  getMonitoringUniverseRecords() {
+    return this.db.prepare(`
+      SELECT * FROM investment_monitoring_universe
+      ORDER BY analysis_date DESC, alpha_score DESC, created_at DESC
+    `).all();
   }
 
   /**
@@ -2839,6 +2860,63 @@ class DB {
   }
 
   /**
+   * Função de Leitura Global para a Aba de Monitorização
+   * Lê da tabela investment_monitoring_universe e computa os KPIs.
+   */
+  getAllMonitoringData() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS investment_monitoring_universe (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticker TEXT NOT NULL,
+        company_name TEXT,
+        country TEXT,
+        sector TEXT,
+        direction TEXT NOT NULL,
+        entry_price REAL NOT NULL,
+        target_price REAL NOT NULL,
+        stop_loss REAL NOT NULL,
+        current_price REAL,
+        win_rate_mc REAL,
+        cvar_95 REAL,
+        graham_score REAL,
+        alpha_score REAL,
+        analysis_date TEXT NOT NULL,
+        status TEXT DEFAULT 'MONITORIZANDO',
+        exit_date TEXT,
+        exit_price REAL,
+        pnl_pct REAL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(ticker, analysis_date)
+      );
+    `);
+
+    const records = this.db.prepare(`
+      SELECT * FROM investment_monitoring_universe 
+      ORDER BY created_at DESC, alpha_score DESC
+    `).all();
+
+    const total = records.length;
+    const targetHits = records.filter(r => r.status === 'TARGET_ATINGIDO').length;
+    const stopHits = records.filter(r => r.status === 'STOP_ATINGIDO').length;
+    const pending = records.filter(r => r.status === 'MONITORIZANDO').length;
+    const expired = records.filter(r => r.status === 'EXPIRADO').length;
+    const closedCount = targetHits + stopHits + expired;
+    const hitRate = closedCount > 0 ? ((targetHits / closedCount) * 100).toFixed(1) : '0.0';
+
+    return {
+      kpis: {
+        totalMonitored: total,
+        targetHits,
+        stopHits,
+        pendingCount: pending,
+        expiredCount: expired,
+        hitRate
+      },
+      records: records
+    };
+  }
+
+  /**
    * Agrega KPIs globais, calibração por patamar de win rate e falhas por setor
    * do universo em monitorização para o dashboard.
    */
@@ -2943,6 +3021,7 @@ class DB {
   }
 
   _syncBatchToQuantTrackerDb(assets, todayStr) {
+    if (this._isTestEnvironment()) return;
     const quantTrackerPath = process.env.QUANT_TRACKER_DB_PATH || path.resolve(process.cwd(), 'quant_tracker.db');
     if (!fs.existsSync(quantTrackerPath)) return;
     let trackerDb = null;
@@ -2978,6 +3057,14 @@ class DB {
           @tier_label, @alpha_score, @entry_price, 0.0, 0.0, 'PENDENTE'
         )
       `) : null;
+      // Idempotência: uma nova gravação do mesmo ticker/dia substitui a linha
+      // anterior em vez de acumular duplicados no tracker (o esquema Python não
+      // tem UNIQUE(ticker, recommendation_date)).
+      const deleteTrackedDay = hasTracked ? trackerDb.prepare(`
+        DELETE FROM tracked_recommendations
+        WHERE UPPER(TRIM(ticker)) = ?
+          AND COALESCE(recommendation_date, entry_date) = ?
+      `) : null;
 
       const tx = trackerDb.transaction((items) => {
         for (const item of items) {
@@ -2985,6 +3072,7 @@ class DB {
           const tierLabel = winRate >= 70 ? 'Extrema (70%+)' : winRate >= 65 ? 'Muito Forte (65-69%)' : winRate >= 60 ? 'Forte (60-64%)' : winRate >= 55 ? 'Favorável (55-59%)' : winRate >= 50 ? 'Moderada (50-54%)' : 'Fraca (<50%)';
           if (insertTracked) {
             try {
+              deleteTrackedDay.run(String(item.ticker).trim().toUpperCase(), todayStr);
               insertTracked.run({
                 ticker: item.ticker,
                 sector: item.sector || 'Geral',
@@ -3006,6 +3094,99 @@ class DB {
       if (trackerDb) {
         try { trackerDb.close(); } catch (_) {}
       }
+    }
+  }
+
+  _isTestEnvironment() {
+    return Boolean(process.env.NODE_TEST_CONTEXT || process.env.NODE_ENV === 'test');
+  }
+
+  /**
+   * Higienização 1.1 — remove do tracker canónico (trades.db) os registos
+   * excedentes despejados por engano. A âncora é a tabela autoritária
+   * alphaquant_top20_tracker: só os tickers do Top 20 mais recente ficam no
+   * histórico; sem Top 20, mantém os 20 registos mais recentes (fallback).
+   */
+  pruneTrackerTablesToLatestTop20() {
+    const result = { removedHistory: 0, removedQuantTracked: 0 };
+    try {
+      const top20Rows = this.db.prepare(`
+        SELECT ticker FROM alphaquant_top20_tracker
+        WHERE recommendation_date = (SELECT MAX(recommendation_date) FROM alphaquant_top20_tracker)
+      `).all();
+      const topTickers = top20Rows
+        .map((r) => String(r.ticker || '').trim().toUpperCase())
+        .filter(Boolean);
+
+      if (topTickers.length > 0) {
+        const placeholders = topTickers.map(() => '?').join(', ');
+        result.removedHistory = this.db.prepare(`
+          DELETE FROM alphaquant_history_tracker
+          WHERE UPPER(TRIM(ticker)) NOT IN (${placeholders})
+        `).run(...topTickers).changes || 0;
+        // Remove duplicados históricos do mesmo ticker (mantém o registo mais recente).
+        this.db.prepare(`
+          DELETE FROM alphaquant_history_tracker
+          WHERE id NOT IN (
+            SELECT MAX(id) FROM alphaquant_history_tracker GROUP BY UPPER(TRIM(ticker))
+          )
+        `).run();
+      } else {
+        result.removedHistory = this.db.prepare(`
+          DELETE FROM alphaquant_history_tracker
+          WHERE id NOT IN (
+            SELECT id FROM alphaquant_history_tracker
+            ORDER BY id DESC LIMIT 20
+          )
+        `).run().changes || 0;
+      }
+    } catch (_) {
+      // Tabela ainda não existe: nada a limpar.
+    }
+    if (result.removedHistory > 0) {
+      console.log(`[DB Hygiene] ${result.removedHistory} registo(s) excedente(s) removidos de alphaquant_history_tracker.`);
+    }
+    try {
+      result.removedQuantTracked = this._pruneQuantTrackerPollution();
+    } catch (_) {}
+    return result;
+  }
+
+  _pruneQuantTrackerPollution() {
+    if (this._isTestEnvironment()) return 0;
+    const quantTrackerPath = process.env.QUANT_TRACKER_DB_PATH || path.resolve(process.cwd(), 'quant_tracker.db');
+    if (!fs.existsSync(quantTrackerPath)) return 0;
+    let trackerDb = null;
+    let removed = 0;
+    try {
+      trackerDb = new Database(quantTrackerPath);
+      const hasTracked = trackerDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tracked_recommendations'").get();
+      if (!hasTracked) return 0;
+      removed = trackerDb.prepare(`
+        DELETE FROM tracked_recommendations
+        WHERE id NOT IN (
+          SELECT id FROM tracked_recommendations
+          ORDER BY id DESC LIMIT 20
+        )
+      `).run().changes || 0;
+      if (removed > 0) {
+        console.log(`[DB Hygiene] ${removed} registo(s) excedente(s) removidos de tracked_recommendations (quant_tracker.db).`);
+      }
+    } catch (_) {
+      removed = 0;
+    } finally {
+      if (trackerDb) {
+        try { trackerDb.close(); } catch (_) {}
+      }
+    }
+    return removed;
+  }
+
+  _sanitizeTrackerPollution() {
+    try {
+      this.pruneTrackerTablesToLatestTop20();
+    } catch (err) {
+      console.error('[DB Hygiene] Falha na limpeza do tracker:', err && err.message ? err.message : err);
     }
   }
 

@@ -75,7 +75,8 @@
 
       // 3. Callback reativo por aba — adiado para depois do primeiro paint
       //    (a troca de aba pinta de imediato; o conteúdo chega sem bloquear a animação)
-      const shouldLoad = force || !tabsLoadedOnce.has(normTarget);
+      const isPortfolio = normTarget === 'portfolio' || normTarget.includes('monitoriza') || normTarget.includes('monitoring');
+      const shouldLoad = force || isPortfolio || !tabsLoadedOnce.has(normTarget);
       tabsLoadedOnce.add(normTarget);
       if (!shouldLoad) return;
 
@@ -91,8 +92,15 @@
             } else if (typeof window.restoreSimulationViewState === 'function') {
               window.restoreSimulationViewState();
             }
-          } else if (normTarget === 'portfolio' && typeof loadPortfolio === 'function') {
-            loadPortfolio();
+          } else if (normTarget === 'portfolio') {
+            if (typeof loadMonitoringTabData === 'function') {
+              loadMonitoringTabData();
+            } else if (typeof loadMonitoringTab === 'function') {
+              loadMonitoringTab();
+            }
+            if (typeof loadPortfolio === 'function') {
+              loadPortfolio();
+            }
           } else if (normTarget === 'history' && typeof loadHistory === 'function') {
             loadHistory();
           } else if (normTarget === 'quant-tracker' && typeof loadTrackerDashboard === 'function') {
@@ -3618,7 +3626,14 @@
 
   const portfolioTab = document.querySelector('.tab-btn[data-tab="portfolio"]');
   if (portfolioTab) {
-    portfolioTab.addEventListener('click', loadPortfolio);
+    portfolioTab.addEventListener('click', () => {
+      loadPortfolio();
+      if (typeof loadMonitoringTabData === 'function') {
+        loadMonitoringTabData();
+      } else if (typeof loadMonitoringTab === 'function') {
+        loadMonitoringTab();
+      }
+    });
   }
 
   let chartOutcomes = null;
@@ -3770,7 +3785,175 @@
     }).join('');
   }
 
+  function renderMonitoringCharts(analytics) {
+    const { kpis, tierAccuracy, sectorFailureAnalysis } = analytics || {};
+    if (!kpis) return;
+
+    const setText = (id, value) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    };
+    if (kpis.avgPnl != null) {
+      setText('mon-kpi-pnl', `${Number(kpis.avgPnl || 0) >= 0 ? '+' : ''}${Number(kpis.avgPnl || 0).toFixed(2)}%`);
+    }
+
+    if (typeof Chart !== 'undefined') {
+      const ctxOutcomes = document.getElementById('chart-monitoring-outcomes');
+      if (ctxOutcomes) {
+        if (chartOutcomes) chartOutcomes.destroy();
+        chartOutcomes = new Chart(ctxOutcomes.getContext('2d'), {
+          type: 'doughnut',
+          data: {
+            labels: ['Target Atingido', 'Stop Loss', 'Em Aberto', 'Expirado'],
+            datasets: [{
+              data: [kpis.targetHits || 0, kpis.stopHits || 0, kpis.pendingCount || 0, kpis.expiredCount || 0],
+              backgroundColor: ['#10b981', '#ef4444', '#38bdf8', '#64748b'],
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 10 } } } }
+          }
+        });
+      }
+
+      const ctxTiers = document.getElementById('chart-monitoring-tiers');
+      if (ctxTiers) {
+        if (chartTiers) chartTiers.destroy();
+        chartTiers = new Chart(ctxTiers.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels: (tierAccuracy || []).map(t => t.tier),
+            datasets: [{
+              label: 'Hit Rate Real (%)',
+              data: (tierAccuracy || []).map(t => t.realHitRate),
+              backgroundColor: '#0284c7',
+              borderRadius: 4
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: { beginAtZero: true, max: 100, ticks: { color: '#64748b' } },
+              x: { ticks: { color: '#94a3b8' } }
+            },
+            plugins: { legend: { display: false } }
+          }
+        });
+      }
+
+      const ctxSectors = document.getElementById('chart-monitoring-sectors');
+      if (ctxSectors) {
+        if (chartSectors) chartSectors.destroy();
+        const topSectors = (sectorFailureAnalysis || []).slice(0, 5);
+        chartSectors = new Chart(ctxSectors.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels: topSectors.map(s => s.sector),
+            datasets: [{
+              label: 'Taxa de Stop (%)',
+              data: topSectors.map(s => s.failRate),
+              backgroundColor: '#ef4444',
+              borderRadius: 4
+            }]
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: { beginAtZero: true, max: 100, ticks: { color: '#64748b' } },
+              y: { ticks: { color: '#94a3b8' } }
+            },
+            plugins: { legend: { display: false } }
+          }
+        });
+      }
+    }
+  }
+
+  async function loadMonitoringTabData() {
+    try {
+      const api = window.electronAPI || window.api || window.quantAPI;
+      const hasDedicatedApi = api && typeof api.getMonitoringUniverseRecords === 'function';
+      const hasLegacyApi = api && typeof api.getMonitoringData === 'function';
+      if (!hasDedicatedApi && !hasLegacyApi) return;
+      // Aba 3 lê EXCLUSIVAMENTE investment_monitoring_universe — nunca o Tracker.
+      const res = hasDedicatedApi
+        ? await api.getMonitoringUniverseRecords()
+        : await api.getMonitoringData();
+      if (!res || !res.success) {
+        console.warn('Não foi possível carregar dados da monitorização:', res?.error);
+        return;
+      }
+
+      const { kpis = {}, records = [] } = res;
+
+      // Atualizar os KPIs nos cartões do topo
+      const elTotal = document.getElementById('mon-kpi-total');
+      const elHitRate = document.getElementById('mon-kpi-hitrate');
+      const elTargets = document.getElementById('mon-kpi-targets');
+      const elStops = document.getElementById('mon-kpi-stops');
+
+      if (elTotal) elTotal.textContent = kpis.totalMonitored || 0;
+      if (elHitRate) elHitRate.textContent = `${kpis.hitRate || '0.0'}%`;
+      if (elTargets) elTargets.textContent = kpis.targetHits || 0;
+      if (elStops) elStops.textContent = kpis.stopHits || 0;
+
+      // Renderizar linhas da tabela
+      const tbody = document.getElementById('monitoring-table-body');
+      if (!tbody) return;
+
+      tbody.innerHTML = '';
+
+      if (records.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: #64748b; padding: 24px;">Nenhum ativo guardado em monitorização. Corre uma análise e clica em "Guardar Restantes Qualificados".</td></tr>`;
+        return;
+      }
+
+      records.forEach(r => {
+        let badgeColor = '#38bdf8';
+        if (r.status === 'TARGET_ATINGIDO') badgeColor = '#10b981';
+        if (r.status === 'STOP_ATINGIDO') badgeColor = '#ef4444';
+        if (r.status === 'EXPIRADO') badgeColor = '#64748b';
+
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid #1e2538';
+        tr.innerHTML = `
+          <td style="padding: 8px 10px; color: #94a3b8;">${r.analysis_date || '--'}</td>
+          <td style="padding: 8px 10px; font-weight: 700; color: #ffffff;">${r.ticker}</td>
+          <td style="padding: 8px 10px; color: #cbd5e1;">${r.company_name || r.ticker}</td>
+          <td style="padding: 8px 10px; color: #94a3b8;">${r.sector || 'Geral'}</td>
+          <td style="padding: 8px 10px; text-align: right; color: #f8fafc;">${(r.entry_price || 0).toFixed(2)} €</td>
+          <td style="padding: 8px 10px; text-align: right; color: #34d399;">${(r.target_price || 0).toFixed(2)} €</td>
+          <td style="padding: 8px 10px; text-align: right; color: #f87171;">${(r.stop_loss || 0).toFixed(2)} €</td>
+          <td style="padding: 8px 10px; text-align: center; color: #38bdf8; font-weight: 600;">${(r.win_rate_mc || 0).toFixed(1)}%</td>
+          <td style="padding: 8px 10px; text-align: center;">
+            <span style="background: ${badgeColor}22; color: ${badgeColor}; border: 1px solid ${badgeColor}44; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600;">
+              ${r.status}
+            </span>
+          </td>
+          <td style="padding: 8px 10px; text-align: right; font-weight: 600; color: ${r.pnl_pct >= 0 ? '#34d399' : '#f87171'};">
+            ${r.pnl_pct != null ? `${r.pnl_pct > 0 ? '+' : ''}${r.pnl_pct.toFixed(2)}%` : '--'}
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Renderizar gráficos se analytics estiver presente
+      if (res.analytics && typeof renderMonitoringCharts === 'function') {
+        renderMonitoringCharts(res.analytics);
+      }
+    } catch (err) {
+      console.error('Erro ao popular aba Monitorização:', err);
+    }
+  }
+
   window.loadMonitoringTab = loadMonitoringTab;
+  window.loadMonitoringTabData = loadMonitoringTabData;
   window.loadMonitoringUniverseData = loadMonitoringTab;
 
   const btnRunMonitoringEval = document.getElementById('btn-run-monitoring-eval');
@@ -5893,6 +6076,9 @@
     if (!window.currentAnalysisRemaining || window.currentAnalysisRemaining.length === 0) {
       window.currentAnalysisRemaining = (window.currentAllAnalyzedAssets || []).slice(20);
     }
+    if (!window.currentMonitoringPool || window.currentMonitoringPool.length === 0) {
+      window.currentMonitoringPool = (window.currentAllAnalyzedAssets || []).slice(20).filter(a => Number(a.win_rate_mc || a.winRateMC || 0) >= 50.0);
+    }
 
     if (!recommendedAssets || recommendedAssets.length === 0) {
       tbody.innerHTML = `
@@ -6140,37 +6326,64 @@
       };
     }
 
+    // Garantir fallback para qualquer nome de variável que o Python tenha retornado
+    function getQualifiedMonitoringList() {
+      if (Array.isArray(window.currentMonitoringPool) && window.currentMonitoringPool.length > 0) {
+        return window.currentMonitoringPool;
+      }
+      if (Array.isArray(window.currentAnalysisRemaining) && window.currentAnalysisRemaining.length > 0) {
+        return window.currentAnalysisRemaining;
+      }
+      if (Array.isArray(window.currentAllAnalyzedAssets)) {
+        // Fallback: filtra os ativos fora do Top 20 que têm MC >= 50%
+        return window.currentAllAnalyzedAssets.slice(20).filter(a => Number(a.win_rate_mc || a.winRateMC || 0) >= 50.0);
+      }
+      return [];
+    }
+
     const btnQualifiedMonitoring = document.getElementById('btn-save-qualified-monitoring');
+    const btnSaveQualified = btnQualifiedMonitoring;
     if (btnQualifiedMonitoring) {
       btnQualifiedMonitoring.onclick = async () => {
-        const pool = window.currentMonitoringPool || [];
-        if (pool.length === 0) {
-          alert('Nenhum ativo qualificado restante para monitorização.');
+        const pool = getQualifiedMonitoringList();
+        const listToSave = pool;
+
+        if (!listToSave || listToSave.length === 0) {
+          alert('⚠️ Nenhum ativo qualificado restante (MC >= 50%) encontrado para gravar. Corre a análise primeiro no Workstation.');
           return;
         }
 
         btnQualifiedMonitoring.disabled = true;
-        btnQualifiedMonitoring.textContent = `⏳ A guardar ${pool.length} análises...`;
+        const originalText = btnQualifiedMonitoring.innerHTML;
+        btnQualifiedMonitoring.innerHTML = `<span>⏳ A gravar ${listToSave.length} ativos na BD...</span>`;
 
         try {
           const api = window.electronAPI || window.api || window.quantAPI;
-          if (!api || typeof api.saveQualifiedMonitoring !== 'function') {
-            throw new Error('Canal IPC saveQualifiedMonitoring não disponível.');
+          const hasDedicatedChannel = api && typeof api.saveMonitoringUniverseBatch === 'function';
+          if (!hasDedicatedChannel && (!api || typeof api.saveQualifiedMonitoring !== 'function')) {
+            throw new Error('Canal IPC de monitorização não disponível.');
           }
-          const res = await api.saveQualifiedMonitoring(pool);
+          // Prioridade absoluta ao canal dedicado da Aba 3; o canal legado só
+          // serve de fallback e grava igualmente em investment_monitoring_universe.
+          const res = hasDedicatedChannel
+            ? await api.saveMonitoringUniverseBatch(pool)
+            : await api.saveQualifiedMonitoring(pool);
           if (res && res.success) {
-            alert(`✅ Sucesso! ${res.count} análises qualificadas guardadas na aba Monitorização de Investimentos.`);
-            if (typeof loadMonitoringUniverseData === 'function') {
-              loadMonitoringUniverseData();
-            } else if (typeof window.loadMonitoringUniverseData === 'function') {
-              window.loadMonitoringUniverseData();
+            alert(`✅ Sucesso! ${res.count} ativos qualificados foram guardados na aba Monitorização de Investimentos.`);
+            // Força o recarregamento imediato dos dados da aba se a função existir
+            if (typeof loadMonitoringTabData === 'function') {
+              await loadMonitoringTabData();
+            } else if (typeof loadMonitoringTab === 'function') {
+              await loadMonitoringTab();
+            } else if (typeof loadMonitoringUniverseData === 'function') {
+              await loadMonitoringUniverseData();
             }
           } else {
-            alert(`Erro: ${res?.error || 'Falha ao guardar as análises.'}`);
+            alert(`❌ Erro ao gravar: ${res?.error || 'Falha desconhecida na base de dados.'}`);
           }
-        } catch (e) {
-          console.error(e);
-          alert('Falha na comunicação com a base de dados.');
+        } catch (err) {
+          console.error('Erro ao invocar saveQualifiedMonitoring:', err);
+          alert('❌ Erro na comunicação IPC com a base de dados.');
         } finally {
           btnQualifiedMonitoring.disabled = false;
           btnQualifiedMonitoring.innerHTML = `📊 Guardar Restantes Qualificados (<span id="count-qualified-monitoring">${pool.length}</span>) na Monitorização`;
@@ -6459,6 +6672,26 @@
   }
   window.loadInitialStockData = loadInitialStockData;
 
+  // 4.2. Ligar o carregamento ao clique na aba no menu de navegação
+  function setupNavigationHooks() {
+    // Procura todos os botões de aba ou links de navegação
+    const navTabs = document.querySelectorAll('[data-tab], .nav-tab, .tab-btn');
+    
+    navTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const tabTarget = tab.getAttribute('data-tab') || tab.textContent.trim().toLowerCase();
+        
+        // Se a aba clicada for a de monitorização, força a leitura do SQLite
+        if (tabTarget.includes('monitoriza') || tabTarget.includes('monitoring') || tabTarget.includes('portfolio') || (tab.textContent || '').toLowerCase().includes('monitoriza')) {
+          if (typeof loadMonitoringTabData === 'function') {
+            loadMonitoringTabData();
+          }
+        }
+      });
+    });
+  }
+  window.setupNavigationHooks = setupNavigationHooks;
+
   // ═══════════════════════════════════════════════════════════
   // 2. BLINDAGEM DO ARRANQUE
   // ═══════════════════════════════════════════════════════════
@@ -6469,6 +6702,12 @@
       console.log('✅ Navegação por abas inicializada com sucesso.');
     } catch (err) {
       console.error('❌ Erro crítico ao iniciar navegação de abas:', err);
+    }
+
+    try {
+      setupNavigationHooks();
+    } catch (err) {
+      console.warn('Aviso: Falha ao configurar hooks de navegação:', err);
     }
 
     // 2. Os restantes módulos arrancam isolados em blocos try/catch
@@ -6504,6 +6743,9 @@
     } catch (err) {
       console.error('❌ Erro imediato ao iniciar navegação de abas:', err);
     }
+    try {
+      setupNavigationHooks();
+    } catch (_) {}
     try {
       if (typeof setupModalClosingGuards === 'function') setupModalClosingGuards();
     } catch (_) {}
