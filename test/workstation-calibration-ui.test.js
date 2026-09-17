@@ -136,7 +136,10 @@ test('Tabela Mestra: badge de contagem é dinâmico (sem texto rígido "5 Ativos
 
   const quantJs = fs.readFileSync(path.resolve('renderer/quantRenderer.js'), 'utf8');
   assert.match(quantJs, /badge-top-count/);
-  assert.match(quantJs, /Top \$\{sortedAssets\.length\} Melhores Ativos \(Ordenados do Maior para o Menor\)/);
+  assert.match(quantJs, /countBadge\.textContent\s*=\s*`\$\{sortedAssets\.length\} Ativos`/);
+
+  const rendererJs = fs.readFileSync(path.resolve('renderer/renderer.js'), 'utf8');
+  assert.match(rendererJs, /countBadge\.textContent\s*=\s*`\$\{sortedAssets\.length\} Ativos`/);
 });
 
 test('Top 20: ordenação defensiva por Alpha Score decrescente e ranking #1-#20', () => {

@@ -2614,7 +2614,11 @@ class DB {
   }
 
   saveRemainingToMonitoring(remainingList) {
-    if (!Array.isArray(remainingList) || remainingList.length === 0) return 0;
+    return this.saveQualifiedToMonitoring(remainingList);
+  }
+
+  saveQualifiedToMonitoring(monitoringList) {
+    if (!Array.isArray(monitoringList) || monitoringList.length === 0) return 0;
     const today = new Date().toISOString().split('T')[0];
     const stmt = this.db.prepare(`
       INSERT INTO investment_monitoring_universe (
@@ -2639,11 +2643,24 @@ class DB {
     `);
 
     const tx = this.db.transaction((items) => {
+      const tickers = [];
+      for (const item of items) {
+        if (!item || !item.ticker) continue;
+        const normalized = String(item.ticker).trim().toUpperCase();
+        if (!normalized) continue;
+        tickers.push(normalized);
+      }
+      if (tickers.length === 0) return 0;
+      const placeholders = tickers.map(() => '?').join(', ');
+      this.db.prepare(`DELETE FROM investment_monitoring_universe WHERE analysis_date = ? AND ticker NOT IN (${placeholders})`).run(today, ...tickers);
+
       let count = 0;
       for (const item of items) {
         if (!item || !item.ticker) continue;
+        const ticker = String(item.ticker).trim().toUpperCase();
+        if (!ticker) continue;
         stmt.run({
-          ticker: String(item.ticker).trim().toUpperCase(),
+          ticker,
           company_name: item.company_name || item.name || item.ticker,
           country: item.country || 'Global',
           sector: item.sector || 'Geral',
@@ -2662,7 +2679,11 @@ class DB {
       return count;
     });
 
-    return tx(remainingList);
+    return tx(monitoringList);
+  }
+
+  saveAllToMonitoring(assetsList) {
+    return this.saveQualifiedToMonitoring(assetsList);
   }
 
   getTop20Tracker(date = null) {

@@ -5795,10 +5795,11 @@
       .slice(0, 20);
 
     window.currentTopRecommendations = sortedAssets;
+    window.currentTop20 = sortedAssets;
     window.currentAnalysisTop20 = sortedAssets;
 
     if (countBadge) {
-      countBadge.textContent = `Top ${sortedAssets.length} Melhores Ativos (Ordenados do Maior para o Menor)`;
+      countBadge.textContent = `${sortedAssets.length} Ativos`;
     }
 
     sortedAssets.forEach((asset, index) => {
@@ -5953,10 +5954,6 @@
 
   function setupMasterCheckboxHandlers() {
     const masterCheck = document.getElementById('checkbox-master-recommendations');
-    const btnExport = document.getElementById('btn-export-tracker-batch') || document.getElementById('btn-export-top20-tracker');
-    const countSpan = document.getElementById('tracker-selected-count');
-    const btnExportAll = document.getElementById('btn-export-all-tracker');
-    const totalAnalyzedBadge = document.getElementById('total-analyzed-badge');
 
     if (masterCheck) {
       masterCheck.checked = true;
@@ -5974,41 +5971,10 @@
     window.updateExportButtonState = function() {
       const totalBoxes = document.querySelectorAll('.check-recommendation-item');
       const checkedBoxes = document.querySelectorAll('.check-recommendation-item:checked');
-      const selectedCount = checkedBoxes.length;
 
-      if (countSpan) countSpan.textContent = selectedCount;
-
-      if (btnExport) {
-        if (selectedCount > 0) {
-          btnExport.style.display = 'inline-flex';
-        } else {
-          btnExport.style.display = 'none';
-        }
-      }
-
-      const totalAllAnalyzed = (window.currentAllAnalyzedAssets || []).length;
-      if (totalAnalyzedBadge) totalAnalyzedBadge.textContent = totalAllAnalyzed;
-
-      if (btnExportAll) {
-        if (totalAllAnalyzed > 0) {
-          btnExportAll.style.display = 'inline-flex';
-        } else {
-          btnExportAll.style.display = 'none';
-        }
-      }
-
-      const btnSplit = document.getElementById('btn-export-split-workflow');
-      const countRemainingBadge = document.getElementById('count-remaining');
-      const remainingCount = (window.currentAnalysisRemaining || []).length;
-      if (countRemainingBadge) countRemainingBadge.textContent = remainingCount;
-
-      if (btnSplit) {
-        const top20Count = (window.currentAnalysisTop20 || window.currentTopRecommendations || []).length;
-        if (top20Count > 0 || remainingCount > 0) {
-          btnSplit.style.display = 'inline-flex';
-        } else {
-          btnSplit.style.display = 'none';
-        }
+      const countQualifiedMonitoring = document.getElementById('count-qualified-monitoring');
+      if (countQualifiedMonitoring) {
+        countQualifiedMonitoring.textContent = (window.currentMonitoringPool || []).length;
       }
 
       if (masterCheck && totalBoxes.length > 0) {
@@ -6017,136 +5983,78 @@
       }
     };
 
-    if (btnExport) {
-      btnExport.onclick = async () => {
-        const checkedTickers = Array.from(document.querySelectorAll('.check-recommendation-item:checked'))
-          .map(cb => cb.dataset.ticker);
+    const btnSaveTop20 = document.getElementById('btn-save-top20-tracker');
+    if (btnSaveTop20) {
+      btnSaveTop20.onclick = async () => {
+        const top20 = window.currentTop20 || window.currentTopRecommendations || [];
+        if (top20.length === 0) {
+          alert('Nenhum Top 20 disponível para guardar.');
+          return;
+        }
 
-        if (checkedTickers.length === 0) return;
-
-        const assetsToExport = (window.currentTopRecommendations || [])
-          .filter(asset => checkedTickers.includes(asset.ticker));
-
-        btnExport.disabled = true;
-        btnExport.innerHTML = `<span>⏳ A exportar ${assetsToExport.length} ativos...</span>`;
+        btnSaveTop20.disabled = true;
+        btnSaveTop20.textContent = '⏳ A guardar no Tracker...';
 
         try {
           const api = window.electronAPI || window.api || window.quantAPI;
-          if (!api || typeof api.exportRecommendationsToTrackerBatch !== 'function') {
-            throw new Error('Canal IPC exportRecommendationsToTrackerBatch não disponível.');
+          if (!api || typeof api.saveTop20Tracker !== 'function') {
+            throw new Error('Canal IPC saveTop20Tracker não disponível.');
           }
-          const response = await api.exportRecommendationsToTrackerBatch(assetsToExport);
-          if (response && response.success) {
-            alert(`✅ Sucesso: ${response.insertedCount} recomendações exportadas para a aba de Monitorização!`);
+          const res = await api.saveTop20Tracker(top20);
+          if (res && res.success) {
+            alert(`✅ ${res.count} ativos guardados na aba AlphaQuant Tracker & Performance!`);
             if (typeof loadTrackerData === 'function') {
               loadTrackerData();
             } else if (typeof window.loadTrackerData === 'function') {
               window.loadTrackerData();
             }
           } else {
-            alert(`⚠️ Aviso: ${response?.message || 'Falha ao exportar ativos.'}`);
+            alert(`Erro: ${res?.error || 'Falha ao guardar os ativos.'}`);
           }
-        } catch (err) {
-          console.error('Erro na exportação para o tracker:', err);
-          alert('❌ Ocorreu um erro ao comunicar com a base de dados.');
+        } catch (e) {
+          console.error(e);
+          alert('Falha na comunicação.');
         } finally {
-          btnExport.disabled = false;
-          if (typeof window.updateExportButtonState === 'function') {
-            window.updateExportButtonState();
-          }
+          btnSaveTop20.disabled = false;
+          btnSaveTop20.textContent = '🎯 Guardar Top 20 no Tracker';
         }
       };
     }
 
-    if (btnExportAll) {
-      btnExportAll.onclick = async () => {
-        const assets = window.currentAllAnalyzedAssets || [];
-        if (assets.length === 0) {
-          alert('Nenhum ativo analisado disponível para exportar.');
+    const btnQualifiedMonitoring = document.getElementById('btn-save-qualified-monitoring');
+    if (btnQualifiedMonitoring) {
+      btnQualifiedMonitoring.onclick = async () => {
+        const pool = window.currentMonitoringPool || [];
+        if (pool.length === 0) {
+          alert('Nenhum ativo qualificado restante para monitorização.');
           return;
         }
 
-        if (!confirm(`Deseja exportar todas as ${assets.length} análises para a aba de Monitorização de Investimentos?`)) {
-          return;
-        }
-
-        btnExportAll.disabled = true;
-        btnExportAll.innerHTML = `<span>⏳ A gravar ${assets.length} ativos na base de dados...</span>`;
+        btnQualifiedMonitoring.disabled = true;
+        btnQualifiedMonitoring.textContent = `⏳ A guardar ${pool.length} análises...`;
 
         try {
           const api = window.electronAPI || window.api || window.quantAPI;
-          if (!api || typeof api.exportRecommendationsToTrackerBatch !== 'function') {
-            throw new Error('Canal IPC exportRecommendationsToTrackerBatch não disponível.');
+          if (!api || typeof api.saveQualifiedMonitoring !== 'function') {
+            throw new Error('Canal IPC saveQualifiedMonitoring não disponível.');
           }
-          const res = await api.exportRecommendationsToTrackerBatch(assets);
+          const res = await api.saveQualifiedMonitoring(pool);
           if (res && res.success) {
-            alert(`✅ Sucesso! Foram adicionadas/atualizadas ${res.insertedCount} análises na Monitorização.`);
-            if (typeof loadTrackerData === 'function') {
-              loadTrackerData();
-            } else if (typeof window.loadTrackerData === 'function') {
-              window.loadTrackerData();
-            }
+            alert(`✅ Sucesso! ${res.count} análises qualificadas guardadas na aba Monitorização de Investimentos.`);
             if (typeof loadMonitoringUniverseData === 'function') {
               loadMonitoringUniverseData();
+            } else if (typeof window.loadMonitoringUniverseData === 'function') {
+              window.loadMonitoringUniverseData();
             }
           } else {
-            alert(`⚠️ Aviso: ${res?.message || 'Erro ao processar lote.'}`);
+            alert(`Erro: ${res?.error || 'Falha ao guardar as análises.'}`);
           }
-        } catch (err) {
-          console.error('Erro na exportação em lote:', err);
-          alert('❌ Ocorreu um erro ao comunicar com a base de dados.');
+        } catch (e) {
+          console.error(e);
+          alert('Falha na comunicação com a base de dados.');
         } finally {
-          btnExportAll.disabled = false;
-          btnExportAll.innerHTML = `<span>🚀 Exportar Todas as Análises (${assets.length}) para Monitorização</span>`;
-          if (typeof window.updateExportButtonState === 'function') {
-            window.updateExportButtonState();
-          }
-        }
-      };
-    }
-
-    const btnSplit = document.getElementById('btn-export-split-workflow');
-    if (btnSplit) {
-      btnSplit.onclick = async () => {
-        btnSplit.disabled = true;
-        btnSplit.innerHTML = '<span>⏳ A processar e gravar nas respetivas abas...</span>';
-
-        const top20List = window.currentAnalysisTop20 || (window.currentTopRecommendations || []).slice(0, 20);
-        const remainingList = window.currentAnalysisRemaining || (window.currentAllAnalyzedAssets || []).slice(20);
-
-        const payload = {
-          top20: top20List,
-          remaining: remainingList
-        };
-
-        try {
-          const api = window.electronAPI || window.api || window.quantAPI;
-          if (!api || typeof api.exportSplitAnalysis !== 'function') {
-            throw new Error('Canal IPC exportSplitAnalysis não disponível.');
-          }
-          const res = await api.exportSplitAnalysis(payload);
-          if (res && res.success) {
-            alert(`✅ Sucesso!\n- Top 20 guardados na aba "AlphaQuant Tracker & Performance"\n- ${res.savedRemainingCount} ativos guardados na aba "Monitorização de Investimentos" para auto-aprendizagem do modelo.`);
-            if (typeof loadTrackerData === 'function') {
-              loadTrackerData();
-            } else if (typeof window.loadTrackerData === 'function') {
-              window.loadTrackerData();
-            }
-            if (typeof loadMonitoringUniverseData === 'function') {
-              loadMonitoringUniverseData();
-            }
-          } else {
-            alert(`Erro: ${res?.error || res?.message || 'Falha ao guardar os registos.'}`);
-          }
-        } catch (err) {
-          console.error('Erro na exportação dividida:', err);
-          alert(`Erro: ${err.message || 'Falha ao guardar os registos.'}`);
-        } finally {
-          btnSplit.disabled = false;
-          btnSplit.innerHTML = `<span>🚀 Guardar Top 20 no Tracker &amp; Restantes (<span id="count-remaining">${(window.currentAnalysisRemaining || []).length}</span>) na Monitorização</span>`;
-          if (typeof window.updateExportButtonState === 'function') {
-            window.updateExportButtonState();
-          }
+          btnQualifiedMonitoring.disabled = false;
+          btnQualifiedMonitoring.innerHTML = `📊 Guardar Restantes Qualificados (<span id="count-qualified-monitoring">${pool.length}</span>) na Monitorização`;
         }
       };
     }

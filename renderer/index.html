@@ -230,36 +230,28 @@
 
         <!-- TABELA MESTRA DE RECOMENDAÇÕES (TOP BUY LIST) -->
         <div class="card-recommendations-master" id="container-top-recommendations">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <span style="font-size: 15px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+            <!-- Esquerda: Título da Tabela -->
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 15px; font-weight: 700; color: #f8fafc;">
                 📌 Tabela Mestra de Recomendações (Top Buy List)
               </span>
-              <span class="badge-count-pill" id="badge-top-count" style="background: #1e293b; color: #38bdf8; font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 9999px; border: 1px solid #334155;">
-                A aguardar execução do Motor...
+              <span id="badge-top-count" style="background: #1e293b; color: #38bdf8; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 9999px; border: 1px solid #334155;">
+                0 Ativos
               </span>
-              <span class="master-table-count-badge" id="master-table-count" style="display: none;"></span>
             </div>
 
+            <!-- Direita: Ações Desacopladas -->
             <div style="display: flex; align-items: center; gap: 10px;">
-              <!-- Botão A: Exportar Selecionados (Top 20) -->
-              <button id="btn-export-tracker-batch" type="button" class="btn-pill" style="display: none; background: #1e293b; color: #38bdf8; border: 1px solid #0284c7; padding: 6px 14px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; align-items: center; gap: 6px;">
-                <span>📥 Exportar (<span id="tracker-selected-count">0</span>) Selecionados</span>
+              <!-- Botão 1: Apenas Top 20 para AlphaQuant Tracker & Performance (Aba 6) -->
+              <button id="btn-save-top20-tracker" type="button" class="btn-pill" style="background: #0284c7; color: #ffffff; border: 1px solid #38bdf8; padding: 7px 14px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+                🎯 Guardar Top 20 no Tracker
               </button>
 
-              <!-- Botão B: Exportar TODO o Universo Analisado (100+ / 700+ ativos) -->
-              <button id="btn-export-all-tracker" type="button" class="btn-pill" style="display: none; background: #059669; color: #ffffff; border: 1px solid #10b981; padding: 6px 16px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; align-items: center; gap: 6px;">
-                <span>🚀 Exportar Todas as Análises (<span id="total-analyzed-badge">0</span>) para Monitorização</span>
+              <!-- Botão 2: Apenas o restante qualificado (MC >= 50%) para Monitorização de Investimentos (Aba 3) -->
+              <button id="btn-save-qualified-monitoring" type="button" class="btn-pill" style="background: #059669; color: #ffffff; border: 1px solid #10b981; padding: 7px 14px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+                📊 Guardar Restantes Qualificados (<span id="count-qualified-monitoring">0</span>) na Monitorização
               </button>
-
-              <!-- Botão C: Guardar Top 20 no Tracker & Restantes na Monitorização -->
-              <button id="btn-export-split-workflow" type="button" class="btn-pill" style="display: none; background: #0284c7; color: #ffffff; border: 1px solid #38bdf8; padding: 6px 16px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; align-items: center; gap: 6px;">
-                <span>🚀 Guardar Top 20 no Tracker &amp; Restantes (<span id="count-remaining">0</span>) na Monitorização</span>
-              </button>
-
-              <span style="font-size: 11px; color: #64748b;">
-                💡 Clica numa linha para abrir a inspeção estocástica lateral
-              </span>
             </div>
           </div>
 

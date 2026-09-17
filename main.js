@@ -747,6 +747,32 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('save-top20-tracker', async (_event, top20 = []) => {
+      try {
+        if (!db) {
+          return { success: false, error: 'Base de dados não inicializada.' };
+        }
+        const count = db.saveTop20ToTracker(Array.isArray(top20) ? top20 : []);
+        return { success: true, count };
+      } catch (err) {
+        console.error('Erro ao guardar no tracker:', err);
+        return { success: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('save-qualified-monitoring', async (_event, qualifiedList = []) => {
+      try {
+        if (!db) {
+          return { success: false, error: 'Base de dados não inicializada.' };
+        }
+        const count = db.saveQualifiedToMonitoring(Array.isArray(qualifiedList) ? qualifiedList : []);
+        return { success: true, count };
+      } catch (err) {
+        console.error('Erro ao guardar na monitorização:', err);
+        return { success: false, error: err.message };
+      }
+    });
+
     ipcMain.handle('get-top20-tracker', async (_event, date = null) => {
       try {
         if (!db) return { success: false, error: 'Base de dados não inicializada.' };

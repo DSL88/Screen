@@ -15,6 +15,7 @@ os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
 import json
+import math
 import argparse
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -83,6 +84,26 @@ def _safe_float(val: Any, default: float = 0.0) -> float:
         return default if (np.isnan(f) or np.isinf(f)) else f
     except Exception:
         return default
+
+
+def _finite_float(value: Any, default: float) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(result):
+        return default
+    return result
+
+
+def sanitize_non_finite(obj):
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: sanitize_non_finite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [sanitize_non_finite(v) for v in obj]
+    return obj
 
 
 def _build_synthetic_price_series(
@@ -660,17 +681,8 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
     first_series = first_asset.get("price_series", pd.Series(dtype=float))
     chart_close = [round(float(p), 2) for p in first_series.tail(60).tolist()] if len(first_series) >= 10 else [100.0] * 60
 
-    recommendations = generate_top_investment_recommendations(
-        analyzed_assets,
-        top_n=int(params.get("top_n") or params.get("topN") or 20),
-        horizon_days=horizon_markov,
-    )
-
-    split_res = split_analysis_results(analyzed_assets, horizon_days=horizon_markov)
+    qualified_res = consolidate_and_split_pipeline(analyzed_assets, horizon_days=horizon_markov)
     pipeline_res = build_pipeline_output(analyzed_assets, horizon_days=horizon_markov)
-
-    # Garante que a Tabela Mestra traz os 20 melhores sem estrangulamento precoce
-    final_top_20 = split_res["top_20"] if len(recommendations) < 20 else recommendations[:20]
 
     output_payload = {
         "success": True,
@@ -678,10 +690,13 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
         "timestamp": pd.Timestamp.now().isoformat(),
         "summary": summary,
         "assets": analyzed_assets,
-        "top_20": split_res["top_20"],
-        "remaining_analyzed": split_res["remaining_analyzed"],
-        "total_analyzed": split_res["total_analyzed"],
-        "top_recommendations": final_top_20,
+        "top_20": qualified_res["top_20"],
+        "monitoring_pool": qualified_res["monitoring_pool"],
+        "monitoring_count": qualified_res["monitoring_count"],
+        "total_qualified_count": qualified_res["total_qualified_count"],
+        "remaining_analyzed": qualified_res["monitoring_pool"],
+        "top_recommendations": qualified_res["top_20"],
+        "total_analyzed": qualified_res["total_qualified_count"],
         "all_analyzed_assets": pipeline_res["all_analyzed_assets"],
         "total_analyzed_count": pipeline_res["total_analyzed_count"],
         "phases": {
@@ -781,25 +796,27 @@ def classify_win_rate_tier(win_rate: float) -> dict:
         return {"level": "Fraca (<50%)", "color": "#dc3545", "badge": "bg-danger", "tier_id": 0}
 
 
-def split_analysis_results(processed_assets: List[Dict[str, Any]], horizon_days: int = 35) -> Dict[str, Any]:
+def consolidate_and_split_pipeline(processed_assets: List[Dict[str, Any]], horizon_days: int = 35) -> Dict[str, Any]:
     """
-    Separa estritamente o universo analisado em dois blocos:
-    - top_20: Os 20 ativos mais bem qualificados ordenados por Alpha Score decrescente.
-    - remaining_analyzed: Todos os restantes ativos analisados para monitorização contínua e auto-aprendizagem.
+    Consolida apenas o universo qualificado (Win Rate Monte Carlo >= 50.0% e preço válido) e divide-o em:
+    - top_20: os 20 ativos com maior Alpha Score.
+    - monitoring_pool: o restante pool qualificado para monitorização contínua.
     """
-    all_scored = []
-    
+    qualified = []
+
     for asset in processed_assets:
-        current_price = float(asset.get('current_price', asset.get('price', asset.get('latest_price', 0.0))) or 0.0)
+        current_price = _finite_float(asset.get('current_price', asset.get('price', asset.get('latest_price', 0.0))), 0.0)
         if current_price <= 0:
             continue
 
-        win_rate = float(asset.get('mc_win_rate', asset.get('winRateMC', asset.get('win_rate_numeric', 50.0))) or 50.0)
-        cvar_95 = float(asset.get('cvar_95', asset.get('mc_cvar_95', 5.0)) or 5.0)
-        exp_return = float(asset.get('expected_return', asset.get('mc_expected_return', 0.0)) or 0.0)
-        quality_score = float(asset.get('quality_score', asset.get('graham_score', 50.0)) or 50.0)
+        win_rate = _finite_float(asset.get('mc_win_rate', asset.get('winRateMC', asset.get('win_rate_numeric', 0.0))), 0.0)
+        if win_rate < 50.0:
+            continue
 
-        # Sentido e preços projetados
+        cvar_95 = _finite_float(asset.get('cvar_95', asset.get('mc_cvar_95', 5.0)), 5.0)
+        exp_return = _finite_float(asset.get('expected_return', asset.get('mc_expected_return', 0.0)), 0.0)
+        quality_score = _finite_float(asset.get('quality_score', asset.get('graham_score', 50.0)), 50.0)
+
         signal_dir = asset.get('signal_direction')
         if signal_dir in ('COMPRA', 'VENDA'):
             direction = signal_dir
@@ -816,10 +833,7 @@ def split_analysis_results(processed_assets: List[Dict[str, Any]], horizon_days:
             stop_p = current_price * (1.0 + 0.024)
 
         efficiency = abs(exp_return) / cvar_95 if cvar_95 > 0 else 1.0
-        # Fórmula de Alpha Score para ordenação
-        alpha = float(asset.get('purified_alpha_score', asset.get('alpha_score', 0.0)) or 0.0)
-        if alpha <= 0:
-            alpha = (quality_score * 0.3) + (win_rate * 0.4) + (efficiency * 30.0)
+        alpha = (quality_score * 0.3) + (win_rate * 0.4) + (efficiency * 30.0)
 
         ticker_raw = str(asset.get('ticker') or '').strip().upper()
 
@@ -841,22 +855,33 @@ def split_analysis_results(processed_assets: List[Dict[str, Any]], horizon_days:
             "status_eligibility": asset.get('status', 'Analisado'),
             "horizon_days": horizon_days
         }
-        all_scored.append(item)
+        qualified.append(item)
 
-    # Ordenação estrita do melhor para o pior
-    all_scored_sorted = sorted(all_scored, key=lambda x: x['alpha_score'], reverse=True)
+    qualified_sorted = sorted(qualified, key=lambda x: x['alpha_score'], reverse=True)
 
-    # Separação exata: Top 20 vs Restante Universo
-    top_20 = all_scored_sorted[:20]
-    remaining = all_scored_sorted[20:]
+    top_20 = qualified_sorted[:20]
+    monitoring_pool = qualified_sorted[20:]
 
     for idx, r in enumerate(top_20, start=1):
         r["rank"] = idx
 
     return {
         "top_20": top_20,
-        "remaining_analyzed": remaining,
-        "total_analyzed": len(all_scored_sorted)
+        "monitoring_pool": monitoring_pool,
+        "total_qualified_count": len(qualified_sorted),
+        "monitoring_count": len(monitoring_pool)
+    }
+
+
+def split_analysis_results(processed_assets: List[Dict[str, Any]], horizon_days: int = 35) -> Dict[str, Any]:
+    """
+    Compatibilidade: delega no motor único de triagem consolidado e devolve as chaves antigas.
+    """
+    res = consolidate_and_split_pipeline(processed_assets, horizon_days=horizon_days)
+    return {
+        "top_20": res["top_20"],
+        "remaining_analyzed": res["monitoring_pool"],
+        "total_analyzed": res["total_qualified_count"]
     }
 
 
@@ -864,14 +889,14 @@ def build_pipeline_output(processed_assets: List[Dict[str, Any]], horizon_days: 
     all_analyzed = []
     
     for asset in processed_assets:
-        current_price = float(asset.get('current_price', asset.get('price', asset.get('latest_price', 0.0))) or 0.0)
+        current_price = _finite_float(asset.get('current_price', asset.get('price', asset.get('latest_price', 0.0))), 0.0)
         if current_price <= 0:
             continue
 
-        win_rate = float(asset.get('mc_win_rate', asset.get('winRateMC', asset.get('win_rate_numeric', 50.0))) or 50.0)
-        cvar_95 = float(asset.get('cvar_95', asset.get('mc_cvar_95', 5.0)) or 5.0)
-        exp_return = float(asset.get('expected_return', asset.get('mc_expected_return', 0.0)) or 0.0)
-        quality_score = float(asset.get('quality_score', asset.get('graham_score', 50.0)) or 50.0)
+        win_rate = _finite_float(asset.get('mc_win_rate', asset.get('winRateMC', asset.get('win_rate_numeric', 50.0))), 50.0)
+        cvar_95 = _finite_float(asset.get('cvar_95', asset.get('mc_cvar_95', 5.0)), 5.0)
+        exp_return = _finite_float(asset.get('expected_return', asset.get('mc_expected_return', 0.0)), 0.0)
+        quality_score = _finite_float(asset.get('quality_score', asset.get('graham_score', 50.0)), 50.0)
         
         # Determina a direção estatística
         signal_dir = asset.get('signal_direction')
@@ -1081,10 +1106,10 @@ def main():
 
     try:
         result = execute_alpha_quant_engine(input_payload)
-        print(json.dumps(result))
+        print(json.dumps(sanitize_non_finite(result)))
     except Exception as e:
         err_res = {"success": False, "error": str(e)}
-        print(json.dumps(err_res))
+        print(json.dumps(sanitize_non_finite(err_res)))
         sys.exit(1)
 
 

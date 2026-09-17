@@ -55,6 +55,7 @@ from src.features.markov_monte_carlo import (
 from python_engine.run_pipeline import (
     execute_alpha_quant_engine,
     classify_win_rate_tier,
+    sanitize_non_finite,
 )
 from python_engine.tracker_db import (
     save_recommendation,
@@ -619,10 +620,10 @@ def main():
     handler = action_map.get(args.action, run_full_pipeline)
     try:
         result = handler(input_payload)
-        print(json.dumps(result))
+        print(json.dumps(sanitize_non_finite(result)))
     except Exception as e:
         err_res = {"success": False, "error": str(e)}
-        print(json.dumps(err_res))
+        print(json.dumps(sanitize_non_finite(err_res)))
         sys.exit(1)
 
 

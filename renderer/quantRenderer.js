@@ -314,8 +314,10 @@
 
     window.currentAnalysisTop20 = splitTop20;
     window.currentAnalysisRemaining = splitRemaining;
-    window.currentTopRecommendations = splitTop20.length > 0 ? splitTop20 : (data.top_recommendations || recs || []);
+    window.currentTopRecommendations = splitTop20.length > 0 ? splitTop20 : (data.top_recommendations || []);
     window.currentAllAnalyzedAssets = data.all_analyzed_assets || data.assets || assets || [];
+    window.currentTop20 = data.top_20 || splitTop20 || [];
+    window.currentMonitoringPool = data.monitoring_pool || data.remaining_analyzed || [];
 
     // 1. Dashboard de KPIs Globais (Grid de 4 Cartões Simétricos)
     updateGlobalSymmetricKPIs(summary, phases);
@@ -323,7 +325,7 @@
     // 2. Tabela Mestra de Recomendações (Top Buy List)
     const recList = window.currentTopRecommendations.length > 0
       ? window.currentTopRecommendations
-      : (recs.length > 0 ? recs : assets);
+      : assets;
 
     if (typeof window.renderTopRecommendations === 'function') {
       window.renderTopRecommendations(recList);
@@ -419,8 +421,9 @@
       .slice(0, 20);
 
     window.currentTopRecommendations = sortedAssets;
+    window.currentTop20 = sortedAssets;
 
-    if (countBadge) countBadge.textContent = `Top ${sortedAssets.length} Melhores Ativos (Ordenados do Maior para o Menor)`;
+    if (countBadge) countBadge.textContent = `${sortedAssets.length} Ativos`;
 
     sortedAssets.forEach((asset, idx) => {
       const rank = Number(asset.rank) > 0 ? Number(asset.rank) : idx + 1;

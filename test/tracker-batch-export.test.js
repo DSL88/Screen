@@ -10,20 +10,44 @@ const DB = require('../src/db/database');
 const ROOT = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
 
-test('HTML: Elementos de Checkbox Master e Botão de Exportação em Lote presentes', () => {
+// Isola o sync do tracker canónico: os testes nunca escrevem no quant_tracker.db real.
+const NOSYNC_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'test-tracker-batch-nosync-'));
+const ORIGINAL_QUANT_TRACKER_DB_PATH = process.env.QUANT_TRACKER_DB_PATH;
+process.env.QUANT_TRACKER_DB_PATH = path.join(NOSYNC_DIR, 'quant_tracker.db');
+
+test.after(() => {
+  if (ORIGINAL_QUANT_TRACKER_DB_PATH === undefined) {
+    delete process.env.QUANT_TRACKER_DB_PATH;
+  } else {
+    process.env.QUANT_TRACKER_DB_PATH = ORIGINAL_QUANT_TRACKER_DB_PATH;
+  }
+  fs.rmSync(NOSYNC_DIR, { recursive: true, force: true });
+});
+
+test('HTML: toolbar limpa da Tabela Mestra com os novos botões e checkbox master', () => {
   const html = read('renderer/index.html');
 
-  // Botão de exportação em lote com contador
-  assert.match(html, /id=["']btn-export-tracker-batch["']/);
-  assert.match(html, /id=["']tracker-selected-count["']/);
+  // Botão do Top 20 para o tracker
+  assert.match(html, /id=["']btn-save-top20-tracker["']/);
 
-  // Botão de exportação de todo o universo analisado
-  assert.match(html, /id=["']btn-export-all-tracker["']/);
-  assert.match(html, /id=["']total-analyzed-badge["']/);
+  // Botão dos restantes qualificados para a monitorização, com contador
+  assert.match(html, /id=["']btn-save-qualified-monitoring["']/);
+  assert.match(html, /id=["']count-qualified-monitoring["']/);
+
+  // Badge de contagem da tabela mestra
+  assert.match(html, /id=["']badge-top-count["']/);
 
   // Checkbox Master no thead
   assert.match(html, /id=["']checkbox-master-recommendations["']/);
   assert.match(html, /<th[^>]*>\s*<input type="checkbox" id="checkbox-master-recommendations"/);
+
+  // Os IDs antigos da toolbar foram removidos
+  assert.doesNotMatch(html, /id=["']btn-export-tracker-batch["']/);
+  assert.doesNotMatch(html, /id=["']btn-export-all-tracker["']/);
+  assert.doesNotMatch(html, /id=["']tracker-selected-count["']/);
+  assert.doesNotMatch(html, /id=["']total-analyzed-badge["']/);
+  assert.doesNotMatch(html, /id=["']btn-save-all-monitoring["']/);
+  assert.doesNotMatch(html, /id=["']count-all-monitoring["']/);
 });
 
 test('Preload & Main: Exposição e registro do canal IPC export-recommendations-tracker-batch', () => {
@@ -144,11 +168,17 @@ test('Renderer: Lógica de seleção individual, exportação integral e handler
   assert.match(rendererJs, /class="check-recommendation-item"/);
   assert.match(rendererJs, /data-ticker=/);
   assert.match(rendererJs, /updateExportButtonState/);
-  assert.match(rendererJs, /btn-export-all-tracker/);
+  assert.match(rendererJs, /btn-save-top20-tracker/);
+  assert.match(rendererJs, /btn-save-qualified-monitoring/);
+  assert.match(rendererJs, /api\.saveTop20Tracker\(top20\)/);
+  assert.match(rendererJs, /api\.saveQualifiedMonitoring\(pool\)/);
+  assert.match(rendererJs, /window\.currentMonitoringPool/);
 
   // Verificação no quantRenderer.js
   assert.match(quantJs, /window\.currentTopRecommendations =/);
   assert.match(quantJs, /window\.currentAllAnalyzedAssets =/);
+  assert.match(quantJs, /window\.currentTop20 =/);
+  assert.match(quantJs, /window\.currentMonitoringPool =/);
   assert.match(quantJs, /class="check-recommendation-item"/);
   assert.match(quantJs, /updateExportButtonState/);
 });
