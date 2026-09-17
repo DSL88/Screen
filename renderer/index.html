@@ -660,50 +660,103 @@
           </table>
         </section>
 
-        <!-- SECÇÃO: UNIVERSO DE MONITORIZAÇÃO (AUTO-APRENDIZAGEM DO MODELO) -->
-        <section class="results" style="margin-top: 24px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 0 4px;">
+        <div id="tab-monitoring-container" class="results" style="margin-top: 24px; padding: 20px 24px; color: #f8fafc;">
+          <!-- Barra de Topo com Botão de Avaliação -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
             <div>
-              <h2 style="font-size: 1.15rem; font-weight: 700; color: #f8fafc; margin: 0; display: flex; align-items: center; gap: 8px;">
-                <span>🌐 Universo Global de Análises (<span id="monitoring-universe-count">0</span> Ativos)</span>
+              <h2 style="margin: 0; font-size: 18px; font-weight: 700; color: #f8fafc;">
+                📊 Monitorização de Investimentos &amp; Auditoria do Modelo
               </h2>
-              <p style="font-size: 12px; color: #94a3b8; margin: 2px 0 0 0;">
-                Registo contínuo de todos os ativos analisados para avaliação de alvos e auto-calibração estocástica do modelo.
-              </p>
+              <span style="font-size: 12px; color: #94a3b8;">
+                Auditoria empírica contínua das hipóteses de Monte Carlo (MC &gt;= 50%) para auto-aperfeiçoamento do algoritmo
+              </span>
             </div>
-            <button id="btn-refresh-monitoring-universe" type="button" class="btn-secondary" style="font-size: 12px; padding: 5px 12px;">
-              <span>🔄 Atualizar Universo</span>
+
+            <button id="btn-run-monitoring-eval" type="button" class="btn-pill" style="background: #0284c7; color: #ffffff; border: 1px solid #38bdf8; padding: 8px 18px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+              🔄 Avaliar Desempenho e Atualizar Cotações
             </button>
           </div>
 
-          <table class="results-table portfolio-table" id="table-monitoring-universe">
-            <thead>
-              <tr>
-                <th class="col-ticker">Ticker</th>
-                <th class="col-name">Empresa</th>
-                <th class="col-country">País</th>
-                <th class="col-sector">Setor</th>
-                <th class="col-dir">Sentido</th>
-                <th class="col-num">Entrada</th>
-                <th class="col-num">Target</th>
-                <th class="col-num">Stop Loss</th>
-                <th class="col-num">Win Rate MC</th>
-                <th class="col-num">CVaR 95%</th>
-                <th class="col-num">Graham Score</th>
-                <th class="col-num">Alpha Score</th>
-                <th class="col-date">Data Análise</th>
-                <th class="col-status">Estado</th>
-              </tr>
-            </thead>
-            <tbody id="monitoring-universe-tbody">
-              <tr class="empty">
-                <td colspan="14" style="text-align: center; color: #94a3b8; padding: 24px;">
-                  Nenhum ativo gravado no Universo de Monitorização ainda. Execute o motor quantitativo e clique em "Guardar Top 20 no Tracker & Restantes na Monitorização".
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
+          <!-- Cards de KPIs do Topo -->
+          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 24px;">
+            <div style="background: #141923; padding: 14px 18px; border-radius: 10px; border: 1px solid #232b3e;">
+              <div style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Total Monitorizado</div>
+              <div id="mon-kpi-total" style="font-size: 24px; font-weight: 700; color: #38bdf8; margin-top: 4px;">0</div>
+            </div>
+            <div style="background: #141923; padding: 14px 18px; border-radius: 10px; border: 1px solid #232b3e;">
+              <div style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Taxa de Acerto Real (Hit Rate)</div>
+              <div id="mon-kpi-hitrate" style="font-size: 24px; font-weight: 700; color: #10b981; margin-top: 4px;">0.0%</div>
+            </div>
+            <div style="background: #141923; padding: 14px 18px; border-radius: 10px; border: 1px solid #232b3e;">
+              <div style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">PnL Médio (Fechados)</div>
+              <div id="mon-kpi-pnl" style="font-size: 24px; font-weight: 700; color: #a855f7; margin-top: 4px;">0.0%</div>
+            </div>
+            <div style="background: #141923; padding: 14px 18px; border-radius: 10px; border: 1px solid #232b3e;">
+              <div style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Targets Atingidos</div>
+              <div id="mon-kpi-targets" style="font-size: 24px; font-weight: 700; color: #34d399; margin-top: 4px;">0</div>
+            </div>
+            <div style="background: #141923; padding: 14px 18px; border-radius: 10px; border: 1px solid #232b3e;">
+              <div style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Stops Atingidos (Falhas)</div>
+              <div id="mon-kpi-stops" style="font-size: 24px; font-weight: 700; color: #f87171; margin-top: 4px;">0</div>
+            </div>
+          </div>
+
+          <!-- Painel com os 3 Gráficos de Auditoria -->
+          <div style="display: grid; grid-template-columns: 1fr 1.4fr 1.4fr; gap: 16px; margin-bottom: 24px;">
+            <div style="background: #141923; padding: 16px; border-radius: 10px; border: 1px solid #232b3e;">
+              <span style="font-size: 13px; font-weight: 600; color: #e2e8f0; display: block; margin-bottom: 12px;">
+                Distribuição de Resultados
+              </span>
+              <div style="height: 220px; position: relative;">
+                <canvas id="chart-monitoring-outcomes"></canvas>
+              </div>
+            </div>
+
+            <div style="background: #141923; padding: 16px; border-radius: 10px; border: 1px solid #232b3e;">
+              <span style="font-size: 13px; font-weight: 600; color: #e2e8f0; display: block; margin-bottom: 12px;">
+                Taxa de Acerto Real por Patamar Monte Carlo
+              </span>
+              <div style="height: 220px; position: relative;">
+                <canvas id="chart-monitoring-tiers"></canvas>
+              </div>
+            </div>
+
+            <div style="background: #141923; padding: 16px; border-radius: 10px; border: 1px solid #232b3e;">
+              <span style="font-size: 13px; font-weight: 600; color: #e2e8f0; display: block; margin-bottom: 12px;">
+                Diagnóstico: Onde o Modelo Mais Falha (% Stop por Setor)
+              </span>
+              <div style="height: 220px; position: relative;">
+                <canvas id="chart-monitoring-sectors"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tabela com a lista de ativos monitorizados -->
+          <div style="background: #141923; padding: 16px; border-radius: 10px; border: 1px solid #232b3e;">
+            <span style="font-size: 13px; font-weight: 600; color: #e2e8f0; display: block; margin-bottom: 12px;">
+              Lista de Ativos em Monitorização
+            </span>
+            <div style="max-height: 400px; overflow-y: auto;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                <thead>
+                  <tr style="border-bottom: 1px solid #232b3e; color: #64748b; text-align: left; height: 32px;">
+                    <th style="padding: 6px 10px;">DATA</th>
+                    <th style="padding: 6px 10px;">TICKER</th>
+                    <th style="padding: 6px 10px;">SETOR</th>
+                    <th style="padding: 6px 10px; text-align: right;">ENTRADA</th>
+                    <th style="padding: 6px 10px; text-align: right;">ATUAL</th>
+                    <th style="padding: 6px 10px; text-align: right; color: #34d399;">TARGET</th>
+                    <th style="padding: 6px 10px; text-align: right; color: #f87171;">STOP</th>
+                    <th style="padding: 6px 10px; text-align: center;">WIN RATE MC</th>
+                    <th style="padding: 6px 10px; text-align: center;">ESTADO</th>
+                    <th style="padding: 6px 10px; text-align: right;">PNL (%)</th>
+                  </tr>
+                </thead>
+                <tbody id="monitoring-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="tab-content tab-pane hidden" id="tab-history" data-tab-content="history" style="display: none;">

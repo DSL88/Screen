@@ -2700,6 +2700,247 @@ class DB {
     return this.db.prepare('SELECT * FROM investment_monitoring_universe ORDER BY analysis_date DESC, alpha_score DESC LIMIT 1000').all();
   }
 
+  /**
+   * Avaliação diária dos ativos em 'MONITORIZANDO': resolve TARGET_ATINGIDO,
+   * STOP_ATINGIDO ou EXPIRADO (horizonte de 35 dias) e atualiza o preço corrente.
+   * @returns {{updatedCount: number, resolvedCount: number}}
+   */
+  evaluateMonitoringAssetsDaily() {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayMs = Date.parse(todayStr);
+    const HORIZON_DAYS = 35;
+    const pricesSince = this.db.prepare(`
+      SELECT date, high, low, close FROM historical_prices
+      WHERE ticker IN (?, ?) AND date >= ? AND date <= ?
+      ORDER BY date ASC
+    `);
+    const updateStmt = this.db.prepare(`
+      UPDATE investment_monitoring_universe
+      SET current_price = ?, status = ?, exit_date = ?, exit_price = ?, pnl_pct = ?
+      WHERE id = ?
+    `);
+
+    const tx = this.db.transaction(() => {
+      const rows = this.db.prepare(
+        "SELECT * FROM investment_monitoring_universe WHERE status = 'MONITORIZANDO'"
+      ).all();
+      let updatedCount = 0;
+      let resolvedCount = 0;
+
+      for (const row of rows) {
+        let analysisDate = row.analysis_date;
+        let analysisMs = Date.parse(analysisDate);
+        if (!Number.isFinite(analysisMs) && row.created_at) {
+          analysisDate = String(row.created_at).split(' ')[0];
+          analysisMs = Date.parse(analysisDate);
+        }
+        if (!Number.isFinite(analysisMs)) continue;
+
+        const direction = String(row.direction || '').trim().toUpperCase();
+        if (direction !== 'COMPRA' && direction !== 'VENDA') continue;
+
+        const horizonEndDate = new Date(analysisMs + HORIZON_DAYS * 86400000).toISOString().split('T')[0];
+        const analysisDay = String(analysisDate).split('T')[0].split(' ')[0];
+        const rawPrices = pricesSince.all(
+          row.ticker,
+          String(row.ticker || '').trim().toUpperCase(),
+          analysisDay,
+          horizonEndDate
+        );
+
+        const prices = [];
+        for (const p of rawPrices) {
+          const close = Number(p.close);
+          if (!Number.isFinite(close) || close <= 0) continue;
+          prices.push({
+            date: p.date,
+            high: Number(p.high) > 0 ? Number(p.high) : close,
+            low: Number(p.low) > 0 ? Number(p.low) : close,
+            close
+          });
+        }
+
+        const daysPassed = Math.floor((todayMs - analysisMs) / 86400000);
+
+        if (prices.length === 0) {
+          if (daysPassed >= HORIZON_DAYS) {
+            updateStmt.run(null, 'EXPIRADO', horizonEndDate, null, null, row.id);
+            updatedCount++;
+            resolvedCount++;
+          }
+          continue;
+        }
+
+        const latest = prices[prices.length - 1];
+        const entry = Number(row.entry_price);
+        const target = Number(row.target_price);
+        const stop = Number(row.stop_loss);
+        const hasTarget = Number.isFinite(target) && target > 0;
+        const hasStop = Number.isFinite(stop) && stop > 0;
+
+        let status = 'MONITORIZANDO';
+        let exitDate = null;
+        let exitPrice = null;
+        let pnlPct = null;
+
+        for (const p of prices) {
+          if (direction === 'COMPRA') {
+            if (hasTarget && p.high >= target) {
+              status = 'TARGET_ATINGIDO';
+              exitPrice = target;
+              exitDate = p.date;
+              break;
+            }
+            if (hasStop && p.low <= stop) {
+              status = 'STOP_ATINGIDO';
+              exitPrice = stop;
+              exitDate = p.date;
+              break;
+            }
+          } else {
+            if (hasTarget && p.low <= target) {
+              status = 'TARGET_ATINGIDO';
+              exitPrice = target;
+              exitDate = p.date;
+              break;
+            }
+            if (hasStop && p.high >= stop) {
+              status = 'STOP_ATINGIDO';
+              exitPrice = stop;
+              exitDate = p.date;
+              break;
+            }
+          }
+        }
+
+        if (status === 'MONITORIZANDO' && daysPassed >= HORIZON_DAYS) {
+          status = 'EXPIRADO';
+          exitPrice = latest.close;
+          exitDate = latest.date;
+        }
+
+        if (status !== 'MONITORIZANDO' && Number.isFinite(entry) && entry !== 0) {
+          const exit = Number(exitPrice);
+          const pnl = direction === 'COMPRA'
+            ? ((exit - entry) / entry) * 100
+            : ((entry - exit) / entry) * 100;
+          pnlPct = Number.isFinite(pnl) ? Math.round(pnl * 100) / 100 : null;
+        }
+
+        updateStmt.run(latest.close, status, exitDate, exitPrice, pnlPct, row.id);
+        updatedCount++;
+        if (status !== 'MONITORIZANDO') resolvedCount++;
+      }
+
+      return { updatedCount, resolvedCount };
+    });
+
+    return tx();
+  }
+
+  /**
+   * Agrega KPIs globais, calibração por patamar de win rate e falhas por setor
+   * do universo em monitorização para o dashboard.
+   */
+  getMonitoringAnalytics() {
+    const allRecords = this.db.prepare('SELECT * FROM investment_monitoring_universe').all();
+    const total = allRecords.length;
+
+    let targetHits = 0;
+    let stopHits = 0;
+    let pendingCount = 0;
+    let expiredCount = 0;
+    const closedPnl = [];
+    for (const r of allRecords) {
+      if (r.status === 'TARGET_ATINGIDO') targetHits++;
+      else if (r.status === 'STOP_ATINGIDO') stopHits++;
+      else if (r.status === 'EXPIRADO') expiredCount++;
+      else pendingCount++;
+
+      if (r.status !== 'TARGET_ATINGIDO' && r.status !== 'STOP_ATINGIDO' && r.status !== 'EXPIRADO') continue;
+      if (r.pnl_pct == null) continue;
+      const pnl = Number(r.pnl_pct);
+      if (Number.isFinite(pnl)) closedPnl.push(pnl);
+    }
+
+    const closedCount = targetHits + stopHits + expiredCount;
+    const hitRate = closedCount > 0 ? Math.round((targetHits / closedCount) * 1000) / 10 : 0;
+    const avgPnl = closedPnl.length > 0
+      ? Math.round((closedPnl.reduce((sum, v) => sum + v, 0) / closedPnl.length) * 100) / 100
+      : 0;
+
+    const tierDefinitions = [
+      { tier: '50-54%', min: 50, max: 55 },
+      { tier: '55-59%', min: 55, max: 60 },
+      { tier: '60-64%', min: 60, max: 65 },
+      { tier: '65-69%', min: 65, max: 70 },
+      { tier: '70%+', min: 70, max: 100, maxInclusive: true }
+    ];
+    const tierAccuracy = tierDefinitions.map((tier) => {
+      const inTier = allRecords.filter((r) => {
+        const wr = Number(r.win_rate_mc);
+        if (!Number.isFinite(wr)) return false;
+        return wr >= tier.min && (tier.maxInclusive ? wr <= tier.max : wr < tier.max);
+      });
+      const targets = inTier.filter((r) => r.status === 'TARGET_ATINGIDO').length;
+      const stops = inTier.filter((r) => r.status === 'STOP_ATINGIDO').length;
+      const resolved = targets + stops;
+      return {
+        tier: tier.tier,
+        totalCount: inTier.length,
+        resolvedCount: resolved,
+        targetHits: targets,
+        stopHits: stops,
+        realHitRate: resolved > 0 ? Math.round((targets / resolved) * 1000) / 10 : 0
+      };
+    });
+
+    const sectorMap = new Map();
+    for (const r of allRecords) {
+      const key = r.sector || 'Geral';
+      if (!sectorMap.has(key)) sectorMap.set(key, { sector: key, total: 0, stops: 0, targets: 0 });
+      const bucket = sectorMap.get(key);
+      bucket.total++;
+      if (r.status === 'STOP_ATINGIDO') bucket.stops++;
+      else if (r.status === 'TARGET_ATINGIDO') bucket.targets++;
+    }
+    const sectorFailureAnalysis = Array.from(sectorMap.values())
+      .map((bucket) => {
+        const resolved = bucket.stops + bucket.targets;
+        return {
+          ...bucket,
+          failRate: resolved > 0 ? Math.round((bucket.stops / resolved) * 1000) / 10 : 0
+        };
+      })
+      .sort((a, b) => b.failRate - a.failRate);
+
+    const records = allRecords
+      .slice()
+      .sort((a, b) => {
+        if (a.analysis_date !== b.analysis_date) {
+          return String(b.analysis_date || '').localeCompare(String(a.analysis_date || ''));
+        }
+        return Number(b.alpha_score || 0) - Number(a.alpha_score || 0);
+      })
+      .slice(0, 1000);
+
+    return {
+      kpis: {
+        totalMonitored: total,
+        closedCount,
+        targetHits,
+        stopHits,
+        pendingCount,
+        expiredCount,
+        hitRate,
+        avgPnl
+      },
+      tierAccuracy,
+      sectorFailureAnalysis,
+      records,
+      recordsTotal: total
+    };
+  }
 
   _syncBatchToQuantTrackerDb(assets, todayStr) {
     const quantTrackerPath = process.env.QUANT_TRACKER_DB_PATH || path.resolve(process.cwd(), 'quant_tracker.db');

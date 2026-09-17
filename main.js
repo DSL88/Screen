@@ -773,6 +773,33 @@ app.whenReady().then(async () => {
       }
     });
 
+    ipcMain.handle('evaluate-monitoring-daily', async () => {
+      try {
+        if (!db) {
+          return { success: false, error: 'Base de dados não inicializada.' };
+        }
+        const res = db.evaluateMonitoringAssetsDaily();
+        const analytics = db.getMonitoringAnalytics();
+        return { success: true, ...res, analytics };
+      } catch (err) {
+        console.error('Erro na avaliação de monitorização:', err);
+        return { success: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('get-monitoring-data', async () => {
+      try {
+        if (!db) {
+          return { success: false, error: 'Base de dados não inicializada.' };
+        }
+        const analytics = db.getMonitoringAnalytics();
+        return { success: true, analytics };
+      } catch (err) {
+        console.error('Erro ao obter dados de monitorização:', err);
+        return { success: false, error: err.message };
+      }
+    });
+
     ipcMain.handle('get-top20-tracker', async (_event, date = null) => {
       try {
         if (!db) return { success: false, error: 'Base de dados não inicializada.' };

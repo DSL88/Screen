@@ -3621,64 +3621,183 @@
     portfolioTab.addEventListener('click', loadPortfolio);
   }
 
-  async function loadMonitoringUniverseData() {
-    const tbody = document.getElementById('monitoring-universe-tbody');
-    const badge = document.getElementById('monitoring-universe-count');
-    if (!tbody) return;
+  let chartOutcomes = null;
+  let chartTiers = null;
+  let chartSectors = null;
 
+  async function loadMonitoringTab() {
     try {
       const api = window.electronAPI || window.api || window.quantAPI;
-      if (!api || typeof api.getMonitoringUniverse !== 'function') return;
-      const res = await api.getMonitoringUniverse();
-      if (!res || !res.success || !Array.isArray(res.data)) return;
-
-      const rows = res.data;
-      if (badge) badge.textContent = rows.length;
-
-      if (rows.length === 0) {
-        tbody.innerHTML = `
-          <tr class="empty">
-            <td colspan="14" style="text-align: center; color: #94a3b8; padding: 24px;">
-              Nenhum ativo gravado no Universo de Monitorização ainda. Execute o motor quantitativo e clique em "Guardar Top 20 no Tracker & Restantes na Monitorização".
-            </td>
-          </tr>`;
-        return;
+      if (!api || typeof api.getMonitoringData !== 'function') return;
+      const res = await api.getMonitoringData();
+      if (res && res.success && res.analytics) {
+        renderMonitoringDashboard(res.analytics);
       }
-
-      tbody.innerHTML = rows.map(item => {
-        const isBuy = item.direction === 'COMPRA';
-        const dirBadge = isBuy
-          ? '<span style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid #10b981; padding: 2px 8px; border-radius: 9999px; font-weight: 700; font-size: 11px;">COMPRA</span>'
-          : '<span style="background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid #ef4444; padding: 2px 8px; border-radius: 9999px; font-weight: 700; font-size: 11px;">VENDA</span>';
-
-        return `
-          <tr style="border-bottom: 1px solid #1e2538; height: 36px;">
-            <td style="font-weight: 700; color: #38bdf8;">${escapeHtml(item.ticker)}</td>
-            <td style="color: #cbd5e1; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.company_name || item.ticker)}</td>
-            <td>${escapeHtml(item.country || 'Global')}</td>
-            <td>${escapeHtml(item.sector || 'Geral')}</td>
-            <td style="text-align: center;">${dirBadge}</td>
-            <td class="col-num" style="color: #f8fafc; font-weight: 600;">${Number(item.entry_price || 0).toFixed(2)}</td>
-            <td class="col-num" style="color: #10b981; font-weight: 600;">${Number(item.target_price || 0).toFixed(2)}</td>
-            <td class="col-num" style="color: #ef4444; font-weight: 600;">${Number(item.stop_loss || 0).toFixed(2)}</td>
-            <td class="col-num" style="color: #38bdf8;">${Number(item.win_rate_mc || 0).toFixed(1)}%</td>
-            <td class="col-num" style="color: #fb923c;">-${Number(item.cvar_95 || 0).toFixed(1)}%</td>
-            <td class="col-num">${Number(item.graham_score || 0).toFixed(1)}</td>
-            <td class="col-num" style="font-weight: 700; color: #a855f7;">${Number(item.alpha_score || 0).toFixed(1)}</td>
-            <td style="color: #94a3b8; font-size: 11px;">${escapeHtml(item.analysis_date || '')}</td>
-            <td><span class="portfolio-status-badge portfolio-status-aberto" style="font-size: 10px;">${escapeHtml(item.status || 'MONITORIZANDO')}</span></td>
-          </tr>
-        `;
-      }).join('');
     } catch (e) {
-      console.error('Erro ao carregar universo de monitorização:', e);
+      console.error('Erro ao carregar dashboard de monitorização:', e);
     }
   }
-  window.loadMonitoringUniverseData = loadMonitoringUniverseData;
 
-  const btnRefreshMonitoringUniverse = document.getElementById('btn-refresh-monitoring-universe');
-  if (btnRefreshMonitoringUniverse) {
-    btnRefreshMonitoringUniverse.addEventListener('click', loadMonitoringUniverseData);
+  function renderMonitoringDashboard(analytics) {
+    const { kpis, tierAccuracy, sectorFailureAnalysis, records } = analytics || {};
+    if (!kpis) return;
+
+    const setText = (id, value) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    };
+    setText('mon-kpi-total', kpis.totalMonitored);
+    setText('mon-kpi-hitrate', `${Number(kpis.hitRate || 0).toFixed(1)}%`);
+    setText('mon-kpi-targets', kpis.targetHits);
+    setText('mon-kpi-stops', kpis.stopHits);
+    setText('mon-kpi-pnl', `${Number(kpis.avgPnl || 0) >= 0 ? '+' : ''}${Number(kpis.avgPnl || 0).toFixed(2)}%`);
+
+    if (typeof Chart !== 'undefined') {
+      const ctxOutcomes = document.getElementById('chart-monitoring-outcomes');
+      if (ctxOutcomes) {
+        if (chartOutcomes) chartOutcomes.destroy();
+        chartOutcomes = new Chart(ctxOutcomes.getContext('2d'), {
+          type: 'doughnut',
+          data: {
+            labels: ['Target Atingido', 'Stop Loss', 'Em Aberto', 'Expirado'],
+            datasets: [{
+              data: [kpis.targetHits, kpis.stopHits, kpis.pendingCount, kpis.expiredCount],
+              backgroundColor: ['#10b981', '#ef4444', '#38bdf8', '#64748b'],
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 10 } } } }
+          }
+        });
+      }
+
+      const ctxTiers = document.getElementById('chart-monitoring-tiers');
+      if (ctxTiers) {
+        if (chartTiers) chartTiers.destroy();
+        chartTiers = new Chart(ctxTiers.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels: (tierAccuracy || []).map(t => t.tier),
+            datasets: [{
+              label: 'Hit Rate Real (%)',
+              data: (tierAccuracy || []).map(t => t.realHitRate),
+              backgroundColor: '#0284c7',
+              borderRadius: 4
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: { beginAtZero: true, max: 100, ticks: { color: '#64748b' } },
+              x: { ticks: { color: '#94a3b8' } }
+            },
+            plugins: { legend: { display: false } }
+          }
+        });
+      }
+
+      const ctxSectors = document.getElementById('chart-monitoring-sectors');
+      if (ctxSectors) {
+        if (chartSectors) chartSectors.destroy();
+        const topSectors = (sectorFailureAnalysis || []).slice(0, 5);
+        chartSectors = new Chart(ctxSectors.getContext('2d'), {
+          type: 'bar',
+          data: {
+            labels: topSectors.map(s => s.sector),
+            datasets: [{
+              label: 'Taxa de Stop (%)',
+              data: topSectors.map(s => s.failRate),
+              backgroundColor: '#ef4444',
+              borderRadius: 4
+            }]
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: { beginAtZero: true, max: 100, ticks: { color: '#64748b' } },
+              y: { ticks: { color: '#94a3b8' } }
+            },
+            plugins: { legend: { display: false } }
+          }
+        });
+      }
+    }
+
+    const tbody = document.getElementById('monitoring-table-body');
+    if (!tbody) return;
+    const money = (value, record) => (typeof window.formatPriceWithCurrency === 'function'
+      ? window.formatPriceWithCurrency(Number(value || 0), record)
+      : Number(value || 0).toFixed(2));
+
+    if (!records || records.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #94a3b8; padding: 24px;">Nenhum ativo no universo de monitorização. Execute o motor quantitativo e guarde os restantes qualificados.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = records.map(r => {
+      let badgeColor = '#38bdf8';
+      if (r.status === 'TARGET_ATINGIDO') badgeColor = '#10b981';
+      if (r.status === 'STOP_ATINGIDO') badgeColor = '#ef4444';
+      if (r.status === 'EXPIRADO') badgeColor = '#64748b';
+      const pnl = r.pnl_pct;
+      const pnlText = pnl != null ? `${Number(pnl) > 0 ? '+' : ''}${Number(pnl).toFixed(2)}%` : '--';
+      const pnlColor = pnl == null ? '#94a3b8' : (Number(pnl) >= 0 ? '#34d399' : '#f87171');
+      return `
+        <tr style="border-bottom: 1px solid #1e2538;">
+          <td style="padding: 6px 10px; color: #94a3b8;">${escapeHtml(r.analysis_date || '')}</td>
+          <td style="padding: 6px 10px; font-weight: 700; color: #ffffff;">${escapeHtml(r.ticker || '')}</td>
+          <td style="padding: 6px 10px; color: #94a3b8;">${escapeHtml(r.sector || 'Geral')}</td>
+          <td style="padding: 6px 10px; text-align: right;">${money(r.entry_price, r)}</td>
+          <td style="padding: 6px 10px; text-align: right;">${money(r.current_price || r.entry_price, r)}</td>
+          <td style="padding: 6px 10px; text-align: right; color: #34d399;">${money(r.target_price, r)}</td>
+          <td style="padding: 6px 10px; text-align: right; color: #f87171;">${money(r.stop_loss, r)}</td>
+          <td style="padding: 6px 10px; text-align: center;">${Number(r.win_rate_mc || 0).toFixed(1)}%</td>
+          <td style="padding: 6px 10px; text-align: center;">
+            <span style="background: ${badgeColor}22; color: ${badgeColor}; border: 1px solid ${badgeColor}44; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 600;">
+              ${escapeHtml(r.status || 'MONITORIZANDO')}
+            </span>
+          </td>
+          <td style="padding: 6px 10px; text-align: right; font-weight: 600; color: ${pnlColor};">
+            ${pnlText}
+          </td>
+        </tr>`;
+    }).join('');
+  }
+
+  window.loadMonitoringTab = loadMonitoringTab;
+  window.loadMonitoringUniverseData = loadMonitoringTab;
+
+  const btnRunMonitoringEval = document.getElementById('btn-run-monitoring-eval');
+  if (btnRunMonitoringEval) {
+    btnRunMonitoringEval.onclick = async () => {
+      btnRunMonitoringEval.disabled = true;
+      btnRunMonitoringEval.textContent = '⏳ A auditar cotações e saídas...';
+      try {
+        const api = window.electronAPI || window.api || window.quantAPI;
+        if (!api || typeof api.evaluateMonitoringDaily !== 'function') {
+          throw new Error('Canal IPC evaluateMonitoringDaily não disponível.');
+        }
+        const res = await api.evaluateMonitoringDaily();
+        if (res && res.success) {
+          alert(`Auditoria Concluída:\n${res.updatedCount} ativos verificados.\n${res.resolvedCount} trades fechados (Target/Stop/Expirado).`);
+          renderMonitoringDashboard(res.analytics);
+        } else {
+          alert(`Erro: ${res?.error || 'Falha ao avaliar a monitorização.'}`);
+        }
+      } catch (e) {
+        console.error(e);
+        alert('Falha na comunicação com a base de dados.');
+      } finally {
+        btnRunMonitoringEval.disabled = false;
+        btnRunMonitoringEval.textContent = '🔄 Avaliar Desempenho e Atualizar Cotações';
+      }
+    };
   }
 
   // ═══════════════════════════════════════════════════════════

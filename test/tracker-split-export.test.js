@@ -37,11 +37,23 @@ test('HTML: Elementos do fluxo de exportação dividida presentes', () => {
   assert.doesNotMatch(html, /id=["']btn-save-all-monitoring["']/);
   assert.doesNotMatch(html, /id=["']count-all-monitoring["']/);
 
-  // Secção e tabela de Universo de Monitorização em #tab-portfolio
-  assert.match(html, /id=["']table-monitoring-universe["']/);
-  assert.match(html, /id=["']monitoring-universe-tbody["']/);
-  assert.match(html, /id=["']monitoring-universe-count["']/);
-  assert.match(html, /id=["']btn-refresh-monitoring-universe["']/);
+  // Secção e dashboard de Monitorização em #tab-portfolio (nova UI substitui
+  // a antiga tabela de universo: mesmos dados, IDs e gráficos novos).
+  assert.match(html, /id=["']tab-monitoring-container["']/);
+  assert.match(html, /id=["']btn-run-monitoring-eval["']/);
+  assert.match(html, /id=["']monitoring-table-body["']/);
+  assert.match(html, /id=["']mon-kpi-total["']/);
+  assert.match(html, /id=["']mon-kpi-hitrate["']/);
+  assert.match(html, /id=["']mon-kpi-pnl["']/);
+  assert.match(html, /id=["']chart-monitoring-outcomes["']/);
+  assert.match(html, /id=["']chart-monitoring-tiers["']/);
+  assert.match(html, /id=["']chart-monitoring-sectors["']/);
+
+  // IDs antigos do universo de monitorização foram removidos
+  assert.doesNotMatch(html, /id=["']table-monitoring-universe["']/);
+  assert.doesNotMatch(html, /id=["']monitoring-universe-tbody["']/);
+  assert.doesNotMatch(html, /id=["']monitoring-universe-count["']/);
+  assert.doesNotMatch(html, /id=["']btn-refresh-monitoring-universe["']/);
 });
 
 test('Preload & Main: Exposição e registo do canal IPC export-split-analysis', () => {
