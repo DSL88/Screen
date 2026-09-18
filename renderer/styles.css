@@ -7336,3 +7336,26 @@ tr.empty td .empty-state {
   justify-content: flex-start !important;
   border-radius: var(--radius-pill) !important;
 }
+
+/* ── AlphaQuant Tracker: Destaque de Linhas Duplicadas ── */
+.row-duplicate {
+  background: rgba(239, 68, 68, 0.06) !important;
+}
+
+.row-duplicate:hover {
+  background: rgba(239, 68, 68, 0.12) !important;
+}
+
+.badge-duplicate {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #f87171;
+  background: rgba(127, 29, 29, 0.5);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+}

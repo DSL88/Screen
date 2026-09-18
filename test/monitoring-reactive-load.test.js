@@ -117,10 +117,93 @@ test('Preload: exposição dos canais dedicados da Monitorização', () => {
 
 test('Renderer.js: botão da monitorização prioriza o canal dedicado com fallback legado', () => {
   const rendererJs = read('renderer/renderer.js');
+  assert.match(rendererJs, /api\.saveMonitoringUniverse\(pool\)/);
   assert.match(rendererJs, /api\.saveMonitoringUniverseBatch\(pool\)/);
   assert.match(rendererJs, /api\.saveQualifiedMonitoring\(pool\)/);
   assert.match(rendererJs, /api\.getMonitoringUniverseRecords\(\)/);
+  assert.match(rendererJs, /function\s+bindMonitoringExportButton\s*\(\)/);
+  assert.match(rendererJs, /function\s+bindTop20ExportButton\s*\(\)/);
+  assert.match(rendererJs, /function\s+renderTrackerView\s*\(\)/);
+  assert.match(rendererJs, /function\s+renderMonitoringView\s*\(\)/);
 });
+
+test('IPC separado: save-monitoring-universe / get-tracker-table / get-monitoring-table', () => {
+  const main = read('main.js');
+  assert.match(main, /ipcMain\.handle\(['"]save-monitoring-universe['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]get-tracker-table['"]/);
+  assert.match(main, /ipcMain\.handle\(['"]get-monitoring-table['"]/);
+  assert.match(main, /db\.saveOnlyRemainingToMonitoring\(/);
+  assert.match(main, /db\.getTrackerOnlyData\(/);
+  assert.match(main, /db\.getMonitoringOnlyData\(/);
+
+  const preload = read('preload.js');
+  assert.match(preload, /saveMonitoringUniverse:\s*\(data\)\s*=>\s*ipcRenderer\.invoke\(['"]save-monitoring-universe['"],\s*data\)/);
+  assert.match(preload, /getTrackerTable:\s*\(\)\s*=>\s*ipcRenderer\.invoke\(['"]get-tracker-table['"]\)/);
+  assert.match(preload, /getMonitoringTable:\s*\(\)\s*=>\s*ipcRenderer\.invoke\(['"]get-monitoring-table['"]\)/);
+
+  const trackerJs = read('renderer/quantTrackerRenderer.js');
+  assert.match(trackerJs, /getTrackerTable/);
+  assert.match(trackerJs, /buildDashboardFromTop20/);
+});
+
+test('DB separação física: Top 20 corta em 20 e nunca toca na monitorização', () => {
+  const { db, dir } = createTempDb();
+  try {
+    const count = (table) => db.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      ticker: `TOP${String(i).padStart(2, '0')}`,
+      current_price: 10 + i,
+      target_price: 10.48 + i,
+      stop_loss: 9.76 + i,
+      win_rate_mc: 70,
+      alpha_score: 100 - i
+    }));
+
+    const saved = db.saveOnlyTop20ToTracker(many);
+    assert.equal(saved, 20, 'Deve cortar rigorosamente nos 20 primeiros');
+    assert.equal(count('alphaquant_top20_tracker'), 20);
+    assert.equal(count('investment_monitoring_universe'), 0, 'A monitorização não pode ser tocada');
+    assert.equal(count('alphaquant_history_tracker'), 0, 'O histórico do tracker não é tocado pelo canal exclusivo');
+
+    const trackerRows = db.getTrackerOnlyData();
+    assert.equal(trackerRows.length, 20);
+    assert.ok(trackerRows.every((r) => r.ticker.startsWith('TOP')));
+
+    const monitoringRows = db.getMonitoringOnlyData();
+    assert.equal(monitoringRows.length, 0);
+  } finally {
+    db.close();
+    removeTempDir(dir);
+  }
+});
+
+test('DB separação física: monitorização exclusiva não toca nas tabelas do Tracker', () => {
+  const { db, dir } = createTempDb();
+  try {
+    const count = (table) => db.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+
+    const saved = db.saveOnlyRemainingToMonitoring([
+      { ticker: 'MONA', current_price: 10, target_price: 10.48, stop_loss: 9.76, win_rate_mc: 55, alpha_score: 40 },
+      { ticker: 'MONB', current_price: 20, target_price: 20.96, stop_loss: 19.52, win_rate_mc: 52, alpha_score: 35 },
+      { ticker: 'MONC', current_price: 30, target_price: 31.44, stop_loss: 29.28, win_rate_mc: 51, alpha_score: 30 }
+    ]);
+
+    assert.equal(saved, 3);
+    assert.equal(count('investment_monitoring_universe'), 3);
+    assert.equal(count('alphaquant_top20_tracker'), 0);
+    assert.equal(count('alphaquant_history_tracker'), 0);
+
+    const monitoringRows = db.getMonitoringOnlyData();
+    assert.equal(monitoringRows.length, 3);
+    assert.deepEqual(monitoringRows.map((r) => r.ticker).sort(), ['MONA', 'MONB', 'MONC']);
+    assert.equal(db.getTrackerOnlyData().length, 0);
+  } finally {
+    db.close();
+    removeTempDir(dir);
+  }
+});
+
 
 test('DB: saveToMonitoringUniverseOnly grava apenas em investment_monitoring_universe', () => {
   const { db, dir } = createTempDb();

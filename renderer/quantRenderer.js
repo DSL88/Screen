@@ -319,6 +319,23 @@
     window.currentTop20 = data.top_20 || splitTop20 || [];
     window.currentMonitoringPool = data.monitoring_pool || data.remaining_analyzed || [];
 
+    if (!window.currentMonitoringPool || window.currentMonitoringPool.length === 0) {
+      const candidates = window.currentAllAnalyzedAssets || [];
+      const extractWr = (a) => {
+        if (!a) return 0;
+        const raw = a.win_rate_mc ?? a.mc_win_rate ?? a.winRateMC ?? a.win_rate ?? a.win_rate_numeric ?? 0;
+        const num = parseFloat(String(raw).replace('%', '').trim());
+        return isNaN(num) ? 0 : num;
+      };
+      const extractP = (a) => {
+        if (!a) return 0;
+        const num = parseFloat(a.current_price ?? a.price ?? a.latest_price ?? a.entry_price ?? 0);
+        return isNaN(num) ? 0 : num;
+      };
+      const qualified = candidates.filter(a => extractWr(a) >= 50.0 && extractP(a) > 0);
+      window.currentMonitoringPool = qualified.length > 20 ? qualified.slice(20) : qualified;
+    }
+
     // 1. Dashboard de KPIs Globais (Grid de 4 Cartões Simétricos)
     updateGlobalSymmetricKPIs(summary, phases);
 

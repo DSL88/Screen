@@ -774,6 +774,105 @@ app.whenReady().then(async () => {
       }
     });
 
+    // CANAL EXCLUSIVO DA MONITORIZAÇÃO (Aba 3) — grava só em investment_monitoring_universe.
+    ipcMain.handle('save-monitoring-universe', async (_event, list = []) => {
+      try {
+        if (!db) {
+          return { success: false, error: 'Base de dados não inicializada.' };
+        }
+        const count = typeof db.saveOnlyRemainingToMonitoring === 'function'
+          ? db.saveOnlyRemainingToMonitoring(Array.isArray(list) ? list : [])
+          : db.saveQualifiedToMonitoring(Array.isArray(list) ? list : []);
+        return { success: true, count };
+      } catch (err) {
+        console.error('Erro save-monitoring-universe:', err);
+        return { success: false, error: err.message };
+      }
+    });
+
+    // LEITURA EXCLUSIVA DA ABA 6 — apenas alphaquant_top20_tracker.
+    ipcMain.handle('get-tracker-table', async () => {
+      try {
+        if (!db) return [];
+        return typeof db.getTrackerOnlyData === 'function' ? db.getTrackerOnlyData() : [];
+      } catch (err) {
+        console.error('Erro get-tracker-table:', err);
+        return [];
+      }
+    });
+
+    // VALIDAÇÃO E GESTÃO DE DUPLICADOS NO TRACKER (Aba 6 & Aba 1)
+    ipcMain.handle('check-asset-tracked', async (_event, ticker) => {
+      try {
+        if (!db) return { exists: false };
+        return db.isAssetAlreadyTracked(ticker);
+      } catch (err) {
+        console.error('Erro check-asset-tracked:', err);
+        return { exists: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('add-tracked-investment-safe', async (_event, asset) => {
+      try {
+        if (!db) return { success: false, error: 'Base de dados não inicializada.' };
+        return db.addTrackedInvestmentSafe(asset);
+      } catch (err) {
+        console.error('Erro add-tracked-investment-safe:', err);
+        return { success: false, error: err.message };
+      }
+    });
+
+    ipcMain.handle('get-duplicate-tracked-assets', async () => {
+      try {
+        if (!db) return [];
+        return db.getDuplicateTrackedAssets();
+      } catch (err) {
+        console.error('Erro get-duplicate-tracked-assets:', err);
+        return [];
+      }
+    });
+
+    ipcMain.handle('delete-duplicate-tracked-assets', async () => {
+      try {
+        if (!db) return { success: false, deletedCount: 0, error: 'Base de dados não inicializada.' };
+        return db.deleteDuplicateTrackedAssets();
+      } catch (err) {
+        console.error('Erro delete-duplicate-tracked-assets:', err);
+        return { success: false, deletedCount: 0, error: err.message };
+      }
+    });
+
+    ipcMain.handle('delete-tracked-assets-by-ids', async (_event, ids) => {
+      try {
+        if (!db) return { success: false, deletedCount: 0, error: 'Base de dados não inicializada.' };
+        return db.deleteTrackedAssetsByIds(ids);
+      } catch (err) {
+        console.error('Erro delete-tracked-assets-by-ids:', err);
+        return { success: false, deletedCount: 0, error: err.message };
+      }
+    });
+
+    ipcMain.handle('clear-all-tracker-data', async () => {
+      try {
+        if (!db) return { success: false, deletedCount: 0, error: 'Base de dados não inicializada.' };
+        return db.clearAllTrackerData();
+      } catch (err) {
+        console.error('Erro clear-all-tracker-data:', err);
+        return { success: false, deletedCount: 0, error: err.message };
+      }
+    });
+
+    // LEITURA EXCLUSIVA DA ABA 3 — apenas investment_monitoring_universe.
+    ipcMain.handle('get-monitoring-table', async () => {
+      try {
+        if (!db) return [];
+        return typeof db.getMonitoringOnlyData === 'function' ? db.getMonitoringOnlyData() : [];
+      } catch (err) {
+        console.error('Erro get-monitoring-table:', err);
+        return [];
+      }
+    });
+
     ipcMain.handle('get-monitoring-data', async () => {
       try {
         if (!db) {

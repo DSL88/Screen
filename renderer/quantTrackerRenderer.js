@@ -36,6 +36,16 @@
   let tbodyMatrix;
   let badgeRowsCount;
 
+  // Controlo de Duplicados e Seleção
+  let chkFilterDuplicates;
+  let btnDeleteDuplicates;
+  let countDuplicatesBadge;
+  let chkSelectAllTracker;
+  let btnDeleteSelected;
+  let btnClearAllTracker;
+  let countSelectedBadge;
+  let btnCountSelected;
+
   // KPI elements
   let elKpiHitRate;
   let elKpiHitMeta;
@@ -58,6 +68,15 @@
     tbodyMatrix = document.getElementById('tracker-matrix-body');
     badgeRowsCount = document.getElementById('tracker-rows-count');
 
+    chkFilterDuplicates = document.getElementById('chk-filter-duplicates');
+    btnDeleteDuplicates = document.getElementById('btn-delete-duplicates');
+    countDuplicatesBadge = document.getElementById('count-duplicates-badge');
+    chkSelectAllTracker = document.getElementById('chk-select-all-tracker');
+    btnDeleteSelected = document.getElementById('btn-delete-selected');
+    btnClearAllTracker = document.getElementById('btn-clear-all-tracker');
+    countSelectedBadge = document.getElementById('count-selected-badge');
+    btnCountSelected = document.getElementById('btn-count-selected');
+
     elKpiHitRate = document.getElementById('tracker-kpi-hit-rate');
     elKpiHitMeta = document.getElementById('tracker-kpi-hit-meta');
     elKpiHitBar = document.getElementById('tracker-kpi-hit-bar');
@@ -70,7 +89,148 @@
   // ═══════════════════════════════════════════════════════════
   //  OBTENÇÃO DE DADOS VIA IPC BRIDGE
   // ═══════════════════════════════════════════════════════════
-  async function fetchTrackerDashboardData() {
+
+  // Fonte física e exclusiva da Aba 6: alphaquant_top20_tracker (trades.db).
+  async function fetchTop20OnlyRecords() {
+    const bridges = [window.electronAPI, window.api, window.quantAPI].filter(Boolean);
+    for (const bridge of bridges) {
+      if (typeof bridge.getTrackerTable !== 'function') continue;
+      const res = await bridge.getTrackerTable();
+      if (Array.isArray(res)) return res;
+      if (res && Array.isArray(res.records)) return res.records;
+      return [];
+    }
+    return null;
+  }
+
+  function computeTierLabel(winRate) {
+    if (winRate >= 70.0) return 'Extrema (70%+)';
+    if (winRate >= 65.0) return 'Muito Forte (65-69%)';
+    if (winRate >= 60.0) return 'Forte (60-64%)';
+    if (winRate >= 55.0) return 'Favorável (55-59%)';
+    if (winRate >= 50.0) return 'Moderada (50-54%)';
+    return 'Fraca (<50%)';
+  }
+
+  function buildDashboardFromTop20(rows, legacy) {
+    const legacyByTicker = new Map();
+    if (legacy && Array.isArray(legacy.items)) {
+      for (const item of legacy.items) {
+        const key = String((item && item.ticker) || '').trim().toUpperCase();
+        if (key) legacyByTicker.set(key, item);
+      }
+    }
+
+    const items = (rows || []).map((row) => {
+      const ticker = String(row.ticker || '').trim().toUpperCase();
+      const legacyItem = legacyByTicker.get(ticker) || {};
+      const winRate = Number(row.win_rate_mc || legacyItem.mc_win_rate || 0);
+      const entryPrice = Number(row.entry_price || 0);
+      const currentPrice = Number(legacyItem.current_price || row.current_price || entryPrice);
+      let pnl = legacyItem.realized_pnl_pct;
+      if (pnl == null) pnl = row.pnl_pct;
+      if (pnl == null && entryPrice > 0) pnl = ((currentPrice - entryPrice) / entryPrice) * 100;
+      const stopLoss = Number(row.stop_loss || legacyItem.stop_loss_price || 0);
+      return {
+        id: row.id,
+        ticker,
+        sector: row.sector || 'Outros',
+        recommendation_date: row.recommendation_date || legacyItem.recommendation_date || '',
+        entry_date: row.recommendation_date || '',
+        entry_price: entryPrice,
+        current_price: currentPrice,
+        target_price: Number(row.target_price || 0),
+        stop_loss_price: stopLoss,
+        stop_loss: stopLoss,
+        mc_win_rate: winRate,
+        predicted_win_rate: winRate,
+        mc_tier_label: legacyItem.mc_tier_label || computeTierLabel(winRate),
+        alpha_score: Number(row.alpha_score || 0),
+        horizon_days: 35,
+        status: legacyItem.status || row.status || 'PENDENTE',
+        exit_price: legacyItem.exit_price != null ? legacyItem.exit_price : row.exit_price,
+        exit_date: legacyItem.exit_date || row.exit_date || null,
+        realized_pnl_pct: Number(pnl || 0),
+        max_favorable_excursion: Number(legacyItem.max_favorable_excursion || 0),
+        max_adverse_excursion: Number(legacyItem.max_adverse_excursion || 0),
+        days_to_exit: legacyItem.days_to_exit != null ? legacyItem.days_to_exit : null
+      };
+    });
+
+    const total = items.length;
+    const targetHits = items.filter((it) => it.status === 'TARGET_ATINGIDO').length;
+    const stopHits = items.filter((it) => it.status === 'STOP_LOSS_ATINGIDO' || it.status === 'STOP_ATINGIDO').length;
+    const expired = items.filter((it) => it.status === 'EXPIRADO').length;
+    const pending = items.filter((it) => it.status === 'PENDENTE' || it.status === 'MONITORIZANDO').length;
+    const resolved = targetHits + stopHits + expired;
+    const hitRate = resolved > 0 ? (targetHits / resolved) * 100 : 0;
+
+    const gains = items.filter((it) => it.realized_pnl_pct > 0).reduce((acc, it) => acc + it.realized_pnl_pct, 0);
+    const losses = items.filter((it) => it.realized_pnl_pct < 0).reduce((acc, it) => acc + Math.abs(it.realized_pnl_pct), 0);
+    const profitFactor = losses > 0 ? gains / losses : (gains > 0 ? gains : 1);
+    const avgReturn = total > 0 ? items.reduce((acc, it) => acc + it.realized_pnl_pct, 0) / total : 0;
+
+    const targetDays = items
+      .filter((it) => it.status === 'TARGET_ATINGIDO' && Number(it.days_to_exit) > 0)
+      .map((it) => Number(it.days_to_exit));
+    const avgDays = targetDays.length > 0 ? targetDays.reduce((a, b) => a + b, 0) / targetDays.length : 0;
+
+    const cohortDates = Array.from(new Set(items.map((it) => it.recommendation_date).filter(Boolean)))
+      .sort()
+      .reverse();
+
+    const tierMap = new Map();
+    for (const it of items) {
+      const key = it.mc_tier_label;
+      if (!tierMap.has(key)) {
+        tierMap.set(key, {
+          tier_label: key,
+          suggestions_count: 0,
+          targets_hit: 0,
+          stops_hit: 0,
+          hit_rate_real: 0,
+          avg_return: 0,
+          status_calibration: 'Amostragem em Curso'
+        });
+      }
+      const bucket = tierMap.get(key);
+      bucket.suggestions_count++;
+      if (it.status === 'TARGET_ATINGIDO') bucket.targets_hit++;
+      else if (it.status === 'STOP_LOSS_ATINGIDO' || it.status === 'STOP_ATINGIDO') bucket.stops_hit++;
+      bucket.avg_return += it.realized_pnl_pct;
+    }
+    const tierMatrix = Array.from(tierMap.values()).map((bucket) => {
+      const tierResolved = bucket.targets_hit + bucket.stops_hit;
+      bucket.hit_rate_real = tierResolved > 0 ? Math.round((bucket.targets_hit / tierResolved) * 1000) / 10 : 0;
+      bucket.avg_return = bucket.suggestions_count > 0
+        ? Math.round((bucket.avg_return / bucket.suggestions_count) * 100) / 100
+        : 0;
+      if (bucket.suggestions_count >= 5 && bucket.hit_rate_real >= 60) bucket.status_calibration = 'Calibrado com Sucesso';
+      else if (bucket.suggestions_count >= 5 && bucket.hit_rate_real < 50) bucket.status_calibration = 'Alerta de Subdesempenho';
+      return bucket;
+    });
+
+    return {
+      kpis: {
+        total_recommendations: total,
+        active_pending: pending,
+        target_hits: targetHits,
+        stop_hits: stopHits,
+        expired_count: expired,
+        resolved_trades: resolved,
+        hit_rate: Math.round(hitRate * 10) / 10,
+        profit_factor: Math.round(profitFactor * 100) / 100,
+        avg_return_pct: Math.round(avgReturn * 100) / 100,
+        avg_days_to_target: Math.round(avgDays * 10) / 10
+      },
+      cohort_dates: cohortDates,
+      tier_matrix: tierMatrix,
+      items
+    };
+  }
+
+  // Fonte legada (Python / quant_tracker.db) — usada apenas como fallback.
+  async function fetchLegacyTrackerDashboardData() {
     try {
       let res;
       if (window.quantAPI && typeof window.quantAPI.fetchTrackerData === 'function') {
@@ -97,6 +257,25 @@
       console.error('[QuantTracker] Erro ao carregar dashboard de rastreio:', err);
       return null;
     }
+  }
+
+  async function fetchTrackerDashboardData() {
+    // 1) Fonte física e exclusiva da Aba 6: alphaquant_top20_tracker (trades.db).
+    try {
+      const top20Rows = await fetchTop20OnlyRecords();
+      if (top20Rows) {
+        let legacy = null;
+        try {
+          legacy = await fetchLegacyTrackerDashboardData();
+        } catch (_) { /* enriquecimento de estado é opcional */ }
+        return buildDashboardFromTop20(top20Rows, legacy);
+      }
+    } catch (err) {
+      console.error('[QuantTracker] Erro ao ler alphaquant_top20_tracker:', err);
+    }
+
+    // 2) Fallback de compatibilidade quando o canal dedicado não está exposto.
+    return fetchLegacyTrackerDashboardData();
   }
 
   async function loadTrackerDashboard() {
@@ -291,14 +470,26 @@
     if (items.length === 0) {
       tbodyTracker.innerHTML = `
         <tr>
-          <td colspan="10" class="text-center text-muted py-4">
+          <td colspan="11" class="text-center text-muted py-4">
             Nenhuma recomendação corresponde aos filtros selecionados.
           </td>
         </tr>`;
+      updateMasterCheckboxState();
+      updateDuplicateCountBadge();
       return;
     }
 
+    // Contagem de ocorrências para deteção de duplicados na tabela
+    const tickerCounts = {};
+    items.forEach((r) => {
+      const t = String(r.ticker || '').toUpperCase().trim();
+      if (t) tickerCounts[t] = (tickerCounts[t] || 0) + 1;
+    });
+
     const rowsHtml = items.map((rec) => {
+      const cleanTicker = String(rec.ticker || '').toUpperCase().trim();
+      const isDuplicate = (tickerCounts[cleanTicker] || 0) > 1;
+
       // Estado badge (Pills limpas)
       let statusHtml = '';
       if (rec.status === 'TARGET_ATINGIDO') {
@@ -338,9 +529,15 @@
       const safeTierLabel = escapeHtml(rec.mc_tier_label || '');
 
       return `
-        <tr>
+        <tr class="${isDuplicate ? 'row-duplicate' : ''}">
+          <td style="width: 38px; text-align: center;">
+            <input type="checkbox" class="chk-tracker-row" data-id="${rec.id}" data-ticker="${safeTicker}" data-duplicate="${isDuplicate}" style="cursor: pointer; width: 15px; height: 15px; accent-color: #3b82f6;">
+          </td>
           <td class="text-secondary" style="font-family: var(--mono); font-size: 12px;">${safeDate}</td>
-          <td><strong class="text-white" style="font-size: 1rem;">${safeTicker}</strong></td>
+          <td>
+            <strong class="text-white" style="font-size: 1rem;">${safeTicker}</strong>
+            ${isDuplicate ? '<span class="badge-duplicate">Duplicado</span>' : ''}
+          </td>
           <td><span class="text-secondary small">${safeSector}</span></td>
           <td class="num-col">${fmt(rec.entry_price)}</td>
           <td class="num-col" style="font-weight: 700; color: #fff;">${fmt(rec.current_price || rec.exit_price || rec.entry_price)}</td>
@@ -359,6 +556,55 @@
       `;
     });
     tbodyTracker.innerHTML = rowsHtml.join('');
+
+    attachRowCheckboxListeners();
+    updateSelectionCounts();
+    updateDuplicateCountBadge();
+  }
+
+  function attachRowCheckboxListeners() {
+    const rowCheckboxes = document.querySelectorAll('.chk-tracker-row');
+    rowCheckboxes.forEach((cb) => {
+      cb.addEventListener('change', () => {
+        updateSelectionCounts();
+      });
+    });
+  }
+
+  function updateSelectionCounts() {
+    const checkedBoxes = document.querySelectorAll('.chk-tracker-row:checked');
+    const count = checkedBoxes.length;
+    if (countSelectedBadge) countSelectedBadge.textContent = count;
+    if (btnCountSelected) btnCountSelected.textContent = count;
+    updateMasterCheckboxState();
+  }
+
+  function updateMasterCheckboxState() {
+    if (!chkSelectAllTracker) return;
+    const total = document.querySelectorAll('.chk-tracker-row');
+    const checked = document.querySelectorAll('.chk-tracker-row:checked');
+    if (total.length === 0) {
+      chkSelectAllTracker.checked = false;
+      chkSelectAllTracker.indeterminate = false;
+    } else {
+      chkSelectAllTracker.checked = checked.length === total.length;
+      chkSelectAllTracker.indeterminate = checked.length > 0 && checked.length < total.length;
+    }
+  }
+
+  async function updateDuplicateCountBadge() {
+    try {
+      const api = window.electronAPI || window.api || window.quantAPI;
+      if (!api || typeof api.getDuplicateTrackedAssets !== 'function') return;
+      const duplicates = await api.getDuplicateTrackedAssets();
+      const badge = document.getElementById('count-duplicates-badge');
+      if (!badge) return;
+      const tickers = new Set((duplicates || []).map((d) => String(d.ticker || '').toUpperCase().trim()));
+      const removableCount = Math.max(0, (duplicates || []).length - tickers.size);
+      badge.textContent = removableCount;
+    } catch (err) {
+      console.error('[QuantTracker] Erro ao atualizar badge de duplicados:', err);
+    }
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -440,6 +686,151 @@
         if (inputSearchTicker) inputSearchTicker.value = '';
         activeSearchQuery = '';
         applyFiltersAndRenderTable();
+      });
+    }
+
+    // Checkbox Master "Selecionar Todos"
+    if (chkSelectAllTracker) {
+      chkSelectAllTracker.addEventListener('change', (e) => {
+        const isChecked = e.target.checked;
+        document.querySelectorAll('.chk-tracker-row').forEach((cb) => {
+          cb.checked = isChecked;
+        });
+        if (chkFilterDuplicates && !isChecked) {
+          chkFilterDuplicates.checked = false;
+        }
+        updateSelectionCounts();
+      });
+    }
+
+    // Checkbox "Marcar Duplicados"
+    if (chkFilterDuplicates) {
+      chkFilterDuplicates.addEventListener('change', (e) => {
+        const markOnlyDuplicates = e.target.checked;
+        const seenTickers = new Set();
+
+        const rows = Array.from(document.querySelectorAll('.chk-tracker-row'));
+        rows.forEach((chk) => {
+          const ticker = String(chk.dataset.ticker || '').toUpperCase().trim();
+          const isDup = chk.dataset.duplicate === 'true';
+
+          if (markOnlyDuplicates && isDup) {
+            if (seenTickers.has(ticker)) {
+              chk.checked = true; // Marca cópias antigas excedentes
+            } else {
+              seenTickers.add(ticker);
+              chk.checked = false; // Mantém a cópia mais recente desmarcada
+            }
+          } else {
+            chk.checked = false;
+          }
+        });
+        updateSelectionCounts();
+      });
+    }
+
+    // Botão 1: "Apagar Selecionados" (elimina as linhas atualmente marcadas com checkbox)
+    if (btnDeleteSelected) {
+      btnDeleteSelected.addEventListener('click', async () => {
+        const api = window.electronAPI || window.api || window.quantAPI;
+        if (!api) return;
+
+        const checkedBoxes = Array.from(document.querySelectorAll('.chk-tracker-row:checked'));
+        if (checkedBoxes.length === 0) {
+          alert('Nenhum registo selecionado para apagar.\nPor favor, marque as caixas de seleção dos ativos que deseja eliminar.');
+          return;
+        }
+
+        const ids = checkedBoxes.map((cb) => Number(cb.dataset.id)).filter((id) => id > 0);
+        if (ids.length === 0) return;
+
+        if (!confirm(`Deseja apagar os ${ids.length} registo(s) selecionado(s) do Tracker?`)) {
+          return;
+        }
+
+        btnDeleteSelected.disabled = true;
+        try {
+          const res = (typeof api.deleteTrackedAssetsByIds === 'function')
+            ? await api.deleteTrackedAssetsByIds(ids)
+            : { success: false, error: 'Função de eliminação por IDs indisponível' };
+
+          if (res && res.success) {
+            alert(`✅ Foram eliminados ${res.deletedCount} registo(s) selecionado(s) do Tracker com sucesso.`);
+            if (chkFilterDuplicates) chkFilterDuplicates.checked = false;
+            if (chkSelectAllTracker) chkSelectAllTracker.checked = false;
+            await loadTrackerDashboard();
+          } else {
+            alert(`Erro ao eliminar registos: ${res?.error || 'Erro desconhecido'}`);
+          }
+        } catch (err) {
+          alert(`Erro na eliminação: ${err.message}`);
+        } finally {
+          btnDeleteSelected.disabled = false;
+        }
+      });
+    }
+
+    // Botão 2: "Apagar Duplicados" (purga automática mantendo o registo mais recente)
+    if (btnDeleteDuplicates) {
+      btnDeleteDuplicates.addEventListener('click', async () => {
+        const api = window.electronAPI || window.api || window.quantAPI;
+        if (!api) return;
+
+        if (!confirm('Deseja apagar automaticamente todas as cópias duplicadas do Tracker, mantendo apenas o registo mais recente de cada ativo?')) {
+          return;
+        }
+
+        btnDeleteDuplicates.disabled = true;
+        try {
+          const res = (typeof api.deleteDuplicateTrackedAssets === 'function')
+            ? await api.deleteDuplicateTrackedAssets()
+            : { success: false, error: 'Função de purga de duplicados indisponível' };
+
+          if (res && res.success) {
+            alert(`✅ Limpeza de duplicados concluída: ${res.deletedCount} duplicado(s) removido(s).`);
+            if (chkFilterDuplicates) chkFilterDuplicates.checked = false;
+            if (chkSelectAllTracker) chkSelectAllTracker.checked = false;
+            await loadTrackerDashboard();
+          } else {
+            alert(`Erro ao eliminar duplicados: ${res?.error || 'Erro desconhecido'}`);
+          }
+        } catch (err) {
+          alert(`Erro na limpeza de duplicados: ${err.message}`);
+        } finally {
+          btnDeleteDuplicates.disabled = false;
+        }
+      });
+    }
+
+    // Botão 3: "Apagar Tudo" (limpar todo o histórico guardado no Tracker)
+    if (btnClearAllTracker) {
+      btnClearAllTracker.addEventListener('click', async () => {
+        const api = window.electronAPI || window.api || window.quantAPI;
+        if (!api) return;
+
+        if (!confirm('⚠️ ATENÇÃO: Tem a certeza de que deseja apagar TODOS os registos guardados no Tracker?\n\nEsta ação irá eliminar permanentemente todo o histórico de acompanhamento e não pode ser revertida.')) {
+          return;
+        }
+
+        btnClearAllTracker.disabled = true;
+        try {
+          const res = (typeof api.clearAllTrackerData === 'function')
+            ? await api.clearAllTrackerData()
+            : { success: false, error: 'Função de limpeza total indisponível' };
+
+          if (res && res.success) {
+            alert(`✅ Todo o histórico do Tracker foi apagado com sucesso (${res.deletedCount} registo(s) eliminado(s)).`);
+            if (chkFilterDuplicates) chkFilterDuplicates.checked = false;
+            if (chkSelectAllTracker) chkSelectAllTracker.checked = false;
+            await loadTrackerDashboard();
+          } else {
+            alert(`Erro ao apagar todos os registos: ${res?.error || 'Erro desconhecido'}`);
+          }
+        } catch (err) {
+          alert(`Erro na limpeza total: ${err.message}`);
+        } finally {
+          btnClearAllTracker.disabled = false;
+        }
       });
     }
 

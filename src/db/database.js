@@ -2557,7 +2557,7 @@ class DB {
     return this.saveRecommendationsBatchToTracker(assets);
   }
 
-  saveTop20ToTracker(top20List) {
+  _saveTop20Strict(top20List) {
     if (!Array.isArray(top20List) || top20List.length === 0) return 0;
     const today = new Date().toISOString().split('T')[0];
     const stmt = this.db.prepare(`
@@ -2583,7 +2583,8 @@ class DB {
 
     const tx = this.db.transaction((items) => {
       let count = 0;
-      for (const item of items) {
+      // Corte rigoroso: a Aba 6 nunca recebe mais do que os 20 melhores.
+      for (const item of items.slice(0, 20)) {
         if (!item || !item.ticker) continue;
         stmt.run({
           ticker: String(item.ticker).trim().toUpperCase(),
@@ -2604,11 +2605,25 @@ class DB {
       return count;
     });
 
-    const savedCount = tx(top20List);
+    return tx(top20List);
+  }
 
-    // Sincroniza também com o tracker canónico / quant_tracker.db
+  /**
+   * Inserção EXCLUSIVA na tabela do Tracker (Aba 6): só alphaquant_top20_tracker,
+   * no máximo 20 registos, sem qualquer escrita na monitorização.
+   */
+  saveOnlyTop20ToTracker(top20List) {
+    return this._saveTop20Strict(top20List);
+  }
+
+  saveTop20ToTracker(top20List) {
+    const savedCount = this._saveTop20Strict(top20List);
+
+    // Sincroniza também com o tracker canónico / quant_tracker.db (apenas Top 20)
     try {
-      this.saveRecommendationsBatchToTracker(top20List);
+      if (Array.isArray(top20List) && top20List.length > 0) {
+        this.saveRecommendationsBatchToTracker(top20List.slice(0, 20));
+      }
     } catch (_) {}
 
     return savedCount;
@@ -2660,17 +2675,22 @@ class DB {
         if (!item || !item.ticker) continue;
         const ticker = String(item.ticker).trim().toUpperCase();
         if (!ticker) continue;
+
+        const currentPrice = Number(item.current_price || item.price || item.latest_price || item.entry_price || 0);
+        const direction = item.direction || item.signal_direction || 'COMPRA';
+        const winRate = Number(item.win_rate_mc ?? item.mc_win_rate ?? item.winRateMC ?? item.win_rate ?? item.win_rate_numeric ?? 50);
+
         stmt.run({
           ticker,
           company_name: item.company_name || item.name || item.ticker,
           country: item.country || 'Global',
           sector: item.sector || 'Geral',
-          direction: item.direction || item.signal_direction || 'COMPRA',
-          current_price: Number(item.current_price || item.price || item.latest_price || 0),
+          direction,
+          current_price: currentPrice,
           target_price: Number(item.target_price || 0),
           stop_loss: Number(item.stop_loss || 0),
-          win_rate_mc: Number(item.win_rate_mc || item.winRateMC || 50),
-          cvar_95: Number(item.cvar_95 || 5),
+          win_rate_mc: winRate,
+          cvar_95: Number(item.cvar_95 || item.mc_cvar_95 || 5),
           graham_score: Number(item.graham_score || item.quality_score || 50),
           alpha_score: Number(item.alpha_score || 0),
           date: today
@@ -2696,6 +2716,14 @@ class DB {
     return this.saveQualifiedToMonitoring(assetsList);
   }
 
+  /**
+   * Inserção EXCLUSIVA na tabela de Monitorização (Aba 3): só
+   * investment_monitoring_universe, sem qualquer escrita no Tracker.
+   */
+  saveOnlyRemainingToMonitoring(monitoringList) {
+    return this.saveQualifiedToMonitoring(monitoringList);
+  }
+
   getTop20Tracker(date = null) {
     if (date) {
       return this.db.prepare('SELECT * FROM alphaquant_top20_tracker WHERE recommendation_date = ? ORDER BY alpha_score DESC').all(date);
@@ -2718,6 +2746,179 @@ class DB {
     return this.db.prepare(`
       SELECT * FROM investment_monitoring_universe
       ORDER BY analysis_date DESC, alpha_score DESC, created_at DESC
+    `).all();
+  }
+
+  /**
+   * Leitura EXCLUSIVA da Aba 6 (Tracker): apenas alphaquant_top20_tracker.
+   */
+  getTrackerOnlyData() {
+    return this.db.prepare(`
+      SELECT * FROM alphaquant_top20_tracker
+      ORDER BY created_at DESC, alpha_score DESC
+    `).all();
+  }
+
+  /**
+   * 1.1. Verificar se um ativo já está no Tracker em estado ativo/pendente ou hoje
+   */
+  isAssetAlreadyTracked(ticker) {
+    if (!this.db || !ticker) return { exists: false };
+    const cleanTicker = String(ticker).trim().toUpperCase();
+    const today = new Date().toISOString().split('T')[0];
+    const row = this.db.prepare(`
+      SELECT id, ticker, recommendation_date, status, created_at 
+      FROM alphaquant_top20_tracker 
+      WHERE UPPER(TRIM(ticker)) = ? AND (status = 'PENDENTE' OR recommendation_date = ?)
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `).get(cleanTicker, today);
+
+    return row ? { exists: true, data: row } : { exists: false };
+  }
+
+  /**
+   * 1.2. Inserir investimento individual com validação prévia de existência
+   */
+  addTrackedInvestmentSafe(asset) {
+    if (!this.db) {
+      return { success: false, alreadyExists: false, error: 'Base de dados não inicializada.' };
+    }
+    if (!asset || !asset.ticker) {
+      return { success: false, alreadyExists: false, error: 'Ativo inválido ou sem ticker.' };
+    }
+
+    const cleanTicker = String(asset.ticker).trim().toUpperCase();
+    const check = this.isAssetAlreadyTracked(cleanTicker);
+    
+    if (check.exists) {
+      return {
+        success: false,
+        alreadyExists: true,
+        message: `O ativo ${cleanTicker} já está adicionado ao Tracker desde ${check.data.recommendation_date}.`,
+        record: check.data
+      };
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const stmt = this.db.prepare(`
+      INSERT INTO alphaquant_top20_tracker (
+        ticker, company_name, country, sector, direction,
+        entry_price, target_price, stop_loss, current_price,
+        win_rate_mc, cvar_95, alpha_score, recommendation_date, status
+      ) VALUES (
+        @ticker, @company_name, @country, @sector, @direction,
+        @entry_price, @target_price, @stop_loss, @entry_price,
+        @win_rate_mc, @cvar_95, @alpha_score, @date, 'PENDENTE'
+      )
+    `);
+
+    const entryPrice = Number(asset.current_price || asset.price || asset.entry_price || asset.latest_price || 0);
+    const direction = String(asset.direction || asset.signal_direction || 'COMPRA').toUpperCase();
+    const isSell = direction.includes('VENDA') || direction.includes('SELL') || direction.includes('SHORT');
+    const targetPrice = asset.target_price != null ? Number(asset.target_price) : (isSell ? entryPrice * (1 - 0.048) : entryPrice * (1 + 0.048));
+    const stopLoss = asset.stop_loss != null ? Number(asset.stop_loss) : (isSell ? entryPrice * (1 + 0.024) : entryPrice * (1 - 0.024));
+
+    try {
+      stmt.run({
+        ticker: cleanTicker,
+        company_name: asset.company_name || asset.name || asset.ticker,
+        country: asset.country || 'Global',
+        sector: asset.sector || 'Geral',
+        direction: isSell ? 'VENDA' : 'COMPRA',
+        entry_price: entryPrice,
+        target_price: targetPrice,
+        stop_loss: stopLoss,
+        win_rate_mc: Number(asset.win_rate_mc || asset.winRateMC || asset.mc_win_rate || 0),
+        cvar_95: Number(asset.cvar_95 || asset.mc_cvar_95 || 0),
+        alpha_score: Number(asset.alpha_score || asset.purified_alpha_score || 0),
+        date: today
+      });
+      return { success: true, alreadyExists: false, ticker: cleanTicker };
+    } catch (err) {
+      return { success: false, alreadyExists: false, error: err.message };
+    }
+  }
+
+  /**
+   * 1.3. Procurar registos duplicados na tabela do Tracker
+   */
+  getDuplicateTrackedAssets() {
+    if (!this.db) return [];
+    return this.db.prepare(`
+      SELECT id, ticker, recommendation_date, created_at, status
+      FROM alphaquant_top20_tracker
+      WHERE UPPER(TRIM(ticker)) IN (
+        SELECT UPPER(TRIM(ticker)) 
+        FROM alphaquant_top20_tracker 
+        GROUP BY UPPER(TRIM(ticker)) 
+        HAVING COUNT(*) > 1
+      )
+      ORDER BY ticker ASC, created_at DESC, id DESC
+    `).all();
+  }
+
+  /**
+   * 1.4. Apagar registos duplicados mantendo apenas o registo mais recente de cada ativo
+   */
+  deleteDuplicateTrackedAssets() {
+    if (!this.db) return { success: false, deletedCount: 0, error: 'Base de dados não inicializada.' };
+    const result = this.db.prepare(`
+      DELETE FROM alphaquant_top20_tracker
+      WHERE id NOT IN (
+        SELECT MAX(id)
+        FROM alphaquant_top20_tracker
+        GROUP BY UPPER(TRIM(ticker))
+      )
+    `).run();
+
+    return { success: true, deletedCount: result.changes };
+  }
+
+  /**
+   * 1.5. Eliminar registos específicos selecionados por IDs (via Checkboxes)
+   */
+  deleteTrackedAssetsByIds(idsArray) {
+    if (!this.db) return { success: false, deletedCount: 0, error: 'Base de dados não inicializada.' };
+    if (!Array.isArray(idsArray) || idsArray.length === 0) return { success: true, deletedCount: 0 };
+    
+    const validIds = idsArray.map(n => Number(n)).filter(n => Number.isInteger(n) && n > 0);
+    if (validIds.length === 0) return { success: true, deletedCount: 0 };
+
+    const chunkSize = 500;
+    let deletedCount = 0;
+    const tx = this.db.transaction((ids) => {
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        const placeholders = chunk.map(() => '?').join(',');
+        const res = this.db.prepare(`
+          DELETE FROM alphaquant_top20_tracker 
+          WHERE id IN (${placeholders})
+        `).run(...chunk);
+        deletedCount += res.changes;
+      }
+    });
+    tx(validIds);
+
+    return { success: true, deletedCount };
+  }
+
+  /**
+   * 1.6. Apagar TODOS os registos da tabela do Tracker (limpar histórico completo)
+   */
+  clearAllTrackerData() {
+    if (!this.db) return { success: false, deletedCount: 0, error: 'Base de dados não inicializada.' };
+    const result = this.db.prepare('DELETE FROM alphaquant_top20_tracker').run();
+    return { success: true, deletedCount: result.changes };
+  }
+
+  /**
+   * Leitura EXCLUSIVA da Aba 3 (Monitorização): apenas investment_monitoring_universe.
+   */
+  getMonitoringOnlyData() {
+    return this.db.prepare(`
+      SELECT * FROM investment_monitoring_universe
+      ORDER BY created_at DESC, alpha_score DESC
     `).all();
   }
 

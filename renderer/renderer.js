@@ -93,18 +93,27 @@
               window.restoreSimulationViewState();
             }
           } else if (normTarget === 'portfolio') {
-            if (typeof loadMonitoringTabData === 'function') {
-              loadMonitoringTabData();
-            } else if (typeof loadMonitoringTab === 'function') {
-              loadMonitoringTab();
+            if (typeof renderMonitoringView === 'function') {
+              renderMonitoringView();
+            } else {
+              if (typeof loadMonitoringTabData === 'function') {
+                loadMonitoringTabData();
+              }
+              if (typeof loadMonitoringTab === 'function') {
+                loadMonitoringTab();
+              }
             }
             if (typeof loadPortfolio === 'function') {
               loadPortfolio();
             }
           } else if (normTarget === 'history' && typeof loadHistory === 'function') {
             loadHistory();
-          } else if (normTarget === 'quant-tracker' && typeof loadTrackerDashboard === 'function') {
-            loadTrackerDashboard();
+          } else if (normTarget === 'quant-tracker') {
+            if (typeof renderTrackerView === 'function') {
+              renderTrackerView();
+            } else if (typeof loadTrackerDashboard === 'function') {
+              loadTrackerDashboard();
+            }
           }
         } catch (cbErr) {
           console.warn(`[Tabs Callback Warning] Erro não-bloqueante ao carregar aba ${normTarget}:`, cbErr);
@@ -3409,7 +3418,10 @@
       <td class="col-alerta">${renderAlerta(state)}</td>
       <td class="col-num" style="color: ${resultadoColor}; font-weight: 600;">${resultadoText}</td>
       <td class="col-action">
-        <button class="portfolio-row-remove" data-trade-id="${trade.id}" data-ticker="${escapeHtml(trade.ticker)}" title="Apagar esta posição">×</button>
+        ${trade && trade.is_monitoring
+          ? `<span style="color: #38bdf8; font-size: 13px;" title="Ativo em monitorização contínua">📊</span>`
+          : `<button class="portfolio-row-remove" data-trade-id="${trade.id}" data-ticker="${escapeHtml(trade.ticker)}" title="Apagar esta posição">×</button>`
+        }
       </td>
     `;
     const removeBtn = tr.querySelector('.portfolio-row-remove');
@@ -3447,6 +3459,31 @@
       }
 
       lastActiveTrades = res.active || [];
+
+      // Se não houver trades manuais, popular a tabela com os ativos guardados no universo de monitorização
+      if (lastActiveTrades.length === 0) {
+        try {
+          const api = window.electronAPI || window.api || window.quantAPI;
+          if (api && typeof api.getMonitoringTable === 'function') {
+            const tableRes = await api.getMonitoringTable();
+            const monRecords = Array.isArray(tableRes) ? tableRes : (tableRes && Array.isArray(tableRes.records) ? tableRes.records : []);
+            if (monRecords.length > 0) {
+              lastActiveTrades = monRecords.map((r, idx) => ({
+                id: r.id || `mon-${idx}`,
+                ticker: r.ticker,
+                nome: r.company_name || r.ticker,
+                direcao: r.direction || 'COMPRA',
+                preco_entrada: Number(r.entry_price || r.current_price || 0),
+                stop_loss: Number(r.stop_loss || 0),
+                take_profit: Number(r.target_price || 0),
+                preco_atual: Number(r.current_price || r.entry_price || 0),
+                resultado_pct_atual: r.pnl_pct != null ? Number(r.pnl_pct) : null,
+                is_monitoring: true
+              }));
+            }
+          }
+        } catch (_) {}
+      }
 
       renderPortfolioTable();
 
@@ -3642,6 +3679,9 @@
 
   async function loadMonitoringTab() {
     try {
+      if (typeof loadMonitoringTabData === 'function') {
+        loadMonitoringTabData();
+      }
       const api = window.electronAPI || window.api || window.quantAPI;
       if (!api || typeof api.getMonitoringData !== 'function') return;
       const res = await api.getMonitoringData();
@@ -3767,12 +3807,12 @@
         <tr style="border-bottom: 1px solid #1e2538;">
           <td style="padding: 6px 10px; color: #94a3b8;">${escapeHtml(r.analysis_date || '')}</td>
           <td style="padding: 6px 10px; font-weight: 700; color: #ffffff;">${escapeHtml(r.ticker || '')}</td>
+          <td style="padding: 6px 10px; color: #cbd5e1;">${escapeHtml(r.company_name || r.ticker || '')}</td>
           <td style="padding: 6px 10px; color: #94a3b8;">${escapeHtml(r.sector || 'Geral')}</td>
-          <td style="padding: 6px 10px; text-align: right;">${money(r.entry_price, r)}</td>
-          <td style="padding: 6px 10px; text-align: right;">${money(r.current_price || r.entry_price, r)}</td>
+          <td style="padding: 6px 10px; text-align: right;">${money(r.entry_price || r.current_price, r)}</td>
           <td style="padding: 6px 10px; text-align: right; color: #34d399;">${money(r.target_price, r)}</td>
           <td style="padding: 6px 10px; text-align: right; color: #f87171;">${money(r.stop_loss, r)}</td>
-          <td style="padding: 6px 10px; text-align: center;">${Number(r.win_rate_mc || 0).toFixed(1)}%</td>
+          <td style="padding: 6px 10px; text-align: center; color: #38bdf8; font-weight: 600;">${Number(r.win_rate_mc || 0).toFixed(1)}%</td>
           <td style="padding: 6px 10px; text-align: center;">
             <span style="background: ${badgeColor}22; color: ${badgeColor}; border: 1px solid ${badgeColor}44; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 600;">
               ${escapeHtml(r.status || 'MONITORIZANDO')}
@@ -3878,13 +3918,32 @@
   async function loadMonitoringTabData() {
     try {
       const api = window.electronAPI || window.api || window.quantAPI;
+      const hasTableApi = api && typeof api.getMonitoringTable === 'function';
       const hasDedicatedApi = api && typeof api.getMonitoringUniverseRecords === 'function';
       const hasLegacyApi = api && typeof api.getMonitoringData === 'function';
-      if (!hasDedicatedApi && !hasLegacyApi) return;
+      if (!hasTableApi && !hasDedicatedApi && !hasLegacyApi) return;
       // Aba 3 lê EXCLUSIVAMENTE investment_monitoring_universe — nunca o Tracker.
-      const res = hasDedicatedApi
-        ? await api.getMonitoringUniverseRecords()
-        : await api.getMonitoringData();
+      let res;
+      if (hasTableApi) {
+        const tableRes = await api.getMonitoringTable();
+        const records = Array.isArray(tableRes)
+          ? tableRes
+          : (tableRes && Array.isArray(tableRes.records) ? tableRes.records : []);
+        res = { success: true, records };
+        if (hasLegacyApi) {
+          try {
+            const meta = await api.getMonitoringData();
+            if (meta && meta.success) {
+              res.kpis = meta.kpis || {};
+              res.analytics = meta.analytics;
+            }
+          } catch (_) { /* KPIs são acessórios */ }
+        }
+      } else if (hasDedicatedApi) {
+        res = await api.getMonitoringUniverseRecords();
+      } else {
+        res = await api.getMonitoringData();
+      }
       if (!res || !res.success) {
         console.warn('Não foi possível carregar dados da monitorização:', res?.error);
         return;
@@ -3955,6 +4014,18 @@
   window.loadMonitoringTab = loadMonitoringTab;
   window.loadMonitoringTabData = loadMonitoringTabData;
   window.loadMonitoringUniverseData = loadMonitoringTab;
+
+  // Aba 3 — Monitorização de Investimentos (investment_monitoring_universe)
+  function renderMonitoringView() {
+    if (typeof loadMonitoringTabData === 'function') {
+      loadMonitoringTabData();
+    }
+    if (typeof loadMonitoringTab === 'function') {
+      loadMonitoringTab();
+    }
+    return Promise.resolve();
+  }
+  window.renderMonitoringView = renderMonitoringView;
 
   const btnRunMonitoringEval = document.getElementById('btn-run-monitoring-eval');
   if (btnRunMonitoringEval) {
@@ -6077,7 +6148,20 @@
       window.currentAnalysisRemaining = (window.currentAllAnalyzedAssets || []).slice(20);
     }
     if (!window.currentMonitoringPool || window.currentMonitoringPool.length === 0) {
-      window.currentMonitoringPool = (window.currentAllAnalyzedAssets || []).slice(20).filter(a => Number(a.win_rate_mc || a.winRateMC || 0) >= 50.0);
+      const candidates = window.currentAllAnalyzedAssets || [];
+      const extractWr = (a) => {
+        if (!a) return 0;
+        const raw = a.win_rate_mc ?? a.mc_win_rate ?? a.winRateMC ?? a.win_rate ?? a.win_rate_numeric ?? 0;
+        const num = parseFloat(String(raw).replace('%', '').trim());
+        return isNaN(num) ? 0 : num;
+      };
+      const extractP = (a) => {
+        if (!a) return 0;
+        const num = parseFloat(a.current_price ?? a.price ?? a.latest_price ?? a.entry_price ?? 0);
+        return isNaN(num) ? 0 : num;
+      };
+      const qualified = candidates.filter(a => extractWr(a) >= 50.0 && extractP(a) > 0);
+      window.currentMonitoringPool = qualified.length > 20 ? qualified.slice(20) : qualified;
     }
 
     if (!recommendedAssets || recommendedAssets.length === 0) {
@@ -6176,7 +6260,7 @@
           ${asset.purified_alpha_score != null ? Number(asset.purified_alpha_score).toFixed(1) : (asset.alpha_score != null ? Number(asset.alpha_score).toFixed(1) : '70.0')}
         </td>
         <td style="padding: 8px 12px; text-align: center;">
-          <button class="btn-track-pill btn-track btn-save-track" style="background: #1e2538; border: 1px solid #333d59; color: #cbd5e1; border-radius: 9999px; height: 28px; padding: 0 14px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+          <button class="btn-track-pill btn-track btn-save-track" data-ticker="${safeTicker}" style="background: #1e2538; border: 1px solid #333d59; color: #cbd5e1; border-radius: 9999px; height: 28px; padding: 0 14px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
             📌 Guardar &amp; Rastrear
           </button>
         </td>
@@ -6194,10 +6278,7 @@
 
       const trackBtn = tr.querySelector('.btn-save-track');
       if (trackBtn) {
-        trackBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          saveToTracker(asset.ticker);
-        });
+        setupInvestButton(trackBtn, asset);
       }
 
       tr.addEventListener('click', (e) => {
@@ -6213,43 +6294,141 @@
     }
   }
 
-  async function saveToTracker(ticker) {
-    try {
-      const btn = event?.target?.closest('button') || document.querySelector(`button[onclick*="${ticker}"]`);
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = '⏳ A guardar...';
-      }
+  async function setupInvestButton(buttonElement, asset) {
+    if (!buttonElement || !asset) return;
+    const ticker = String(asset.ticker || '').toUpperCase().trim();
+    if (!ticker) return;
 
+    const api = window.electronAPI || window.api || window.quantAPI;
+
+    // 1. Verifica proativamente se o ativo já se encontra no Tracker
+    try {
+      if (api && typeof api.checkAssetTracked === 'function') {
+        const check = await api.checkAssetTracked(ticker);
+        if (check && check.exists) {
+          buttonElement.disabled = true;
+          buttonElement.style.background = '#334155';
+          buttonElement.style.borderColor = '#475569';
+          buttonElement.style.color = '#94a3b8';
+          buttonElement.style.cursor = 'not-allowed';
+          buttonElement.innerHTML = '<span>✅ Já em Acompanhamento</span>';
+          buttonElement.title = `Ativo adicionado em ${check.data?.recommendation_date || 'data anterior'}`;
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao verificar se ativo já está no tracker:', err);
+    }
+
+    // 2. Listener para novo investimento / acompanhamento
+    buttonElement.onclick = async (e) => {
+      if (e) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+      buttonElement.disabled = true;
+      buttonElement.innerHTML = '<span>⏳ A validar...</span>';
+
+      try {
+        const result = (api && typeof api.addTrackedInvestmentSafe === 'function')
+          ? await api.addTrackedInvestmentSafe(asset)
+          : (api && typeof api.saveTrackedRecommendation === 'function'
+              ? await api.saveTrackedRecommendation(asset)
+              : { success: false, error: 'API indisponível' });
+
+        if (result && result.alreadyExists) {
+          alert(`⚠️ Informação: O ativo ${ticker} já se encontra registado no Tracker. Não é necessário adicionar novamente.`);
+          buttonElement.innerHTML = '<span>✅ Já em Acompanhamento</span>';
+          buttonElement.style.background = '#334155';
+          buttonElement.style.borderColor = '#475569';
+          buttonElement.style.color = '#94a3b8';
+          buttonElement.style.cursor = 'not-allowed';
+          buttonElement.disabled = true;
+        } else if (result && result.success) {
+          alert(`🎯 Sucesso! ${ticker} adicionado à aba AlphaQuant Tracker & Performance.`);
+          buttonElement.innerHTML = '<span>✅ Já em Acompanhamento</span>';
+          buttonElement.style.background = '#059669';
+          buttonElement.style.borderColor = '#10b981';
+          buttonElement.style.color = '#ffffff';
+          buttonElement.disabled = true;
+          if (typeof window.markTabStale === 'function') window.markTabStale('quant-tracker');
+        } else {
+          alert(`Erro ao adicionar ativo: ${result?.error || 'Erro desconhecido'}`);
+          buttonElement.disabled = false;
+          buttonElement.innerHTML = '<span>📌 Guardar &amp; Rastrear</span>';
+        }
+      } catch (err) {
+        alert(`Erro ao adicionar ativo: ${err.message}`);
+        buttonElement.disabled = false;
+        buttonElement.innerHTML = '<span>📌 Guardar &amp; Rastrear</span>';
+      }
+    };
+  }
+  window.setupInvestButton = setupInvestButton;
+
+  async function saveToTracker(ticker) {
+    const cleanTicker = String(ticker || '').toUpperCase().trim();
+    const btn = event?.target?.closest('button') || document.querySelector(`button[onclick*="${ticker}"]`);
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ A validar...';
+    }
+
+    try {
       let assetData = null;
       if (window.lastPipelineResult?.top_recommendations) {
-        assetData = window.lastPipelineResult.top_recommendations.find(a => a.ticker === ticker);
+        assetData = window.lastPipelineResult.top_recommendations.find(a => String(a.ticker).toUpperCase().trim() === cleanTicker);
       }
       if (!assetData && window.lastPipelineResult?.assets) {
-        assetData = window.lastPipelineResult.assets.find(a => a.ticker === ticker);
+        assetData = window.lastPipelineResult.assets.find(a => String(a.ticker).toUpperCase().trim() === cleanTicker);
+      }
+      if (!assetData && window.currentTopRecommendations) {
+        assetData = window.currentTopRecommendations.find(a => String(a.ticker).toUpperCase().trim() === cleanTicker);
       }
       if (!assetData) {
-        assetData = { ticker };
+        assetData = { ticker: cleanTicker };
       }
 
-      if (window.quantAPI && typeof window.quantAPI.saveTrackedRecommendation === 'function') {
-        await window.quantAPI.saveTrackedRecommendation(assetData);
-      } else if (window.quantAPI && typeof window.quantAPI.saveTrackedAsset === 'function') {
-        await window.quantAPI.saveTrackedAsset(assetData);
-      } else if (window.api && typeof window.api.saveTrackedRecommendation === 'function') {
-        await window.api.saveTrackedRecommendation(assetData);
+      const api = window.electronAPI || window.api || window.quantAPI;
+      let result = null;
+      if (api && typeof api.addTrackedInvestmentSafe === 'function') {
+        result = await api.addTrackedInvestmentSafe(assetData);
+      } else if (api && typeof api.saveTrackedRecommendation === 'function') {
+        result = await api.saveTrackedRecommendation(assetData);
       }
 
-      if (btn) {
-        btn.textContent = '✓ Guardado';
-        btn.style.background = '#10b981';
-        btn.style.borderColor = '#10b981';
-        btn.style.color = '#ffffff';
+      if (result && result.alreadyExists) {
+        alert(`⚠️ Informação: O ativo ${cleanTicker} já se encontra registado no Tracker. Não é necessário adicionar novamente.`);
+        if (btn) {
+          btn.innerHTML = '<span>✅ Já em Acompanhamento</span>';
+          btn.style.background = '#334155';
+          btn.style.borderColor = '#475569';
+          btn.style.color = '#94a3b8';
+          btn.style.cursor = 'not-allowed';
+          btn.disabled = true;
+        }
+        return;
       }
-      if (typeof window.markTabStale === 'function') window.markTabStale('quant-tracker');
+
+      if (result && result.success) {
+        alert(`🎯 Sucesso! ${cleanTicker} adicionado à aba AlphaQuant Tracker & Performance.`);
+        if (btn) {
+          btn.innerHTML = '<span>✅ Já em Acompanhamento</span>';
+          btn.style.background = '#059669';
+          btn.style.borderColor = '#10b981';
+          btn.style.color = '#ffffff';
+          btn.disabled = true;
+        }
+        if (typeof window.markTabStale === 'function') window.markTabStale('quant-tracker');
+      } else {
+        alert(`Erro ao adicionar ativo: ${result?.error || 'Erro desconhecido'}`);
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span>📌 Guardar &amp; Rastrear</span>';
+        }
+      }
     } catch (err) {
       console.error('[QuantEngine] Erro ao guardar ativo no tracker:', err);
-      const btn = event?.target?.closest('button');
       if (btn) {
         btn.disabled = false;
         btn.textContent = '❌ Erro';
@@ -6277,6 +6456,9 @@
       const totalBoxes = document.querySelectorAll('.check-recommendation-item');
       const checkedBoxes = document.querySelectorAll('.check-recommendation-item:checked');
 
+      if (!window.currentMonitoringPool || window.currentMonitoringPool.length === 0) {
+        window.currentMonitoringPool = getQualifiedMonitoringList();
+      }
       const countQualifiedMonitoring = document.getElementById('count-qualified-monitoring');
       if (countQualifiedMonitoring) {
         countQualifiedMonitoring.textContent = (window.currentMonitoringPool || []).length;
@@ -6288,108 +6470,246 @@
       }
     };
 
-    const btnSaveTop20 = document.getElementById('btn-save-top20-tracker');
-    if (btnSaveTop20) {
-      btnSaveTop20.onclick = async () => {
-        const top20 = window.currentTop20 || window.currentTopRecommendations || [];
-        if (top20.length === 0) {
-          alert('Nenhum Top 20 disponível para guardar.');
-          return;
+    bindTop20ExportButton();
+    bindMonitoringExportButton();
+  }
+
+  // Remove listeners residuais substituindo o nó por um clone antes de religar.
+  function replaceButtonWithoutListeners(btn, id) {
+    if (!btn || typeof btn.cloneNode !== 'function' || !btn.parentNode || typeof btn.parentNode.replaceChild !== 'function') {
+      return btn;
+    }
+    const clone = btn.cloneNode(true);
+    clone.id = id;
+    btn.parentNode.replaceChild(clone, btn);
+    return clone;
+  }
+
+  function extractAssetWinRate(asset) {
+    if (!asset) return 0;
+    const raw = asset.win_rate_mc ?? asset.mc_win_rate ?? asset.winRateMC ?? asset.win_rate ?? asset.win_rate_numeric ?? asset.predicted_win_rate ?? 0;
+    const num = parseFloat(String(raw).replace('%', '').trim());
+    return isNaN(num) ? 0 : num;
+  }
+
+  function extractAssetPrice(asset) {
+    if (!asset) return 0;
+    const raw = asset.current_price ?? asset.price ?? asset.latest_price ?? asset.entry_price ?? 0;
+    const num = parseFloat(raw);
+    return isNaN(num) ? 0 : num;
+  }
+
+  function isAssetQualified(asset) {
+    if (!asset || !asset.ticker) return false;
+    const wr = extractAssetWinRate(asset);
+    const price = extractAssetPrice(asset);
+    return wr >= 50.0 && price > 0;
+  }
+
+  // Garantir fallback para qualquer nome de variável que o Python tenha retornado
+  function getQualifiedMonitoringList() {
+    if (Array.isArray(window.currentMonitoringPool) && window.currentMonitoringPool.length > 0) {
+      const valid = window.currentMonitoringPool.filter(isAssetQualified);
+      if (valid.length > 0) return valid;
+    }
+    if (Array.isArray(window.currentAnalysisRemaining) && window.currentAnalysisRemaining.length > 0) {
+      const valid = window.currentAnalysisRemaining.filter(isAssetQualified);
+      if (valid.length > 0) return valid;
+    }
+    if (Array.isArray(window.currentAllAnalyzedAssets) && window.currentAllAnalyzedAssets.length > 0) {
+      const allQualified = window.currentAllAnalyzedAssets.filter(isAssetQualified);
+      if (allQualified.length > 20) {
+        return allQualified.slice(20);
+      }
+      if (allQualified.length > 0) {
+        return allQualified;
+      }
+      return window.currentAllAnalyzedAssets.slice(20).filter(a => Number(a.win_rate_mc || a.winRateMC || 0) >= 50.0);
+    }
+    if (window.lastPipelineResult) {
+      const pAssets = window.lastPipelineResult.all_analyzed_assets || window.lastPipelineResult.assets || [];
+      if (Array.isArray(pAssets) && pAssets.length > 0) {
+        const allQualified = pAssets.filter(isAssetQualified);
+        if (allQualified.length > 20) return allQualified.slice(20);
+        if (allQualified.length > 0) return allQualified;
+      }
+    }
+    if (Array.isArray(window.currentTopRecommendations) && window.currentTopRecommendations.length > 0) {
+      return window.currentTopRecommendations.filter(isAssetQualified);
+    }
+    return [];
+  }
+
+  // Botão 1 — Top 20: fala apenas com o Tracker (Aba 6 / alphaquant_top20_tracker).
+  function bindTop20ExportButton() {
+    let btnSaveTop20 = document.getElementById('btn-save-top20-tracker');
+    if (!btnSaveTop20) return;
+    btnSaveTop20 = replaceButtonWithoutListeners(btnSaveTop20, 'btn-save-top20-tracker');
+
+    btnSaveTop20.onclick = async (e) => {
+      if (e && typeof e.preventDefault === 'function') e.preventDefault();
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+
+      const rawTop20 = window.currentTop20 || window.currentTopRecommendations || [];
+      if (rawTop20.length === 0) {
+        alert('Nenhum Top 20 disponível para guardar.');
+        return;
+      }
+
+      btnSaveTop20.disabled = true;
+      btnSaveTop20.textContent = '⏳ A validar duplicados no Tracker...';
+
+      try {
+        const api = window.electronAPI || window.api || window.quantAPI;
+        if (!api || typeof api.saveTop20Tracker !== 'function') {
+          throw new Error('Canal IPC saveTop20Tracker não disponível.');
         }
 
-        btnSaveTop20.disabled = true;
-        btnSaveTop20.textContent = '⏳ A guardar no Tracker...';
+        const candidates = rawTop20.slice(0, 20);
+        const alreadyTrackedTickers = [];
+        const newAssets = [];
 
-        try {
-          const api = window.electronAPI || window.api || window.quantAPI;
-          if (!api || typeof api.saveTop20Tracker !== 'function') {
-            throw new Error('Canal IPC saveTop20Tracker não disponível.');
+        for (const asset of candidates) {
+          const ticker = String(asset.ticker || '').toUpperCase().trim();
+          if (!ticker) continue;
+          let isTracked = false;
+          if (typeof api.checkAssetTracked === 'function') {
+            try {
+              const check = await api.checkAssetTracked(ticker);
+              if (check && check.exists) {
+                isTracked = true;
+              }
+            } catch (_) {}
           }
-          const res = await api.saveTop20Tracker(top20);
-          if (res && res.success) {
-            alert(`✅ ${res.count} ativos guardados na aba AlphaQuant Tracker & Performance!`);
-            if (typeof loadTrackerData === 'function') {
-              loadTrackerData();
-            } else if (typeof window.loadTrackerData === 'function') {
-              window.loadTrackerData();
-            }
+          if (isTracked) {
+            alreadyTrackedTickers.push(ticker);
           } else {
-            alert(`Erro: ${res?.error || 'Falha ao guardar os ativos.'}`);
+            newAssets.push(asset);
           }
-        } catch (e) {
-          console.error(e);
-          alert('Falha na comunicação.');
-        } finally {
+        }
+
+        const markButtonsAsTracked = (tickerList) => {
+          tickerList.forEach((ticker) => {
+            const btns = document.querySelectorAll(`button[data-ticker="${ticker}"], .btn-save-track[data-ticker="${ticker}"]`);
+            btns.forEach((btn) => {
+              btn.disabled = true;
+              btn.style.background = '#334155';
+              btn.style.borderColor = '#475569';
+              btn.style.color = '#94a3b8';
+              btn.style.cursor = 'not-allowed';
+              btn.innerHTML = '<span>✅ Já em Acompanhamento</span>';
+            });
+          });
+        };
+
+        if (newAssets.length === 0 && alreadyTrackedTickers.length > 0) {
+          alert(`ℹ️ Validação de Duplicados:\nTodos os ${alreadyTrackedTickers.length} ativos do Top 20 já se encontram registados em acompanhamento no Tracker!\n\nNenhum registo duplicado foi adicionado.`);
+          markButtonsAsTracked(candidates.map((a) => String(a.ticker).toUpperCase().trim()));
           btnSaveTop20.disabled = false;
           btnSaveTop20.textContent = '🎯 Guardar Top 20 no Tracker';
-        }
-      };
-    }
-
-    // Garantir fallback para qualquer nome de variável que o Python tenha retornado
-    function getQualifiedMonitoringList() {
-      if (Array.isArray(window.currentMonitoringPool) && window.currentMonitoringPool.length > 0) {
-        return window.currentMonitoringPool;
-      }
-      if (Array.isArray(window.currentAnalysisRemaining) && window.currentAnalysisRemaining.length > 0) {
-        return window.currentAnalysisRemaining;
-      }
-      if (Array.isArray(window.currentAllAnalyzedAssets)) {
-        // Fallback: filtra os ativos fora do Top 20 que têm MC >= 50%
-        return window.currentAllAnalyzedAssets.slice(20).filter(a => Number(a.win_rate_mc || a.winRateMC || 0) >= 50.0);
-      }
-      return [];
-    }
-
-    const btnQualifiedMonitoring = document.getElementById('btn-save-qualified-monitoring');
-    const btnSaveQualified = btnQualifiedMonitoring;
-    if (btnQualifiedMonitoring) {
-      btnQualifiedMonitoring.onclick = async () => {
-        const pool = getQualifiedMonitoringList();
-        const listToSave = pool;
-
-        if (!listToSave || listToSave.length === 0) {
-          alert('⚠️ Nenhum ativo qualificado restante (MC >= 50%) encontrado para gravar. Corre a análise primeiro no Workstation.');
           return;
         }
 
-        btnQualifiedMonitoring.disabled = true;
-        const originalText = btnQualifiedMonitoring.innerHTML;
-        btnQualifiedMonitoring.innerHTML = `<span>⏳ A gravar ${listToSave.length} ativos na BD...</span>`;
+        btnSaveTop20.textContent = '⏳ A guardar no Tracker...';
+        const top20 = newAssets.length > 0 ? newAssets : candidates;
+        const res = await api.saveTop20Tracker(top20);
+        if (res && res.success) {
+          let msg = `✅ ${res.count} novo(s) ativo(s) guardado(s) na aba AlphaQuant Tracker & Performance!`;
+          if (alreadyTrackedTickers.length > 0) {
+            msg += `\n\nℹ️ ${alreadyTrackedTickers.length} ativo(s) já estavam em acompanhamento e não foram duplicados:\n${alreadyTrackedTickers.join(', ')}`;
+          }
+          alert(msg);
 
-        try {
-          const api = window.electronAPI || window.api || window.quantAPI;
-          const hasDedicatedChannel = api && typeof api.saveMonitoringUniverseBatch === 'function';
-          if (!hasDedicatedChannel && (!api || typeof api.saveQualifiedMonitoring !== 'function')) {
-            throw new Error('Canal IPC de monitorização não disponível.');
+          markButtonsAsTracked(candidates.map((a) => String(a.ticker).toUpperCase().trim()));
+
+          if (typeof renderTrackerView === 'function') {
+            renderTrackerView();
+          } else if (typeof loadTrackerData === 'function') {
+            loadTrackerData();
           }
-          // Prioridade absoluta ao canal dedicado da Aba 3; o canal legado só
-          // serve de fallback e grava igualmente em investment_monitoring_universe.
-          const res = hasDedicatedChannel
-            ? await api.saveMonitoringUniverseBatch(pool)
-            : await api.saveQualifiedMonitoring(pool);
-          if (res && res.success) {
-            alert(`✅ Sucesso! ${res.count} ativos qualificados foram guardados na aba Monitorização de Investimentos.`);
-            // Força o recarregamento imediato dos dados da aba se a função existir
-            if (typeof loadMonitoringTabData === 'function') {
-              await loadMonitoringTabData();
-            } else if (typeof loadMonitoringTab === 'function') {
-              await loadMonitoringTab();
-            } else if (typeof loadMonitoringUniverseData === 'function') {
-              await loadMonitoringUniverseData();
-            }
-          } else {
-            alert(`❌ Erro ao gravar: ${res?.error || 'Falha desconhecida na base de dados.'}`);
+          if (typeof window.markTabStale === 'function') {
+            window.markTabStale('quant-tracker');
           }
-        } catch (err) {
-          console.error('Erro ao invocar saveQualifiedMonitoring:', err);
-          alert('❌ Erro na comunicação IPC com a base de dados.');
-        } finally {
-          btnQualifiedMonitoring.disabled = false;
-          btnQualifiedMonitoring.innerHTML = `📊 Guardar Restantes Qualificados (<span id="count-qualified-monitoring">${pool.length}</span>) na Monitorização`;
+        } else {
+          alert(`Erro: ${res?.error || 'Falha ao guardar os ativos.'}`);
         }
-      };
-    }
+      } catch (err) {
+        console.error(err);
+        alert('Falha na comunicação.');
+      } finally {
+        btnSaveTop20.disabled = false;
+        btnSaveTop20.textContent = '🎯 Guardar Top 20 no Tracker';
+      }
+    };
+  }
+
+  // Botão 2 — restantes qualificados: fala apenas com a Monitorização
+  // (Aba 3 / investment_monitoring_universe). Nunca com o Tracker.
+  function bindMonitoringExportButton() {
+    let btnQualifiedMonitoring = document.getElementById('btn-save-qualified-monitoring');
+    if (!btnQualifiedMonitoring) return;
+    btnQualifiedMonitoring = replaceButtonWithoutListeners(btnQualifiedMonitoring, 'btn-save-qualified-monitoring');
+
+    btnQualifiedMonitoring.onclick = async (e) => {
+      if (e && typeof e.preventDefault === 'function') e.preventDefault();
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+
+      const pool = getQualifiedMonitoringList();
+      const listToSave = pool;
+
+      if (!listToSave || listToSave.length === 0) {
+        alert('⚠️ Nenhum ativo qualificado restante (MC >= 50%) encontrado para gravar. Corre a análise primeiro no Workstation.');
+        return;
+      }
+
+      btnQualifiedMonitoring.disabled = true;
+      btnQualifiedMonitoring.innerHTML = `<span>⏳ A gravar ${listToSave.length} ativos na BD...</span>`;
+
+      try {
+        const api = window.electronAPI || window.api || window.quantAPI;
+        const hasDedicatedChannel = api && typeof api.saveMonitoringUniverse === 'function';
+        const hasBatchChannel = api && typeof api.saveMonitoringUniverseBatch === 'function';
+        const hasLegacyChannel = api && typeof api.saveQualifiedMonitoring === 'function';
+        if (!hasDedicatedChannel && !hasBatchChannel && !hasLegacyChannel) {
+          throw new Error('Canal IPC de monitorização não disponível.');
+        }
+        // Prioridade absoluta ao canal dedicado da Aba 3; os canais de
+        // compatibilidade gravam igualmente em investment_monitoring_universe.
+        let res;
+        if (hasDedicatedChannel) {
+          res = await api.saveMonitoringUniverse(pool);
+        } else if (hasBatchChannel) {
+          res = await api.saveMonitoringUniverseBatch(pool);
+        } else {
+          res = await api.saveQualifiedMonitoring(pool);
+        }
+        if (res && res.success) {
+          alert(`✅ Sucesso! ${res.count} ativos qualificados foram guardados na aba Monitorização de Investimentos.`);
+          if (typeof window.markTabStale === 'function') {
+            window.markTabStale('portfolio');
+          }
+          // Força o recarregamento imediato dos dados da aba
+          if (typeof renderMonitoringView === 'function') {
+            await renderMonitoringView();
+          } else if (typeof loadMonitoringTabData === 'function') {
+            await loadMonitoringTabData();
+          } else if (typeof loadMonitoringTab === 'function') {
+            await loadMonitoringTab();
+          }
+          if (typeof loadPortfolio === 'function') {
+            await loadPortfolio();
+          }
+        } else {
+          alert(`❌ Erro ao gravar: ${res?.error || 'Falha desconhecida na base de dados.'}`);
+        }
+      } catch (err) {
+        console.error('Erro ao invocar o canal da monitorização:', err);
+        alert('❌ Erro na comunicação IPC com a base de dados.');
+      } finally {
+        btnQualifiedMonitoring.disabled = false;
+        btnQualifiedMonitoring.innerHTML = `📊 Guardar Restantes Qualificados (<span id="count-qualified-monitoring">${pool.length}</span>) na Monitorização`;
+      }
+    };
   }
 
   function loadTrackerData() {
@@ -6397,6 +6717,15 @@
       window.quantTracker.loadTrackerDashboard();
     }
   }
+
+  // Aba 6 — AlphaQuant Tracker & Performance (alphaquant_top20_tracker)
+  function renderTrackerView() {
+    if (window.quantTracker && typeof window.quantTracker.loadTrackerDashboard === 'function') {
+      return window.quantTracker.loadTrackerDashboard();
+    }
+    return Promise.resolve();
+  }
+  window.renderTrackerView = renderTrackerView;
 
   // ── 8. GAVETA LATERAL RETRÁTIL (STOCHASTIC INSPECTION DRAWER) ──
   let activeInspectedAsset = null;
@@ -6495,11 +6824,13 @@
     // 5. Botão de Ação do Rodapé
     const btnTrack = document.getElementById('drawer-btn-track');
     if (btnTrack) {
-      btnTrack.onclick = () => {
-        if (typeof window.saveToTracker === 'function') {
-          window.saveToTracker(asset.ticker);
-        }
-      };
+      btnTrack.disabled = false;
+      btnTrack.style.background = '';
+      btnTrack.style.borderColor = '';
+      btnTrack.style.color = '';
+      btnTrack.style.cursor = '';
+      btnTrack.innerHTML = '<span>📌 Guardar no Tracker</span>';
+      setupInvestButton(btnTrack, asset);
     }
 
     // 6. Desenhar as Trajetórias de Monte Carlo no Canvas
@@ -6681,10 +7012,20 @@
       tab.addEventListener('click', () => {
         const tabTarget = tab.getAttribute('data-tab') || tab.textContent.trim().toLowerCase();
         
-        // Se a aba clicada for a de monitorização, força a leitura do SQLite
+        // Aba 3 — Monitorização de Investimentos
         if (tabTarget.includes('monitoriza') || tabTarget.includes('monitoring') || tabTarget.includes('portfolio') || (tab.textContent || '').toLowerCase().includes('monitoriza')) {
-          if (typeof loadMonitoringTabData === 'function') {
+          if (typeof renderMonitoringView === 'function') {
+            renderMonitoringView();
+          } else if (typeof loadMonitoringTabData === 'function') {
             loadMonitoringTabData();
+          }
+        }
+        // Aba 6 — AlphaQuant Tracker & Performance
+        if (tabTarget.includes('tracker')) {
+          if (typeof renderTrackerView === 'function') {
+            renderTrackerView();
+          } else if (typeof loadTrackerData === 'function') {
+            loadTrackerData();
           }
         }
       });
