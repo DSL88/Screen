@@ -677,6 +677,42 @@
             </button>
           </div>
 
+          <!-- Painel de Auto-Calibração & Telemetria do Modelo (feedback loop) -->
+          <div style="background: #141923; padding: 14px 18px; border-radius: 10px; border: 1px solid #232b3e; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 12px;">
+              <div>
+                <span style="font-size: 14px; font-weight: 700; color: #f8fafc;">🧠 Auto-Calibração &amp; Telemetria do Modelo</span>
+                <div style="font-size: 11px; color: #8a99ad;">Avaliação empírica do histórico de posições concluídas</div>
+              </div>
+              <button id="btn-train-model" type="button" class="btn-pill" style="background: #7c3aed; color: #ffffff; border: 1px solid #a855f7; padding: 8px 18px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                🔄 Treinar e Calibrar Pesos
+              </button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px;">
+              <!-- Gráfico Teórico vs Real -->
+              <div style="background: #0b0f18; padding: 10px; border-radius: 8px; border: 1px solid #232b3e; height: 250px; position: relative;">
+                <canvas id="calibrationChart"></canvas>
+              </div>
+              <!-- Cartões de Diagnóstico -->
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div style="background: #0b0f18; padding: 10px 14px; border-radius: 8px; border: 1px solid #232b3e;">
+                  <span style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Qualidade da Probabilidade (Brier Score)</span>
+                  <div id="stat-brier" style="font-size: 18px; font-weight: 700; color: #38bdf8; margin-top: 2px;">--</div>
+                  <div style="font-size: 10px; color: #64748b;">(0.00 = Modelo Perfeito | &gt; 0.25 = Aleatório)</div>
+                </div>
+                <div style="background: #0b0f18; padding: 10px 14px; border-radius: 8px; border: 1px solid #232b3e;">
+                  <span style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Pesos Ativos</span>
+                  <div id="stat-weights" style="font-size: 12px; font-weight: 600; color: #e2e8f0; margin-top: 4px; font-variant-numeric: tabular-nums;">Graham: 0.30 | MC: 0.40 | Efic: 30.0</div>
+                </div>
+                <div style="background: #0b0f18; padding: 10px 14px; border-radius: 8px; border: 1px solid #232b3e;">
+                  <span style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Penalizações Setoriais</span>
+                  <div id="stat-sectors" style="font-size: 12px; font-weight: 600; color: #fbbf24; margin-top: 4px;">Sem setores penalizados</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Cards de KPIs do Topo -->
           <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 24px;">
             <div style="background: #141923; padding: 14px 18px; border-radius: 10px; border: 1px solid #232b3e;">

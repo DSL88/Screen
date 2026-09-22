@@ -681,7 +681,7 @@ def execute_alpha_quant_engine(params: Dict[str, Any]) -> Dict[str, Any]:
     first_series = first_asset.get("price_series", pd.Series(dtype=float))
     chart_close = [round(float(p), 2) for p in first_series.tail(60).tolist()] if len(first_series) >= 10 else [100.0] * 60
 
-    qualified_res = consolidate_and_split_pipeline(analyzed_assets, horizon_days=horizon_markov)
+    qualified_res = consolidate_and_split_pipeline(analyzed_assets, horizon_days=horizon_markov, model_weights=_extract_model_weights(params))
     pipeline_res = build_pipeline_output(analyzed_assets, horizon_days=horizon_markov)
 
     output_payload = {
@@ -796,12 +796,51 @@ def classify_win_rate_tier(win_rate: float) -> dict:
         return {"level": "Fraca (<50%)", "color": "#dc3545", "badge": "bg-danger", "tier_id": 0}
 
 
-def consolidate_and_split_pipeline(processed_assets: List[Dict[str, Any]], horizon_days: int = 35) -> Dict[str, Any]:
+def _extract_model_weights(params: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Consolida apenas o universo qualificado (Win Rate Monte Carlo >= 50.0% e preço válido) e divide-o em:
+    Extrai os pesos calibrados do feedback loop da monitorização
+    (tabela model_calibrated_weights, injetados pelo processo principal em
+    params['model_weights']). Aceita camelCase e snake_case.
+    """
+    raw = params.get("model_weights") or params.get("modelWeights") or {}
+    if not isinstance(raw, dict):
+        return {}
+    def _get(*keys, default=None):
+        for k in keys:
+            if k in raw and raw[k] is not None:
+                return raw[k]
+        return default
+    penalties = _get("sectorPenalties", "sector_penalties", default={}) or {}
+    if not isinstance(penalties, dict):
+        penalties = {}
+    return {
+        "weightGraham": _get("weightGraham", "weight_graham", default=0.3),
+        "weightMc": _get("weightMc", "weight_mc", default=0.4),
+        "weightEfficiency": _get("weightEfficiency", "weight_efficiency", default=30.0),
+        "minMcThreshold": _get("minMcThreshold", "min_mc_threshold", default=50.0),
+        "sectorPenalties": penalties,
+    }
+
+
+def consolidate_and_split_pipeline(processed_assets: List[Dict[str, Any]], horizon_days: int = 35, model_weights: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Consolida apenas o universo qualificado (Win Rate Monte Carlo >= threshold
+    calibrado e preço válido) e divide-o em:
     - top_20: os 20 ativos com maior Alpha Score.
     - monitoring_pool: o restante pool qualificado para monitorização contínua.
+
+    Usa os pesos calibrados do feedback loop da monitorização (se disponíveis):
+    peso de Graham, peso Monte Carlo, peso do rácio de eficiência, threshold
+    mínimo de MC e penalizações setoriais (setores que falham repetidamente
+    têm o Alpha Score reduzido nos varrimentos futuros).
     """
+    weights = _extract_model_weights({"model_weights": model_weights or {}})
+    w_graham = _finite_float(weights["weightGraham"], 0.3)
+    w_mc = _finite_float(weights["weightMc"], 0.4)
+    w_efficiency = _finite_float(weights["weightEfficiency"], 30.0)
+    min_mc_threshold = _finite_float(weights["minMcThreshold"], 50.0)
+    sector_penalties = weights["sectorPenalties"] if isinstance(weights["sectorPenalties"], dict) else {}
+
     qualified = []
 
     for asset in processed_assets:
@@ -810,7 +849,7 @@ def consolidate_and_split_pipeline(processed_assets: List[Dict[str, Any]], horiz
             continue
 
         win_rate = _finite_float(asset.get('mc_win_rate', asset.get('winRateMC', asset.get('win_rate_numeric', 0.0))), 0.0)
-        if win_rate < 50.0:
+        if win_rate < min_mc_threshold:
             continue
 
         cvar_95 = _finite_float(asset.get('cvar_95', asset.get('mc_cvar_95', 5.0)), 5.0)
@@ -833,7 +872,13 @@ def consolidate_and_split_pipeline(processed_assets: List[Dict[str, Any]], horiz
             stop_p = current_price * (1.0 + 0.024)
 
         efficiency = abs(exp_return) / cvar_95 if cvar_95 > 0 else 1.0
-        alpha = (quality_score * 0.3) + (win_rate * 0.4) + (efficiency * 30.0)
+        alpha = (quality_score * w_graham) + (win_rate * w_mc) + (efficiency * w_efficiency)
+
+        # Matriz de penalização setorial aprendida: setores com falha
+        # repetida reduzem a pontuação de Alpha deste perfil.
+        sector_name = asset.get('sector') or 'Geral'
+        sector_penalty = _finite_float(sector_penalties.get(str(sector_name), 1.0), 1.0)
+        alpha *= sector_penalty
 
         ticker_raw = str(asset.get('ticker') or '').strip().upper()
 
@@ -873,11 +918,11 @@ def consolidate_and_split_pipeline(processed_assets: List[Dict[str, Any]], horiz
     }
 
 
-def split_analysis_results(processed_assets: List[Dict[str, Any]], horizon_days: int = 35) -> Dict[str, Any]:
+def split_analysis_results(processed_assets: List[Dict[str, Any]], horizon_days: int = 35, model_weights: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Compatibilidade: delega no motor único de triagem consolidado e devolve as chaves antigas.
     """
-    res = consolidate_and_split_pipeline(processed_assets, horizon_days=horizon_days)
+    res = consolidate_and_split_pipeline(processed_assets, horizon_days=horizon_days, model_weights=model_weights)
     return {
         "top_20": res["top_20"],
         "remaining_analyzed": res["monitoring_pool"],

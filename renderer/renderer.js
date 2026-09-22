@@ -3620,29 +3620,66 @@
     btnReanalisar.querySelector('span').textContent = 'A analisar...';
 
     try {
-      // Reutiliza o mesmo endpoint trade:update para não duplicar IPC
-      const res = await window.api.updateTrades();
-      if (!res || !res.ok) {
-        portfolioStatus.textContent = 'Erro na reanálise: ' + (res ? res.error : 'desconhecido');
+      const api = window.electronAPI || window.api || window.quantAPI;
+
+      // 1) Validação prévia de frescura das cotações locais (offline)
+      if (typeof api.checkMonitoringFreshness === 'function') {
+        const freshness = await api.checkMonitoringFreshness();
+        if (freshness && freshness.isUpdated === false) {
+          const warn = `⚠️ Cotações desatualizadas (Última: ${freshness.maxStoredDate || '—'} | Esperada: ${freshness.expectedDate || '—'}). Por favor, acede à aba 'My List' e clica em 'Mais Recente' para sincronizar antes de reanalisar.`;
+          portfolioStatus.textContent = warn;
+          showToast(warn, 'error', 10000);
+          return;
+        }
+      }
+
+      // 2) Reanálise 100% offline — consulta unicamente o SQLite local (historical_prices)
+      if (typeof api.reanalyzeMonitoringPositions !== 'function') {
+        throw new Error('Canal IPC reanalyzeMonitoringPositions não disponível.');
+      }
+      const res = await api.reanalyzeMonitoringPositions();
+      if (!res || !res.success) {
+        const errMsg = 'Erro na reanálise: ' + (res && res.error ? res.error : 'desconhecido');
+        portfolioStatus.textContent = errMsg;
+        showToast(errMsg, 'error');
         return;
       }
 
-      if (Array.isArray(res.states)) {
-        lastStatesByTicker = {};
-        for (const s of res.states) lastStatesByTicker[s.ticker] = s;
+      // 3) Atualizar tabela e gráficos de desempenho imediatamente
+      lastStatesByTicker = {};
+      const records = res.analytics && Array.isArray(res.analytics.records) ? res.analytics.records : [];
+      for (const r of records) {
+        const entry = Number(r.entry_price);
+        const cur = Number(r.current_price);
+        const sign = String(r.direction || 'COMPRA').toUpperCase() === 'VENDA' ? -1 : 1;
+        const curNum = Number.isFinite(cur) && cur > 0 ? cur : null;
+        const resPct = curNum != null && Number.isFinite(entry) && entry !== 0
+          ? Math.round(((curNum - entry) / entry) * sign * 10000) / 100
+          : (r.pnl_pct != null ? Number(r.pnl_pct) : null);
+        lastStatesByTicker[r.ticker] = {
+          ticker: r.ticker,
+          status: r.status === 'STOP_ATINGIDO' ? 'alerta_stop'
+            : r.status === 'TARGET_ATINGIDO' ? 'alerta_tp'
+            : r.status === 'EXPIRADO' ? 'fechado'
+            : 'manter',
+          preco_atual: curNum,
+          resultado_pct_atual: resPct,
+          distancia_stop_pct: curNum != null && Number(r.stop_loss) > 0
+            ? Math.abs(curNum - Number(r.stop_loss)) / curNum * 100 : null,
+          distancia_tp_pct: curNum != null && Number(r.target_price) > 0
+            ? Math.abs(curNum - Number(r.target_price)) / curNum * 100 : null
+        };
       }
 
-      const alertCount = res.states ? res.states.filter(s => s.status !== 'manter').length : 0;
-      const closedCount = (res.closed && res.closed.length) || 0;
+      await loadPortfolio();
+      if (res.analytics && typeof renderMonitoringDashboard === 'function') {
+        renderMonitoringDashboard(res.analytics);
+      }
 
-      const parts = [];
-      parts.push(`Reanálise concluída em ${res.states ? res.states.length : 0} posição(ões).`);
-      if (closedCount > 0) parts.push(`${closedCount} trade(s) fechado(s).`);
-      if (alertCount > 0) parts.push(`${alertCount} alerta(s) ativo(s).`);
+      const parts = [`Reanálise concluída em ${res.updatedCount} posição(ões).`];
+      if (res.resolvedCount > 0) parts.push(`${res.resolvedCount} saída(s) resolvida(s) (Target/Stop/Expirado).`);
       portfolioStatus.textContent = parts.join(' ');
-
-      // Re-renderizar para aplicar alertas visuais
-      renderPortfolioTable();
+      showToast(`Reanálise offline concluída: ${res.updatedCount} posição(ões) avaliada(s).`, 'success');
     } catch (err) {
       portfolioStatus.textContent = 'Erro: ' + (err.message || String(err));
     } finally {
@@ -3690,6 +3727,9 @@
       }
     } catch (e) {
       console.error('Erro ao carregar dashboard de monitorização:', e);
+    }
+    if (typeof refreshTrainingPanel === 'function') {
+      refreshTrainingPanel();
     }
   }
 
@@ -4052,6 +4092,138 @@
         btnRunMonitoringEval.textContent = '🔄 Avaliar Desempenho e Atualizar Cotações';
       }
     };
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  AUTO-CALIBRAÇÃO & TELEMETRIA DO MODELO (feedback loop)
+  // ═══════════════════════════════════════════════════════════
+  const btnTrainModel = document.getElementById('btn-train-model');
+  let calibrationChartInstance = null;
+
+  // Inicializar ou Atualizar Gráfico de Calibração (Teórico vs Real)
+  function renderCalibrationChart(tierData) {
+    const ctx = document.getElementById('calibrationChart');
+    if (!ctx || typeof Chart === 'undefined') return;
+
+    const labels = ['50-54%', '55-59%', '60-64%', '65-69%', '70%+'];
+    const tierKeys = ['50-54', '55-59', '60-64', '65-69', '70+'];
+    const theoreticalWinRates = [52.5, 57.5, 62.5, 67.5, 75.0];
+
+    const actualWinRates = tierKeys.map((key) => {
+      const d = tierData ? tierData[key] : null;
+      if (!d || !d.total) return 0;
+      return Number(((d.hits / d.total) * 100).toFixed(1));
+    });
+
+    if (calibrationChartInstance) {
+      calibrationChartInstance.destroy();
+    }
+
+    calibrationChartInstance = new Chart(ctx.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Previsão MC Teórica (%)',
+            data: theoreticalWinRates,
+            backgroundColor: 'rgba(100, 116, 139, 0.4)',
+            borderColor: '#64748b',
+            borderWidth: 1
+          },
+          {
+            label: 'Acerto Real Observado (%)',
+            data: actualWinRates,
+            backgroundColor: 'rgba(13, 202, 240, 0.7)',
+            borderColor: '#0dcaf0',
+            borderWidth: 1
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            min: 0,
+            max: 100,
+            ticks: { color: '#8e9aa8', callback: (val) => `${val}%` },
+            grid: { color: '#2c3240' }
+          },
+          x: {
+            ticks: { color: '#8e9aa8' },
+            grid: { display: false }
+          }
+        },
+        plugins: {
+          legend: { labels: { color: '#ffffff', boxWidth: 12 } }
+        }
+      }
+    });
+  }
+
+  function updateTrainingPanel(status) {
+    if (!status) return;
+    const brierEl = document.getElementById('stat-brier');
+    const weightsEl = document.getElementById('stat-weights');
+    const sectorsEl = document.getElementById('stat-sectors');
+    const w = status.weights;
+
+    if (brierEl) {
+      brierEl.textContent = status.brierScore != null
+        ? `${Number(status.brierScore).toFixed(4)} (${Number(status.sampleSize || 0)} trades)`
+        : `${Number(status.sampleSize || 0)} trades (sem treino)`;
+    }
+    if (weightsEl && w) {
+      weightsEl.textContent = `Graham: ${Number(w.graham).toFixed(2)} | MC: ${Number(w.monteCarlo).toFixed(2)} | Efic: ${Number(w.efficiency).toFixed(1)} | Limiar: ${Number(w.minMCThreshold)}%`;
+    }
+    if (sectorsEl) {
+      const penalized = Object.entries(status.sectorPenalties || {})
+        .filter(([, factor]) => Number(factor) < 1.0)
+        .map(([sector, factor]) => `${sector} (-${Math.round((1 - Number(factor)) * 100)}%)`);
+      sectorsEl.textContent = penalized.length > 0 ? penalized.join(', ') : 'Nenhum setor degradado';
+    }
+    if (status.tierCalibration && typeof renderCalibrationChart === 'function') {
+      renderCalibrationChart(status.tierCalibration);
+    }
+  }
+
+  async function refreshTrainingPanel() {
+    try {
+      const api = window.electronAPI || window.api || window.quantAPI;
+      if (!api || typeof api.getModelTrainingStatus !== 'function') return;
+      const res = await api.getModelTrainingStatus();
+      if (res && res.success) updateTrainingPanel(res);
+    } catch (_) { /* painel fica com valores por omissão */ }
+  }
+  window.refreshTrainingPanel = refreshTrainingPanel;
+
+  // Evento de Clique no Botão de Treino
+  if (btnTrainModel) {
+    btnTrainModel.addEventListener('click', async () => {
+      btnTrainModel.disabled = true;
+      const prevLabel = btnTrainModel.innerHTML;
+      btnTrainModel.innerHTML = '⏳ A Calibrar...';
+      try {
+        const api = window.electronAPI || window.api || window.quantAPI;
+        if (!api || typeof api.trainModelCalibration !== 'function') {
+          throw new Error('Canal IPC trainModelCalibration não disponível.');
+        }
+        const res = await api.trainModelCalibration();
+        if (!res || !res.success) {
+          alert(res && res.message ? res.message : 'Falha na comunicação com a base de dados.');
+          return;
+        }
+
+        // Atualizar Indicadores no Ecrã
+        updateTrainingPanel(res);
+      } catch (err) {
+        alert('Erro: ' + (err.message || String(err)));
+      } finally {
+        btnTrainModel.disabled = false;
+        btnTrainModel.innerHTML = prevLabel;
+      }
+    });
   }
 
   // ═══════════════════════════════════════════════════════════

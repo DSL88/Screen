@@ -11,6 +11,7 @@ const { getCountryIndex } = require('./src/data/countryIndexMap');
 const wikipediaScraper = require('./src/services/wikipediaScraper');
 const marketDataService = require('./src/services/marketDataService');
 const { isIncrementalUpToDate, addDays } = require('./src/utils/dateUtils');
+const ModelLearningEngine = require('./src/engine/modelLearningEngine');
 const { createProgressReporter } = require('./src/utils/progressThrottle');
 const { parseFile, importFromCsvFile } = require('./src/importer/historicalImporter');
 const { scanStock } = require('./src/scanner');
@@ -40,6 +41,7 @@ for (const idx of tickerLists.WORLD_INDICES || []) {
 
 let mainWindow = null;
 let db = null;
+let learningEngine = null;
 let scannerWorker = null;
 let simulationWorker = null;
 let activeSimulationRunId = null;
@@ -589,6 +591,11 @@ app.whenReady().then(async () => {
     db = new Database(app.getPath('userData'));
     await db.init();
 
+    // Motor Estatístico Local: regressão logística, Brier Score e penalização
+    // setorial sobre os registos concluídos da monitorização. Reutiliza a
+    // ligação SQLite compartilhada (nunca abre uma segunda conexão em disco).
+    learningEngine = new ModelLearningEngine(db);
+
     // Auditoria e reconciliação global: repõe o MIN(date) real na coluna
     // first_date de todos os ativos ANTES de a UI carregar, para que o
     // "PRIMEIRO REGISTO" do modal e da My List nunca apresente a data de um
@@ -646,6 +653,10 @@ app.whenReady().then(async () => {
     ipcMain.handle('quant:run-full-pipeline', async (_event, payload) => {
       try {
         const enrichedPayload = resolveMyListTickers(payload);
+        // Anexa a última calibração ativa do motor estatístico (se houver).
+        if (learningEngine) {
+          try { enrichedPayload.model_weights = learningEngine.getLatestCalibration(); } catch (_) { /* padrão */ }
+        }
         const result = await PythonBridge.runPipeline('run_full_pipeline', enrichedPayload);
         return { ok: true, data: result };
       } catch (err) {
@@ -656,6 +667,10 @@ app.whenReady().then(async () => {
     ipcMain.handle('execute-screener', async (_event, payload) => {
       try {
         const enrichedPayload = resolveMyListTickers(payload);
+        // Anexa a última calibração ativa do motor estatístico (se houver).
+        if (learningEngine) {
+          try { enrichedPayload.model_weights = learningEngine.getLatestCalibration(); } catch (_) { /* padrão */ }
+        }
         const result = await PythonBridge.runPipeline('run_full_pipeline', enrichedPayload);
         return { ok: true, data: result };
       } catch (err) {
@@ -917,6 +932,93 @@ app.whenReady().then(async () => {
       } catch (err) {
         console.error('Erro na avaliação de monitorização:', err);
         return { success: false, error: err.message };
+      }
+    });
+
+    // Validação prévia de frescura das cotações dos ativos em monitorização.
+    // Compara MAX(date) local (historical_prices) com a última sessão útil esperada.
+    ipcMain.handle('check-monitoring-freshness', async () => {
+      try {
+        if (!db) {
+          return { isUpdated: false, maxStoredDate: null, expectedDate: null, error: 'Base de dados não inicializada.' };
+        }
+        return db.checkMonitoringFreshness();
+      } catch (err) {
+        console.error('Erro em check-monitoring-freshness:', err);
+        return { isUpdated: false, maxStoredDate: null, expectedDate: null, error: err.message };
+      }
+    });
+
+    // REANÁLISE 100% OFFLINE das posições ativas (investment_monitoring_universe).
+    // Consulta unicamente o SQLite local (historical_prices) — sem rede.
+    ipcMain.handle('reanalyze-monitoring-positions', async () => {
+      try {
+        if (!db) {
+          return { success: false, error: 'Base de dados não inicializada.' };
+        }
+        const res = db.evaluateMonitoringAssetsDaily();
+        const analytics = db.getMonitoringAnalytics();
+        return { success: true, ...res, analytics };
+      } catch (err) {
+        console.error('Erro na reanálise offline de posições:', err);
+        return { success: false, error: err.message };
+      }
+    });
+
+    // TREINO E CALIBRAÇÃO DO MODELO (motor estatístico local).
+    // Lê diretamente o SQLite, avalia a calibração de Monte Carlo, calcula a
+    // penalização setorial e otimiza os pesos de Alpha via regressão logística
+    // (gradiente descendente), gravando em model_calibrated_weights.
+    ipcMain.handle('train-model-calibration', async () => {
+      try {
+        if (!learningEngine) {
+          return { success: false, message: 'Motor estatístico não inicializado.' };
+        }
+        return learningEngine.runStatisticalEvaluation(30);
+      } catch (err) {
+        console.error('Erro no treino/calibração do modelo:', err);
+        return { success: false, message: err.message };
+      }
+    });
+
+    // Última calibração ativa para consumo do Scanner e Workstation
+    ipcMain.handle('get-calibrated-weights', async () => {
+      try {
+        if (!learningEngine) {
+          return { weight_graham: 0.3, weight_mc: 0.4, weight_efficiency: 30.0, min_mc_threshold: 50.0, sector_penalties: {} };
+        }
+        return learningEngine.getLatestCalibration();
+      } catch (err) {
+        console.error('Erro em get-calibrated-weights:', err);
+        return { success: false, error: err.message };
+      }
+    });
+
+    // Estado do painel de telemetria (amostra concluída, Brier, pesos e curva
+    // de calibração teórica vs. real para o gráfico no load da aba).
+    ipcMain.handle('get-model-training-status', async () => {
+      try {
+        if (!learningEngine) {
+          return { success: false, sampleSize: 0, weights: null };
+        }
+        const snapshot = learningEngine.getCalibrationSnapshot();
+        const latest = learningEngine.getLatestCalibration();
+        return {
+          success: true,
+          sampleSize: snapshot.sampleSize,
+          brierScore: snapshot.brierScore != null ? snapshot.brierScore : (latest.brier_score != null ? latest.brier_score : null),
+          tierCalibration: snapshot.tierCalibration,
+          weights: {
+            graham: latest.weight_graham,
+            monteCarlo: latest.weight_mc,
+            efficiency: latest.weight_efficiency,
+            minMCThreshold: latest.min_mc_threshold
+          },
+          sectorPenalties: latest.sector_penalties || {}
+        };
+      } catch (err) {
+        console.error('Erro em get-model-training-status:', err);
+        return { success: false, sampleSize: 0, weights: null, error: err.message };
       }
     });
 

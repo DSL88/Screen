@@ -225,10 +225,10 @@ test('Database: Criação de alphaquant_top20_tracker e investment_monitoring_un
 test('Python Engine: consolidação qualificada e wrapper split_analysis_results', () => {
   const pyCode = read('python_engine/run_pipeline.py');
 
-  // Motor canónico de triagem
+  // Motor canónico de triagem (com pesos calibrados do feedback loop)
   assert.match(pyCode, /def consolidate_and_split_pipeline/);
   assert.match(pyCode, /if current_price <= 0:/);
-  assert.match(pyCode, /if win_rate < 50\.0:/);
+  assert.match(pyCode, /if win_rate < min_mc_threshold:/);
   assert.match(pyCode, /"top_20":\s*top_20/);
   assert.match(pyCode, /"monitoring_pool":\s*monitoring_pool/);
   assert.match(pyCode, /"total_qualified_count":\s*len\(qualified_sorted\)/);

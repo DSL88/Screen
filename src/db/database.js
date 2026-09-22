@@ -262,6 +262,18 @@ class DB {
           UNIQUE(ticker, analysis_date)
         );
         CREATE INDEX IF NOT EXISTS idx_monitoring_ticker_date ON investment_monitoring_universe(ticker, analysis_date);
+
+        CREATE TABLE IF NOT EXISTS model_calibrated_weights (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          weight_graham REAL DEFAULT 0.3,
+          weight_mc REAL DEFAULT 0.4,
+          weight_efficiency REAL DEFAULT 30.0,
+          min_mc_threshold REAL DEFAULT 50.0,
+          sector_penalties_json TEXT DEFAULT '{}',
+          brier_score REAL,
+          sample_size INTEGER
+        );
       `);
 
       const cols = this.db.prepare("PRAGMA table_info(historical_signals)").all();
@@ -277,6 +289,16 @@ class DB {
       }
       if (!have.has('close_reason')) {
         this.db.exec('ALTER TABLE historical_signals ADD COLUMN close_reason TEXT');
+      }
+
+      // Migration: telemetria de treino do modelo (motor estatístico local)
+      const monitoringCols = this.db.prepare("PRAGMA table_info(investment_monitoring_universe)").all();
+      const monitoringHave = new Set(monitoringCols.map(c => c.name));
+      if (!monitoringHave.has('expected_return')) {
+        this.db.exec('ALTER TABLE investment_monitoring_universe ADD COLUMN expected_return REAL');
+      }
+      if (!monitoringHave.has('realized_return_pct')) {
+        this.db.exec('ALTER TABLE investment_monitoring_universe ADD COLUMN realized_return_pct REAL');
       }
 
       // Migration: ensure stocks table exists for older databases
@@ -2154,6 +2176,36 @@ class DB {
     };
   }
 
+  /**
+   * Validação de frescura das cotações dos ativos em monitorização (offline).
+   * Compara MAX(date) local dos ativos em investment_monitoring_universe
+   * (histórico em historical_prices) com a última sessão útil esperada.
+   * @returns {{isUpdated: boolean, maxStoredDate: string|null, expectedDate: string}}
+   */
+  checkMonitoringFreshness() {
+    const expectedDate = this.getLastExpectedTradingDay();
+    let row = null;
+    try {
+      row = this.db.prepare(`
+        SELECT MAX(hp.date) as maxStoredDate
+        FROM historical_prices hp
+        WHERE hp.ticker IN (SELECT DISTINCT ticker FROM investment_monitoring_universe)
+      `).get();
+    } catch (_) {
+      row = null;
+    }
+    const maxStoredDate = row && row.maxStoredDate ? String(row.maxStoredDate).slice(0, 10) : null;
+    // Sem ativos em monitorização (ou sem cotações locais): nada está desatualizado.
+    if (!maxStoredDate) {
+      return { isUpdated: true, maxStoredDate: null, expectedDate };
+    }
+    return {
+      isUpdated: maxStoredDate >= expectedDate,
+      maxStoredDate,
+      expectedDate
+    };
+  }
+
   getMyListAssetsSyncStatus(indexFilter = null) {
     // Universo completo auditável = UNION deduplicado de stocks + custom_tickers
     // por UPPER(TRIM(ticker)); stocks tem prioridade para name/index_name.
@@ -2640,11 +2692,11 @@ class DB {
       INSERT INTO investment_monitoring_universe (
         ticker, company_name, country, sector, direction,
         entry_price, target_price, stop_loss, current_price,
-        win_rate_mc, cvar_95, graham_score, alpha_score, analysis_date
+        win_rate_mc, cvar_95, graham_score, alpha_score, analysis_date, expected_return
       ) VALUES (
         @ticker, @company_name, @country, @sector, @direction,
         @current_price, @target_price, @stop_loss, @current_price,
-        @win_rate_mc, @cvar_95, @graham_score, @alpha_score, @date
+        @win_rate_mc, @cvar_95, @graham_score, @alpha_score, @date, @expected_return
       )
       ON CONFLICT(ticker, analysis_date) DO UPDATE SET
         entry_price = excluded.entry_price,
@@ -2655,6 +2707,7 @@ class DB {
         cvar_95 = excluded.cvar_95,
         graham_score = excluded.graham_score,
         alpha_score = excluded.alpha_score,
+        expected_return = excluded.expected_return,
         direction = excluded.direction;
     `);
 
@@ -2679,6 +2732,12 @@ class DB {
         const currentPrice = Number(item.current_price || item.price || item.latest_price || item.entry_price || 0);
         const direction = item.direction || item.signal_direction || 'COMPRA';
         const winRate = Number(item.win_rate_mc ?? item.mc_win_rate ?? item.winRateMC ?? item.win_rate ?? item.win_rate_numeric ?? 50);
+        // Rácio de eficiência do treino: expected_return decitemal reconstruído
+        // do sinal (+4.8% COMPRA / −4.8% VENDA) se o emissor não o enviar.
+        let expectedReturn = Number(item.expected_return);
+        if (!Number.isFinite(expectedReturn)) {
+          expectedReturn = direction === 'VENDA' ? -0.048 : 0.048;
+        }
 
         stmt.run({
           ticker,
@@ -2693,6 +2752,7 @@ class DB {
           cvar_95: Number(item.cvar_95 || item.mc_cvar_95 || 5),
           graham_score: Number(item.graham_score || item.quality_score || 50),
           alpha_score: Number(item.alpha_score || 0),
+          expected_return: expectedReturn,
           date: today
         });
         count++;
@@ -2938,7 +2998,7 @@ class DB {
     `);
     const updateStmt = this.db.prepare(`
       UPDATE investment_monitoring_universe
-      SET current_price = ?, status = ?, exit_date = ?, exit_price = ?, pnl_pct = ?
+      SET current_price = ?, status = ?, exit_date = ?, exit_price = ?, pnl_pct = ?, realized_return_pct = ?
       WHERE id = ?
     `);
 
@@ -2986,7 +3046,7 @@ class DB {
 
         if (prices.length === 0) {
           if (daysPassed >= HORIZON_DAYS) {
-            updateStmt.run(null, 'EXPIRADO', horizonEndDate, null, null, row.id);
+            updateStmt.run(null, 'EXPIRADO', horizonEndDate, null, null, null, row.id);
             updatedCount++;
             resolvedCount++;
           }
@@ -3049,7 +3109,7 @@ class DB {
           pnlPct = Number.isFinite(pnl) ? Math.round(pnl * 100) / 100 : null;
         }
 
-        updateStmt.run(latest.close, status, exitDate, exitPrice, pnlPct, row.id);
+        updateStmt.run(latest.close, status, exitDate, exitPrice, pnlPct, pnlPct, row.id);
         updatedCount++;
         if (status !== 'MONITORIZANDO') resolvedCount++;
       }

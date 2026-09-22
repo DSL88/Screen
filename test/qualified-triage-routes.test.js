@@ -62,16 +62,19 @@ function qualifiedAsset(i, overrides = {}) {
 test('PYTHON estático: consolidate_and_split_pipeline, filtros e chaves canónicas', () => {
   const py = read('python_engine/run_pipeline.py');
 
-  assert.match(py, /def consolidate_and_split_pipeline\(processed_assets: List\[Dict\[str, Any\]\], horizon_days: int = 35\)/);
+  assert.match(py, /def consolidate_and_split_pipeline\(processed_assets: List\[Dict\[str, Any\]\], horizon_days: int = 35, model_weights: Dict\[str, Any\] = None\)/);
+  assert.match(py, /def _extract_model_weights\(params: Dict\[str, Any\]\) -> Dict\[str, Any\]/);
   assert.match(py, /if current_price <= 0:/);
-  assert.match(py, /if win_rate < 50\.0:/);
+  assert.match(py, /if win_rate < min_mc_threshold:/);
+  assert.match(py, /alpha = \(quality_score \* w_graham\) \+ \(win_rate \* w_mc\) \+ \(efficiency \* w_efficiency\)/);
+  assert.match(py, /alpha \*= sector_penalty/);
   assert.match(py, /"top_20":\s*top_20/);
   assert.match(py, /"monitoring_pool":\s*monitoring_pool/);
   assert.match(py, /"total_qualified_count":\s*len\(qualified_sorted\)/);
   assert.match(py, /"monitoring_count":\s*len\(monitoring_pool\)/);
 
-  // Payload do motor usa as chaves novas
-  assert.match(py, /qualified_res = consolidate_and_split_pipeline\(analyzed_assets, horizon_days=horizon_markov\)/);
+  // Payload do motor usa as chaves novas (com pesos calibrados do feedback loop)
+  assert.match(py, /qualified_res = consolidate_and_split_pipeline\(analyzed_assets, horizon_days=horizon_markov, model_weights=_extract_model_weights\(params\)\)/);
   assert.match(py, /"monitoring_pool":\s*qualified_res\["monitoring_pool"\]/);
   assert.match(py, /"monitoring_count":\s*qualified_res\["monitoring_count"\]/);
   assert.match(py, /"total_qualified_count":\s*qualified_res\["total_qualified_count"\]/);
@@ -80,7 +83,7 @@ test('PYTHON estático: consolidate_and_split_pipeline, filtros e chaves canóni
 
   // Wrapper de compatibilidade presente e a delegar na canónica
   assert.match(py, /def split_analysis_results/);
-  assert.match(py, /res = consolidate_and_split_pipeline\(processed_assets, horizon_days=horizon_days\)/);
+  assert.match(py, /res = consolidate_and_split_pipeline\(processed_assets, horizon_days=horizon_days, model_weights=model_weights\)/);
   assert.match(py, /"remaining_analyzed":\s*res\["monitoring_pool"\]/);
   assert.match(py, /"total_analyzed":\s*res\["total_qualified_count"\]/);
 });
