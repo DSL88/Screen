@@ -1065,8 +1065,26 @@ app.whenReady().then(async () => {
 
     ipcMain.handle('update-tracker-prices', async (_event, payload) => {
       try {
-        const result = await PythonBridge.runPipeline('update_tracker_prices', payload || {});
-        return { ok: true, data: result };
+        // 1) Fonte de verdade da Aba 6: avaliador offline em trades.db
+        // (alphaquant_top20_tracker). Persiste TARGET/STOP/EXPIRADO por
+        // (ticker, recommendation_date) para não "desaparecer" amanhã.
+        let local = null;
+        try {
+          if (db && typeof db.evaluateTop20TrackerDaily === 'function') {
+            local = db.evaluateTop20TrackerDaily();
+          }
+        } catch (localErr) {
+          console.error('Erro evaluateTop20TrackerDaily:', localErr);
+        }
+        // 2) Enriquecimento legado (quant_tracker.db via Python, Yahoo).
+        let remote = null;
+        let remoteError = null;
+        try {
+          remote = await PythonBridge.runPipeline('update_tracker_prices', payload || {});
+        } catch (err) {
+          remoteError = err.message;
+        }
+        return { ok: true, data: { local, remote, remoteError } };
       } catch (err) {
         return { ok: false, error: err.message };
       }

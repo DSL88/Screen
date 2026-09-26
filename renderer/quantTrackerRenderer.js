@@ -112,25 +112,59 @@
     return 'Fraca (<50%)';
   }
 
+  function isResolvedTrackerStatus(s) {
+    return s === 'TARGET_ATINGIDO' || s === 'STOP_LOSS_ATINGIDO' || s === 'STOP_ATINGIDO' || s === 'EXPIRADO';
+  }
+
+  function normalizeTrackerDate(v) {
+    if (v == null) return '';
+    return String(v).slice(0, 10);
+  }
+
   function buildDashboardFromTop20(rows, legacy) {
-    const legacyByTicker = new Map();
+    // Join por (ticker, data) — juntar só por ticker misturava coortes
+    // distintas (D vs D+1) e fazia o TARGET "desaparecer" / duplicar.
+    const legacyByKey = new Map();
+    const legacyByTickerResolved = new Map();
     if (legacy && Array.isArray(legacy.items)) {
       for (const item of legacy.items) {
-        const key = String((item && item.ticker) || '').trim().toUpperCase();
-        if (key) legacyByTicker.set(key, item);
+        const t = String((item && item.ticker) || '').trim().toUpperCase();
+        if (!t) continue;
+        const d = normalizeTrackerDate(item.recommendation_date || item.entry_date);
+        if (d) legacyByKey.set(`${t}|${d}`, item);
+        // Fallback: último estado resolvido por ticker (para linhas locais
+        // ainda PENDENTE cujo Python já resolveu noutra coorte).
+        if (isResolvedTrackerStatus(item.status) && !legacyByTickerResolved.has(t)) {
+          legacyByTickerResolved.set(t, item);
+        }
       }
     }
 
     const items = (rows || []).map((row) => {
       const ticker = String(row.ticker || '').trim().toUpperCase();
-      const legacyItem = legacyByTicker.get(ticker) || {};
-      const winRate = Number(row.win_rate_mc || legacyItem.mc_win_rate || 0);
+      const rowDate = normalizeTrackerDate(row.recommendation_date);
+      const legacyItem = (rowDate && legacyByKey.get(`${ticker}|${rowDate}`)) || {};
+      const legacyFallback = legacyByTickerResolved.get(ticker) || {};
+      const winRate = Number(row.win_rate_mc || legacyItem.mc_win_rate || legacyFallback.mc_win_rate || 0);
       const entryPrice = Number(row.entry_price || 0);
-      const currentPrice = Number(legacyItem.current_price || row.current_price || entryPrice);
-      let pnl = legacyItem.realized_pnl_pct;
-      if (pnl == null) pnl = row.pnl_pct;
+      // Preço corrente: fonte local (trades.db, atualizada pelo avaliador
+      // offline) tem prioridade; legado só como complemento.
+      const currentPrice = Number(row.current_price || legacyItem.current_price || legacyFallback.current_price || entryPrice);
+      const stopLoss = Number(row.stop_loss || legacyItem.stop_loss_price || legacyFallback.stop_loss_price || 0);
+      // Estado: resolvido prevalece sobre PENDENTE, de qualquer das fontes.
+      // A linha local (trades.db) é a fonte de verdade da Aba 6.
+      let status = row.status || 'PENDENTE';
+      let exitSrc = row;
+      if (!isResolvedTrackerStatus(status) && isResolvedTrackerStatus(legacyItem.status)) {
+        status = legacyItem.status;
+        exitSrc = legacyItem;
+      } else if (!isResolvedTrackerStatus(status) && isResolvedTrackerStatus(legacyFallback.status)) {
+        status = legacyFallback.status;
+        exitSrc = legacyFallback;
+      }
+      let pnl = exitSrc.pnl_pct;
+      if (pnl == null) pnl = exitSrc.realized_pnl_pct;
       if (pnl == null && entryPrice > 0) pnl = ((currentPrice - entryPrice) / entryPrice) * 100;
-      const stopLoss = Number(row.stop_loss || legacyItem.stop_loss_price || 0);
       return {
         id: row.id,
         ticker,
@@ -144,16 +178,16 @@
         stop_loss: stopLoss,
         mc_win_rate: winRate,
         predicted_win_rate: winRate,
-        mc_tier_label: legacyItem.mc_tier_label || computeTierLabel(winRate),
+        mc_tier_label: legacyItem.mc_tier_label || legacyFallback.mc_tier_label || computeTierLabel(winRate),
         alpha_score: Number(row.alpha_score || 0),
         horizon_days: 35,
-        status: legacyItem.status || row.status || 'PENDENTE',
-        exit_price: legacyItem.exit_price != null ? legacyItem.exit_price : row.exit_price,
-        exit_date: legacyItem.exit_date || row.exit_date || null,
+        status,
+        exit_price: exitSrc.exit_price != null ? exitSrc.exit_price : row.exit_price,
+        exit_date: exitSrc.exit_date || row.exit_date || null,
         realized_pnl_pct: Number(pnl || 0),
-        max_favorable_excursion: Number(legacyItem.max_favorable_excursion || 0),
-        max_adverse_excursion: Number(legacyItem.max_adverse_excursion || 0),
-        days_to_exit: legacyItem.days_to_exit != null ? legacyItem.days_to_exit : null
+        max_favorable_excursion: Number(legacyItem.max_favorable_excursion || legacyFallback.max_favorable_excursion || 0),
+        max_adverse_excursion: Number(legacyItem.max_adverse_excursion || legacyFallback.max_adverse_excursion || 0),
+        days_to_exit: exitSrc.days_to_exit != null ? exitSrc.days_to_exit : null
       };
     });
 

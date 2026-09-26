@@ -375,7 +375,15 @@ test('DB analytics: KPIs, avgPnl de fechados, tiers (54.99 vs 55.0) e setores', 
       pendingCount: 2,
       expiredCount: 1,
       hitRate: 50,
-      avgPnl: 4.07 // (10 - 5 + 8 - 4 + 6 + 1.5 + 12) / 7; S3 (pnl null) é excluído
+      avgPnl: 4.07, // (10 - 5 + 8 - 4 + 6 + 1.5 + 12) / 7; S3 (pnl null) é excluído
+      profitFactor: 4.17, // 37.5 / 9
+      expectancy: 4.07,
+      avgDaysToTarget: 0, // sem exit_date na fixture
+      recentHitRate: 0, // coorte 2026-01-05 fora dos 30d
+      recentClosed: 0,
+      sampleProgress: 27, // 8/30
+      calibrationStatus: 'Em recolha — 8/30 fechados para treino',
+      trainMinSample: 30
     });
 
     const tiers = Object.fromEntries(analytics.tierAccuracy.map((t) => [t.tier, t]));
@@ -429,7 +437,15 @@ test('DB analytics: universo vazio devolve KPIs a zeros e listas vazias', { skip
       pendingCount: 0,
       expiredCount: 0,
       hitRate: 0,
-      avgPnl: 0
+      avgPnl: 0,
+      profitFactor: 0,
+      expectancy: 0,
+      avgDaysToTarget: 0,
+      recentHitRate: 0,
+      recentClosed: 0,
+      sampleProgress: 0,
+      calibrationStatus: 'Em recolha — 0/30 fechados para treino',
+      trainMinSample: 30
     });
     assert.equal(analytics.tierAccuracy.length, 5);
     assert.equal(analytics.tierAccuracy.every((t) => t.totalCount === 0 && t.resolvedCount === 0 && t.realHitRate === 0), true);

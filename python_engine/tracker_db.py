@@ -242,12 +242,30 @@ def evaluate_tracked_assets(db_path: Optional[str] = None) -> Dict[str, Any]:
 
     for row in pending:
         rec_id, ticker_symbol, entry_p, target_p, stop_p, entry_d, horizon = row
-        
+
         try:
             ticker_data = yf.Ticker(ticker_symbol)
             hist = ticker_data.history(period="1mo")
         except Exception:
             continue
+
+        if hist.empty:
+            continue
+
+        # Janela determinística: só candles com data >= recommendation_date.
+        # Sem isto, um pico anterior à entrada (ainda dentro de 1mo) gerava um
+        # TARGET falso que depois "desaparecia" ao deslizar a janela.
+        try:
+            entry_ts = pd.Timestamp(entry_d).normalize()
+            # hist tem índice tz-aware em alguns tickers; normalizar para comparar
+            hist_idx = pd.DatetimeIndex(pd.to_datetime(hist.index).tz_localize(None)).normalize()
+            hist = hist.copy()
+            hist.index = hist_idx
+            hist_since = hist[hist.index >= entry_ts]
+            if not hist_since.empty:
+                hist = hist_since
+        except Exception:
+            pass
 
         if hist.empty:
             continue

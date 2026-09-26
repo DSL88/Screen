@@ -46,6 +46,35 @@ function canonicalTicker(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+// Regra canónica do Workstation quantitativo: SL 2.4% / TP 4.8%, sensível à
+// direção (VENDA inverte). Usada pela aba Monitorização para que o modelo
+// avalie exatamente os mesmos níveis da análise.
+const MONITOR_SL_PCT = 0.024;
+const MONITOR_TP_PCT = 0.048;
+
+function canonicalMonitoringLevels(entryPrice, direction, targetPrice, stopLoss) {
+  const entry = Number(entryPrice);
+  const dir = String(direction || 'COMPRA').trim().toUpperCase();
+  const isSell = dir.includes('VENDA') || dir.includes('SELL') || dir.includes('SHORT');
+  if (!Number.isFinite(entry) || entry <= 0) {
+    return { target: Number(targetPrice) || 0, stop: Number(stopLoss) || 0, direction: isSell ? 'VENDA' : 'COMPRA' };
+  }
+  const canonicalTarget = isSell ? entry * (1 - MONITOR_TP_PCT) : entry * (1 + MONITOR_TP_PCT);
+  const canonicalStop = isSell ? entry * (1 + MONITOR_SL_PCT) : entry * (1 - MONITOR_SL_PCT);
+  let target = Number(targetPrice);
+  let stop = Number(stopLoss);
+  const validTarget = Number.isFinite(target) && target > 0;
+  const validStop = Number.isFinite(stop) && stop > 0;
+  // Validação direcional: rejeita níveis inconsistentes (ex.: COMPRA com
+  // target <= entry) e recalcula pelos 2.4%/4.8% canónicos.
+  const targetOk = validTarget && (isSell ? target < entry : target > entry);
+  const stopOk = validStop && (isSell ? stop > entry : stop < entry);
+  if (!targetOk) target = canonicalTarget;
+  if (!stopOk) stop = canonicalStop;
+  const round2 = (v) => Math.round(Number(v) * 100) / 100;
+  return { target: round2(target), stop: round2(stop), direction: isSell ? 'VENDA' : 'COMPRA' };
+}
+
 const DEFAULT_PARAMS = {
   edge_threshold: 0.15,
   markov_window: 150,
@@ -2571,6 +2600,8 @@ class DB {
         graham_score = excluded.graham_score,
         alpha_score = excluded.alpha_score,
         direction = excluded.direction
+      WHERE alphaquant_history_tracker.status IS NULL
+         OR alphaquant_history_tracker.status IN ('PENDENTE', 'PENDING', 'MONITORIZANDO')
     `);
 
     const runBatchTransaction = this.db.transaction((items) => {
@@ -2612,6 +2643,10 @@ class DB {
   _saveTop20Strict(top20List) {
     if (!Array.isArray(top20List) || top20List.length === 0) return 0;
     const today = new Date().toISOString().split('T')[0];
+    // NOTA: o WHERE final torna o UPSERT não-destrutivo — uma linha já
+    // resolvida (TARGET/STOP/EXPIRADO) é imutável; só PENDENTE é atualizável.
+    // Sem isto, regravar a coleção no mesmo dia/dia seguinte corrompia o
+    // histórico e fazia o estado "desaparecer".
     const stmt = this.db.prepare(`
       INSERT INTO alphaquant_top20_tracker (
         ticker, company_name, country, sector, direction,
@@ -2630,7 +2665,10 @@ class DB {
         win_rate_mc = excluded.win_rate_mc,
         cvar_95 = excluded.cvar_95,
         alpha_score = excluded.alpha_score,
-        direction = excluded.direction;
+        direction = excluded.direction
+      WHERE alphaquant_top20_tracker.status IS NULL
+         OR alphaquant_top20_tracker.status = 'PENDENTE'
+         OR alphaquant_top20_tracker.status = 'MONITORIZANDO';
     `);
 
     const tx = this.db.transaction((items) => {
@@ -2638,15 +2676,22 @@ class DB {
       // Corte rigoroso: a Aba 6 nunca recebe mais do que os 20 melhores.
       for (const item of items.slice(0, 20)) {
         if (!item || !item.ticker) continue;
+        const entryPx = Number(item.current_price || item.price || item.latest_price || 0);
+        const lv = canonicalMonitoringLevels(
+          entryPx,
+          item.direction || item.signal_direction || 'COMPRA',
+          item.target_price ?? item.take_profit ?? item.target,
+          item.stop_loss ?? item.stopLoss ?? item.stop
+        );
         stmt.run({
           ticker: String(item.ticker).trim().toUpperCase(),
           company_name: item.company_name || item.name || item.ticker,
           country: item.country || 'Global',
           sector: item.sector || 'Geral',
-          direction: item.direction || item.signal_direction || 'COMPRA',
-          current_price: Number(item.current_price || item.price || item.latest_price || 0),
-          target_price: Number(item.target_price || 0),
-          stop_loss: Number(item.stop_loss || 0),
+          direction: lv.direction,
+          current_price: entryPx,
+          target_price: lv.target,
+          stop_loss: lv.stop,
           win_rate_mc: Number(item.win_rate_mc || item.winRateMC || 50),
           cvar_95: Number(item.cvar_95 || 5),
           alpha_score: Number(item.alpha_score || 0),
@@ -2730,8 +2775,19 @@ class DB {
         if (!ticker) continue;
 
         const currentPrice = Number(item.current_price || item.price || item.latest_price || item.entry_price || 0);
-        const direction = item.direction || item.signal_direction || 'COMPRA';
+        const rawDirection = item.direction || item.signal_direction || 'COMPRA';
         const winRate = Number(item.win_rate_mc ?? item.mc_win_rate ?? item.winRateMC ?? item.win_rate ?? item.win_rate_numeric ?? 50);
+        // Níveis canónicos do Workstation: SL 2.4% / TP 4.8% (direção-aware).
+        // Se o emissor não enviar target/stop válidos, recalcula — sem isto o
+        // avaliador nunca resolve (hasTarget/hasStop falsos) e o modelo não
+        // aprende onde acertou/falhou.
+        const levels = canonicalMonitoringLevels(
+          currentPrice,
+          rawDirection,
+          item.target_price ?? item.take_profit ?? item.target,
+          item.stop_loss ?? item.stopLoss ?? item.stop
+        );
+        const direction = levels.direction;
         // Rácio de eficiência do treino: expected_return decitemal reconstruído
         // do sinal (+4.8% COMPRA / −4.8% VENDA) se o emissor não o enviar.
         let expectedReturn = Number(item.expected_return);
@@ -2746,8 +2802,8 @@ class DB {
           sector: item.sector || 'Geral',
           direction,
           current_price: currentPrice,
-          target_price: Number(item.target_price || 0),
-          stop_loss: Number(item.stop_loss || 0),
+          target_price: levels.target,
+          stop_loss: levels.stop,
           win_rate_mc: winRate,
           cvar_95: Number(item.cvar_95 || item.mc_cvar_95 || 5),
           graham_score: Number(item.graham_score || item.quality_score || 50),
@@ -3121,6 +3177,163 @@ class DB {
   }
 
   /**
+   * Avaliação diária dos ativos do Tracker (Aba 6 — alphaquant_top20_tracker).
+   * Fonte de verdade da aba: persiste TARGET_ATINGIDO / STOP_LOSS_ATINGIDO /
+   * EXPIRADO em trades.db (SQLite local, 100% offline) para que o estado não
+   * "desapareça" no dia seguinte.
+   *
+   * Regras:
+   * - Só avalia linhas com status PENDENTE (idempotente; resolvidas são imutáveis).
+   * - Usa apenas candles com date >= recommendation_date e <= recommendation_date+35.
+   * - Primeiro toque cronológico prevalece (target antes de stop no mesmo dia
+   *   resolve TARGET para COMPRA e para VENDA, como no motor de monitorização).
+   * - Atualiza sempre current_price com o último close disponível.
+   * @returns {{updatedCount: number, resolvedCount: number}}
+   */
+  evaluateTop20TrackerDaily() {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayMs = Date.parse(todayStr);
+    const HORIZON_DAYS = 35;
+    const pricesSince = this.db.prepare(`
+      SELECT date, high, low, close FROM historical_prices
+      WHERE ticker IN (?, ?) AND date >= ? AND date <= ?
+      ORDER BY date ASC
+    `);
+    const updateStmt = this.db.prepare(`
+      UPDATE alphaquant_top20_tracker
+      SET current_price = ?, status = ?, exit_date = ?, exit_price = ?, pnl_pct = ?
+      WHERE id = ?
+    `);
+
+    const tx = this.db.transaction(() => {
+      let rows = [];
+      try {
+        rows = this.db.prepare(
+          "SELECT * FROM alphaquant_top20_tracker WHERE status IS NULL OR status IN ('PENDENTE', 'MONITORIZANDO', 'PENDING')"
+        ).all();
+      } catch (_) {
+        return { updatedCount: 0, resolvedCount: 0 };
+      }
+      let updatedCount = 0;
+      let resolvedCount = 0;
+
+      for (const row of rows) {
+        let recDate = row.recommendation_date;
+        let recMs = Date.parse(recDate);
+        if (!Number.isFinite(recMs) && row.created_at) {
+          recDate = String(row.created_at).split(' ')[0];
+          recMs = Date.parse(recDate);
+        }
+        if (!Number.isFinite(recMs)) continue;
+
+        const direction = String(row.direction || '').trim().toUpperCase();
+        if (direction !== 'COMPRA' && direction !== 'VENDA') continue;
+
+        const horizonEndDate = new Date(recMs + HORIZON_DAYS * 86400000).toISOString().split('T')[0];
+        const recDay = String(recDate).split('T')[0].split(' ')[0];
+        let rawPrices = [];
+        try {
+          rawPrices = pricesSince.all(
+            row.ticker,
+            String(row.ticker || '').trim().toUpperCase(),
+            recDay,
+            horizonEndDate
+          );
+        } catch (_) {
+          rawPrices = [];
+        }
+
+        const prices = [];
+        for (const p of rawPrices) {
+          const close = Number(p.close);
+          if (!Number.isFinite(close) || close <= 0) continue;
+          prices.push({
+            date: p.date,
+            high: Number(p.high) > 0 ? Number(p.high) : close,
+            low: Number(p.low) > 0 ? Number(p.low) : close,
+            close
+          });
+        }
+
+        const daysPassed = Math.floor((todayMs - recMs) / 86400000);
+
+        if (prices.length === 0) {
+          if (daysPassed >= HORIZON_DAYS) {
+            updateStmt.run(null, 'EXPIRADO', horizonEndDate, null, null, row.id);
+            updatedCount++;
+            resolvedCount++;
+          }
+          continue;
+        }
+
+        const latest = prices[prices.length - 1];
+        const entry = Number(row.entry_price);
+        const target = Number(row.target_price);
+        const stop = Number(row.stop_loss);
+        const hasTarget = Number.isFinite(target) && target > 0;
+        const hasStop = Number.isFinite(stop) && stop > 0;
+
+        let status = 'PENDENTE';
+        let exitDate = null;
+        let exitPrice = null;
+        let pnlPct = null;
+
+        for (const p of prices) {
+          if (direction === 'COMPRA') {
+            if (hasTarget && p.high >= target) {
+              status = 'TARGET_ATINGIDO';
+              exitPrice = target;
+              exitDate = p.date;
+              break;
+            }
+            if (hasStop && p.low <= stop) {
+              status = 'STOP_LOSS_ATINGIDO';
+              exitPrice = stop;
+              exitDate = p.date;
+              break;
+            }
+          } else {
+            if (hasTarget && p.low <= target) {
+              status = 'TARGET_ATINGIDO';
+              exitPrice = target;
+              exitDate = p.date;
+              break;
+            }
+            if (hasStop && p.high >= stop) {
+              status = 'STOP_LOSS_ATINGIDO';
+              exitPrice = stop;
+              exitDate = p.date;
+              break;
+            }
+          }
+        }
+
+        if (status === 'PENDENTE' && daysPassed >= HORIZON_DAYS) {
+          status = 'EXPIRADO';
+          exitPrice = latest.close;
+          exitDate = latest.date;
+        }
+
+        if (status !== 'PENDENTE' && Number.isFinite(entry) && entry !== 0) {
+          const exit = Number(exitPrice);
+          const pnl = direction === 'COMPRA'
+            ? ((exit - entry) / entry) * 100
+            : ((entry - exit) / entry) * 100;
+          pnlPct = Number.isFinite(pnl) ? Math.round(pnl * 100) / 100 : null;
+        }
+
+        updateStmt.run(latest.close, status, exitDate, exitPrice, pnlPct, row.id);
+        updatedCount++;
+        if (status !== 'PENDENTE') resolvedCount++;
+      }
+
+      return { updatedCount, resolvedCount };
+    });
+
+    return tx();
+  }
+
+  /**
    * Função de Leitura Global para a Aba de Monitorização
    * Lê da tabela investment_monitoring_universe e computa os KPIs.
    */
@@ -3208,6 +3421,62 @@ class DB {
       ? Math.round((closedPnl.reduce((sum, v) => sum + v, 0) / closedPnl.length) * 100) / 100
       : 0;
 
+    // Métricas de auto-evolução: profit factor, expectancy, dias até target,
+    // breakdown por direção e recência — sem isto o modelo não sabe onde
+    // falha/acerta. Campos novos, sem quebrar o contrato existente.
+    const gains = closedPnl.filter((v) => v > 0).reduce((s, v) => s + v, 0);
+    const lossesAbs = closedPnl.filter((v) => v < 0).reduce((s, v) => s + Math.abs(v), 0);
+    const profitFactor = lossesAbs > 0
+      ? Math.round((gains / lossesAbs) * 100) / 100
+      : (gains > 0 ? Math.round(gains * 100) / 100 : 0);
+    const expectancy = avgPnl;
+
+    let daysSum = 0;
+    let daysN = 0;
+    for (const r of allRecords) {
+      if (r.status !== 'TARGET_ATINGIDO') continue;
+      if (!r.analysis_date || !r.exit_date) continue;
+      const d = Math.round((Date.parse(String(r.exit_date).slice(0, 10)) - Date.parse(String(r.analysis_date).slice(0, 10))) / 86400000);
+      if (Number.isFinite(d) && d >= 0 && d <= 60) { daysSum += d; daysN++; }
+    }
+    const avgDaysToTarget = daysN > 0 ? Math.round((daysSum / daysN) * 10) / 10 : 0;
+
+    const dirStats = {
+      COMPRA: { total: 0, targets: 0, stops: 0 },
+      VENDA: { total: 0, targets: 0, stops: 0 }
+    };
+    for (const r of allRecords) {
+      const d = String(r.direction || 'COMPRA').trim().toUpperCase().includes('VENDA') ? 'VENDA' : 'COMPRA';
+      dirStats[d].total++;
+      if (r.status === 'TARGET_ATINGIDO') dirStats[d].targets++;
+      else if (r.status === 'STOP_ATINGIDO') dirStats[d].stops++;
+    }
+    const directionBreakdown = Object.entries(dirStats).map(([direction, s]) => {
+      const resolved = s.targets + s.stops;
+      return {
+        direction,
+        ...s,
+        hitRate: resolved > 0 ? Math.round((s.targets / resolved) * 1000) / 10 : 0
+      };
+    });
+
+    const todayMs = Date.parse(new Date().toISOString().slice(0, 10));
+    const recent = allRecords.filter((r) => {
+      const ms = Date.parse(String(r.analysis_date || '').slice(0, 10));
+      return Number.isFinite(ms) && (todayMs - ms) <= 30 * 86400000;
+    });
+    const recentTargets = recent.filter((r) => r.status === 'TARGET_ATINGIDO').length;
+    const recentStops = recent.filter((r) => r.status === 'STOP_ATINGIDO').length;
+    const recentExpired = recent.filter((r) => r.status === 'EXPIRADO').length;
+    const recentClosed = recentTargets + recentStops + recentExpired;
+    const recentHitRate = recentClosed > 0 ? Math.round((recentTargets / recentClosed) * 1000) / 10 : 0;
+
+    const TRAIN_MIN_SAMPLE = 30;
+    const sampleProgress = Math.min(100, Math.round((closedCount / TRAIN_MIN_SAMPLE) * 100));
+    const calibrationStatus = closedCount >= TRAIN_MIN_SAMPLE
+      ? (hitRate >= 50 ? 'Calibrado — amostra suficiente' : 'Amostra suficiente — rever calibração')
+      : `Em recolha — ${closedCount}/${TRAIN_MIN_SAMPLE} fechados para treino`;
+
     const tierDefinitions = [
       { tier: '50-54%', min: 50, max: 55 },
       { tier: '55-59%', min: 55, max: 60 },
@@ -3272,8 +3541,19 @@ class DB {
         pendingCount,
         expiredCount,
         hitRate,
-        avgPnl
+        avgPnl,
+        profitFactor,
+        expectancy,
+        avgDaysToTarget,
+        recentHitRate,
+        recentClosed,
+        sampleProgress,
+        calibrationStatus,
+        trainMinSample: TRAIN_MIN_SAMPLE
       },
+      rule: { slPct: MONITOR_SL_PCT * 100, tpPct: MONITOR_TP_PCT * 100, horizonDays: 35 },
+      directionBreakdown,
+      recent: { total: recent.length, closed: recentClosed, targets: recentTargets, stops: recentStops, expired: recentExpired, hitRate: recentHitRate },
       tierAccuracy,
       sectorFailureAnalysis,
       records,
@@ -3318,13 +3598,22 @@ class DB {
           @tier_label, @alpha_score, @entry_price, 0.0, 0.0, 'PENDENTE'
         )
       `) : null;
-      // Idempotência: uma nova gravação do mesmo ticker/dia substitui a linha
-      // anterior em vez de acumular duplicados no tracker (o esquema Python não
-      // tem UNIQUE(ticker, recommendation_date)).
+      // Idempotência segura: uma nova gravação do mesmo ticker/dia só substitui
+      // a linha anterior se ela ainda estiver PENDENTE. Linhas já resolvidas
+      // (TARGET/STOP/EXPIRADO) são imutáveis — sem isto, regravar a coleção
+      // fazia o estado "desaparecer" no próprio dia.
       const deleteTrackedDay = hasTracked ? trackerDb.prepare(`
         DELETE FROM tracked_recommendations
         WHERE UPPER(TRIM(ticker)) = ?
           AND COALESCE(recommendation_date, entry_date) = ?
+          AND (status IS NULL OR status IN ('PENDENTE', 'PENDING', 'MONITORIZANDO'))
+      `) : null;
+      const checkResolvedDay = hasTracked ? trackerDb.prepare(`
+        SELECT id FROM tracked_recommendations
+        WHERE UPPER(TRIM(ticker)) = ?
+          AND COALESCE(recommendation_date, entry_date) = ?
+          AND status NOT IN ('PENDENTE', 'PENDING', 'MONITORIZANDO')
+        LIMIT 1
       `) : null;
 
       const tx = trackerDb.transaction((items) => {
@@ -3333,7 +3622,9 @@ class DB {
           const tierLabel = winRate >= 70 ? 'Extrema (70%+)' : winRate >= 65 ? 'Muito Forte (65-69%)' : winRate >= 60 ? 'Forte (60-64%)' : winRate >= 55 ? 'Favorável (55-59%)' : winRate >= 50 ? 'Moderada (50-54%)' : 'Fraca (<50%)';
           if (insertTracked) {
             try {
-              deleteTrackedDay.run(String(item.ticker).trim().toUpperCase(), todayStr);
+              const tickerKey = String(item.ticker).trim().toUpperCase();
+              if (checkResolvedDay && checkResolvedDay.get(tickerKey, todayStr)) continue;
+              deleteTrackedDay.run(tickerKey, todayStr);
               insertTracked.run({
                 ticker: item.ticker,
                 sector: item.sector || 'Geral',
@@ -3381,24 +3672,34 @@ class DB {
 
       if (topTickers.length > 0) {
         const placeholders = topTickers.map(() => '?').join(', ');
+        // Só PENDENTE de tickers fora do Top20 é podado; resolvidos
+        // (TARGET/STOP/EXPIRADO) são audit trail e nunca apagados — sem isto
+        // o TARGET de ontem "desaparecia" quando o ticker rodava para fora.
         result.removedHistory = this.db.prepare(`
           DELETE FROM alphaquant_history_tracker
-          WHERE UPPER(TRIM(ticker)) NOT IN (${placeholders})
+          WHERE (status IS NULL OR status IN ('PENDENTE', 'PENDING', 'MONITORIZANDO'))
+            AND UPPER(TRIM(ticker)) NOT IN (${placeholders})
         `).run(...topTickers).changes || 0;
-        // Remove duplicados históricos do mesmo ticker (mantém o registo mais recente).
+        // Dedup apenas de PENDENTE duplicado no mesmo (ticker, data);
+        // coortes distintas do mesmo ticker são trades distintos e mantêm-se.
         this.db.prepare(`
           DELETE FROM alphaquant_history_tracker
-          WHERE id NOT IN (
-            SELECT MAX(id) FROM alphaquant_history_tracker GROUP BY UPPER(TRIM(ticker))
-          )
+          WHERE (status IS NULL OR status IN ('PENDENTE', 'PENDING', 'MONITORIZANDO'))
+            AND id NOT IN (
+              SELECT MAX(id) FROM alphaquant_history_tracker GROUP BY UPPER(TRIM(ticker)), recommendation_date
+            )
         `).run();
       } else {
+        // Fallback sem Top20: podar só PENDENTE além dos 20 mais recentes;
+        // resolvidos preservados.
         result.removedHistory = this.db.prepare(`
           DELETE FROM alphaquant_history_tracker
-          WHERE id NOT IN (
-            SELECT id FROM alphaquant_history_tracker
-            ORDER BY id DESC LIMIT 20
-          )
+          WHERE (status IS NULL OR status IN ('PENDENTE', 'PENDING', 'MONITORIZANDO'))
+            AND id NOT IN (
+              SELECT id FROM alphaquant_history_tracker
+              WHERE (status IS NULL OR status IN ('PENDENTE', 'PENDING', 'MONITORIZANDO'))
+              ORDER BY id DESC LIMIT 20
+            )
         `).run().changes || 0;
       }
     } catch (_) {
@@ -3423,12 +3724,17 @@ class DB {
       trackerDb = new Database(quantTrackerPath);
       const hasTracked = trackerDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tracked_recommendations'").get();
       if (!hasTracked) return 0;
+      // NUNCA apagar linhas resolvidas (TARGET/STOP/EXPIRADO) — são o audit
+      // trail. Só PENDENTE excedentário é podado, com limite generoso (500)
+      // para não "desaparecer" o dia anterior após nova coleção de 20.
       removed = trackerDb.prepare(`
         DELETE FROM tracked_recommendations
-        WHERE id NOT IN (
-          SELECT id FROM tracked_recommendations
-          ORDER BY id DESC LIMIT 20
-        )
+        WHERE (status IS NULL OR status IN ('PENDENTE', 'PENDING', 'MONITORIZANDO'))
+          AND id NOT IN (
+            SELECT id FROM tracked_recommendations
+            WHERE (status IS NULL OR status IN ('PENDENTE', 'PENDING', 'MONITORIZANDO'))
+            ORDER BY id DESC LIMIT 500
+          )
       `).run().changes || 0;
       if (removed > 0) {
         console.log(`[DB Hygiene] ${removed} registo(s) excedente(s) removidos de tracked_recommendations (quant_tracker.db).`);

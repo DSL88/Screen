@@ -3734,7 +3734,7 @@
   }
 
   function renderMonitoringDashboard(analytics) {
-    const { kpis, tierAccuracy, sectorFailureAnalysis, records } = analytics || {};
+    const { kpis, tierAccuracy, sectorFailureAnalysis, records, rule, directionBreakdown, recent } = analytics || {};
     if (!kpis) return;
 
     const setText = (id, value) => {
@@ -3746,6 +3746,44 @@
     setText('mon-kpi-targets', kpis.targetHits);
     setText('mon-kpi-stops', kpis.stopHits);
     setText('mon-kpi-pnl', `${Number(kpis.avgPnl || 0) >= 0 ? '+' : ''}${Number(kpis.avgPnl || 0).toFixed(2)}%`);
+
+    // Segunda linha de auto-evolução (tolerante: só preenche se o elemento existir).
+    if (kpis.profitFactor != null) {
+      const pf = Number(kpis.profitFactor);
+      setText('mon-kpi-profit-factor', Number.isFinite(pf) ? `${pf.toFixed(2)}x` : '--');
+      const pfEl = document.getElementById('mon-kpi-profit-factor');
+      if (pfEl) pfEl.style.color = pf >= 1.5 ? '#34d399' : pf >= 1.0 ? '#38bdf8' : '#f87171';
+    }
+    if (kpis.avgDaysToTarget != null) {
+      setText('mon-kpi-avg-days', Number(kpis.avgDaysToTarget) > 0 ? `${Number(kpis.avgDaysToTarget).toFixed(1)} d` : '--');
+    }
+    if (recent || kpis.recentHitRate != null) {
+      const rh = recent ? recent.hitRate : kpis.recentHitRate;
+      const rc = recent ? recent.closed : kpis.recentClosed;
+      setText('mon-kpi-recent', rc > 0 ? `${Number(rh || 0).toFixed(1)}% (${rc})` : '--');
+    }
+    if (Array.isArray(directionBreakdown)) {
+      const compra = directionBreakdown.find((d) => d.direction === 'COMPRA');
+      const venda = directionBreakdown.find((d) => d.direction === 'VENDA');
+      const fmt = (d) => (d ? `${d.direction} ${Number(d.hitRate || 0).toFixed(1)}% (${d.targets}/${d.targets + d.stops || 0})` : '--');
+      setText('mon-direction-breakdown', `COMPRA ${compra ? `${Number(compra.hitRate || 0).toFixed(1)}%` : '--'} • VENDA ${venda ? `${Number(venda.hitRate || 0).toFixed(1)}%` : '--'}`);
+    }
+    if (Array.isArray(sectorFailureAnalysis) && sectorFailureAnalysis.length > 0) {
+      const worst = sectorFailureAnalysis[0];
+      const best = sectorFailureAnalysis.slice().sort((a, b) => (a.failRate || 0) - (b.failRate || 0))[0];
+      setText('mon-sector-insight', `⚠️ ${worst.sector} ${Number(worst.failRate || 0).toFixed(1)}% stops • ✅ ${best.sector} ${Number(best.failRate || 0).toFixed(1)}% stops`);
+    } else {
+      setText('mon-sector-insight', 'Sem dados');
+    }
+    // Banner da regra canónica + progresso da amostra para treino.
+    if (rule) {
+      setText('mon-rule-badge', `🎯 TP +${Number(rule.tpPct || 4.8).toFixed(1)}%  •  🛑 SL −${Number(rule.slPct || 2.4).toFixed(1)}%  •  ⏱ H ${rule.horizonDays || 35}d`);
+    }
+    if (kpis.closedCount != null) {
+      const need = kpis.trainMinSample || 30;
+      setText('mon-sample-progress', `Amostra treino: ${kpis.closedCount}/${need}`);
+      setText('mon-calibration-status', kpis.calibrationStatus || 'Em recolha');
+    }
 
     if (typeof Chart !== 'undefined') {
       const ctxOutcomes = document.getElementById('chart-monitoring-outcomes');
@@ -3866,7 +3904,7 @@
   }
 
   function renderMonitoringCharts(analytics) {
-    const { kpis, tierAccuracy, sectorFailureAnalysis } = analytics || {};
+    const { kpis, tierAccuracy, sectorFailureAnalysis, rule, directionBreakdown, recent } = analytics || {};
     if (!kpis) return;
 
     const setText = (id, value) => {
@@ -3875,6 +3913,34 @@
     };
     if (kpis.avgPnl != null) {
       setText('mon-kpi-pnl', `${Number(kpis.avgPnl || 0) >= 0 ? '+' : ''}${Number(kpis.avgPnl || 0).toFixed(2)}%`);
+    }
+    // Espelha os extras do dashboard (sem re-render da tabela).
+    if (typeof renderMonitoringDashboard === 'function') {
+      try {
+        // Só KPIs/insight — o dashboard completo já trata tabela+gráficos
+        // quando chamado via loadMonitoringTab; aqui garantimos paridade.
+        if (kpis.profitFactor != null) {
+          setText('mon-kpi-profit-factor', `${Number(kpis.profitFactor).toFixed(2)}x`);
+        }
+        if (kpis.avgDaysToTarget != null) {
+          setText('mon-kpi-avg-days', Number(kpis.avgDaysToTarget) > 0 ? `${Number(kpis.avgDaysToTarget).toFixed(1)} d` : '--');
+        }
+        if (recent || kpis.recentHitRate != null) {
+          const rh = recent ? recent.hitRate : kpis.recentHitRate;
+          const rc = recent ? recent.closed : kpis.recentClosed;
+          setText('mon-kpi-recent', rc > 0 ? `${Number(rh || 0).toFixed(1)}% (${rc})` : '--');
+        }
+        if (Array.isArray(directionBreakdown)) {
+          const compra = directionBreakdown.find((d) => d.direction === 'COMPRA');
+          const venda = directionBreakdown.find((d) => d.direction === 'VENDA');
+          setText('mon-direction-breakdown', `COMPRA ${compra ? `${Number(compra.hitRate || 0).toFixed(1)}%` : '--'} • VENDA ${venda ? `${Number(venda.hitRate || 0).toFixed(1)}%` : '--'}`);
+        }
+        if (rule) setText('mon-rule-badge', `🎯 TP +${Number(rule.tpPct || 4.8).toFixed(1)}%  •  🛑 SL −${Number(rule.slPct || 2.4).toFixed(1)}%  •  ⏱ H ${rule.horizonDays || 35}d`);
+        if (kpis.closedCount != null) {
+          setText('mon-sample-progress', `Amostra treino: ${kpis.closedCount}/${kpis.trainMinSample || 30}`);
+          setText('mon-calibration-status', kpis.calibrationStatus || 'Em recolha');
+        }
+      } catch (_) { /* extras são acessórios */ }
     }
 
     if (typeof Chart !== 'undefined') {

@@ -670,6 +670,11 @@
               <span style="font-size: 12px; color: #94a3b8;">
                 Auditoria empírica contínua das hipóteses de Monte Carlo (MC &gt;= 50%) para auto-aperfeiçoamento do algoritmo
               </span>
+              <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
+                <span id="mon-rule-badge" style="font-size: 11px; font-weight: 700; color: #34d399; background: #34d39918; border: 1px solid #34d39944; padding: 3px 10px; border-radius: 9999px;">🎯 TP +4.8% &nbsp;•&nbsp; 🛑 SL −2.4% &nbsp;•&nbsp; ⏱ H 35d</span>
+                <span id="mon-sample-progress" style="font-size: 11px; font-weight: 600; color: #38bdf8; background: #38bdf818; border: 1px solid #38bdf844; padding: 3px 10px; border-radius: 9999px;">Amostra treino: 0/30</span>
+                <span id="mon-calibration-status" style="font-size: 11px; font-weight: 600; color: #fbbf24; background: #fbbf2418; border: 1px solid #fbbf2444; padding: 3px 10px; border-radius: 9999px;">Em recolha</span>
+              </div>
             </div>
 
             <button id="btn-run-monitoring-eval" type="button" class="btn-pill" style="background: #0284c7; color: #ffffff; border: 1px solid #38bdf8; padding: 8px 18px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px;">
@@ -714,7 +719,7 @@
           </div>
 
           <!-- Cards de KPIs do Topo -->
-          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 24px;">
+          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 14px;">
             <div style="background: #141923; padding: 14px 18px; border-radius: 10px; border: 1px solid #232b3e;">
               <div style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Total Monitorizado</div>
               <div id="mon-kpi-total" style="font-size: 24px; font-weight: 700; color: #38bdf8; margin-top: 4px;">0</div>
@@ -734,6 +739,30 @@
             <div style="background: #141923; padding: 14px 18px; border-radius: 10px; border: 1px solid #232b3e;">
               <div style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Stops Atingidos (Falhas)</div>
               <div id="mon-kpi-stops" style="font-size: 24px; font-weight: 700; color: #f87171; margin-top: 4px;">0</div>
+            </div>
+          </div>
+
+          <!-- Segunda linha: auto-evolução (profit factor, dias, 30d, direção) -->
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px;">
+            <div style="background: #141923; padding: 12px 18px; border-radius: 10px; border: 1px solid #232b3e;">
+              <div style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Profit Factor (ganhos/perdas)</div>
+              <div id="mon-kpi-profit-factor" style="font-size: 22px; font-weight: 700; color: #38bdf8; margin-top: 4px;">--</div>
+              <div style="font-size: 10px; color: #64748b;">&gt;=1.5 saudável • &lt;1.0 em perda</div>
+            </div>
+            <div style="background: #141923; padding: 12px 18px; border-radius: 10px; border: 1px solid #232b3e;">
+              <div style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Dias médios até Target</div>
+              <div id="mon-kpi-avg-days" style="font-size: 22px; font-weight: 700; color: #e2e8f0; margin-top: 4px;">--</div>
+              <div style="font-size: 10px; color: #64748b;">Horizonte H 35 dias</div>
+            </div>
+            <div style="background: #141923; padding: 12px 18px; border-radius: 10px; border: 1px solid #232b3e;">
+              <div style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Acerto 30 dias / COMPRA–VENDA</div>
+              <div id="mon-kpi-recent" style="font-size: 22px; font-weight: 700; color: #10b981; margin-top: 4px;">--</div>
+              <div id="mon-direction-breakdown" style="font-size: 10px; color: #64748b;">COMPRA -- • VENDA --</div>
+            </div>
+            <div style="background: #141923; padding: 12px 18px; border-radius: 10px; border: 1px solid #232b3e;">
+              <div style="font-size: 11px; color: #8a99ad; text-transform: uppercase;">Onde falha / onde acerta</div>
+              <div id="mon-sector-insight" style="font-size: 13px; font-weight: 600; color: #fbbf24; margin-top: 6px;">Sem dados</div>
+              <div style="font-size: 10px; color: #64748b;">Setor com mais stops vs mais targets</div>
             </div>
           </div>
 

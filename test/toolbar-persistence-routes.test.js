@@ -330,8 +330,10 @@ test('DB fallbacks: name/price/signal_direction/winRateMC/quality_score são ace
     assert.equal(row.alpha_score, 33);
     assert.equal(row.country, 'Global');
     assert.equal(row.sector, 'Geral');
-    assert.equal(row.target_price, 0);
-    assert.equal(row.stop_loss, 0);
+    // Níveis canónicos do Workstation (SL 2.4% / TP 4.8%, VENDA inverte):
+    // 12.5 VENDA -> TP 11.9 / SL 12.8 (antes: 0/0, nunca resolvia).
+    assert.equal(row.target_price, 11.9);
+    assert.equal(row.stop_loss, 12.8);
     assert.equal(row.cvar_95, 5);
     assert.equal(row.status, 'MONITORIZANDO');
   } finally {
