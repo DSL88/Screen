@@ -221,6 +221,8 @@ async function runWorkstationSimulation(options) {
     return p;
   }
 
+  const assetMap = new Map(assets.map(a => [a.ticker, a]));
+
   function openPosition(asset, i, sig) {
     const c = asset.candles[i];
     const entryRaw = Number.isFinite(c.open) ? c.open : c.close;
@@ -236,13 +238,15 @@ async function runWorkstationSimulation(options) {
     const riskAmount = lastEquity * (cfg.riskPerTradePct / 100);
     let shares = Math.floor(riskAmount / Math.max(Math.abs(entry - slPrice), 1e-9));
     if (shares <= 0) return;
+    const unitCost = entry * (1 + commission);
+    const maxShares = Math.floor(cash / Math.max(unitCost, 1e-9));
+    shares = Math.min(shares, maxShares);
+    if (shares <= 0) return;
     if (sig.side === 'LONG') {
-      const unitCost = entry * (1 + commission);
-      shares = Math.min(shares, Math.floor(cash / Math.max(unitCost, 1e-9)));
-      if (shares <= 0) return;
       cash -= shares * unitCost;
     } else {
-      cash += shares * entry * (1 - commission);
+      // Posição vendida exige margem colateral de 100% do nocional + custos
+      cash -= shares * unitCost;
     }
     positions.set(asset.ticker, {
       ticker: asset.ticker, name: asset.name, side: sig.side, entryPrice: entry,
@@ -257,6 +261,8 @@ async function runWorkstationSimulation(options) {
     const pos = positions.get(asset.ticker);
     if (!pos) return;
     const bar = asset.candles[i];
+    // Evita lookahead bias: gestão de saída avaliada apenas a partir da barra posterior à entrada
+    if (pos.entryDate === bar.date) return;
     const sign = pos.side === 'LONG' ? 1 : -1;
     const favPct = ((sign * (bar.high - pos.entryPrice)) / pos.entryPrice) * 100;
     const advPct = ((sign * (bar.low - pos.entryPrice)) / pos.entryPrice) * 100;
@@ -289,9 +295,13 @@ async function runWorkstationSimulation(options) {
     const exit = pos.side === 'LONG' ? exitRaw * (1 - slip) : exitRaw * (1 + slip);
     const sign = pos.side === 'LONG' ? 1 : -1;
     const profitPct = pos.entryPrice > 0 ? ((exit - pos.entryPrice) / pos.entryPrice) * sign * 100 : 0;
-    if (pos.side === 'LONG') cash += pos.shares * exit * (1 - commission);
-    else cash -= pos.shares * exit * (1 + commission);
     const profit = sign * pos.shares * (exit - pos.entryPrice) - commission * pos.shares * (pos.entryPrice + exit);
+    if (pos.side === 'LONG') {
+      cash += pos.shares * exit * (1 - commission);
+    } else {
+      const unitCost = pos.entryPrice * (1 + commission);
+      cash += pos.shares * unitCost + profit;
+    }
     // fechar MFE/MAE no bar de saída
     const bar = asset ? asset.candles[i] : null;
     if (bar) {
@@ -370,9 +380,15 @@ async function runWorkstationSimulation(options) {
       // marcação na mercado no fecho do dia
       let eq = cash;
       for (const pos of positions.values()) {
-        const a = assets.find(x => x.ticker === pos.ticker);
+        const a = assetMap.get(pos.ticker);
         const last = a ? a.candles[Math.min(ptrOf.get(a.ticker), a.endIdx)].close : pos.entryPrice;
-        eq += pos.side === 'LONG' ? pos.shares * last : -pos.shares * last;
+        if (pos.side === 'LONG') {
+          eq += pos.shares * last;
+        } else {
+          const unitCost = pos.entryPrice * (1 + commission);
+          const unrealizedProfit = -1 * pos.shares * (last - pos.entryPrice) - commission * pos.shares * (pos.entryPrice + last);
+          eq += pos.shares * unitCost + unrealizedProfit;
+        }
       }
       equityCurve.push({ date, value: round2(eq) });
       lastEquity = eq;
@@ -380,14 +396,14 @@ async function runWorkstationSimulation(options) {
 
     // ─ FECHO por limite de horizonte H no fim do bloco ─
     for (const [tk] of Array.from(positions.entries())) {
-      const a = assets.find(x => x.ticker === tk);
+      const a = assetMap.get(tk);
       const pos = positions.get(tk);
       if (pos && pos.entryDate <= blockEnd) {
         // só fecha por horizonte se ainda estiver aberto no fim do bloco
       }
     }
     for (const pos of Array.from(positions.values())) {
-      const a = assets.find(x => x.ticker === pos.ticker);
+      const a = assetMap.get(pos.ticker);
       const lastIdx = a ? Math.min(ptrOf.get(a.ticker), a.endIdx) : null;
       if (a && lastIdx != null) closePosition(pos, a.candles[lastIdx].close, 'Limite H', a.candles[lastIdx].date, lastIdx, a);
     }

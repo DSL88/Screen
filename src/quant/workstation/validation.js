@@ -170,12 +170,10 @@ function validateStrategy(dailyReturns, { nGroups = 5, kTestGroups = 2, nTrials 
     oosSharpes.push([sharpeRatio(test.map(i => r[i]))]);
     nCombos++;
   }
-  const oosFlat = [];
-  for (const { test } of cpcvSplit(r.length, { nGroups, kTestGroups })) {
-    for (const i of test) oosFlat.push(r[i]);
-  }
   const meanOos = mean(oosSharpes.map(x => x[0]));
-  const dsr = deflatedSharpeRatio(oosFlat.length > 1 ? oosFlat : r, nTrials);
+  // DSR avaliado sobre a série amostral efetiva r (T observações únicas) com penalização de múltiplos ensaios nTrials,
+  // sem quadruplicar artificialmente a amostra através de dobras combinatórias repetidas.
+  const dsr = deflatedSharpeRatio(r, nTrials);
   // C4: PBO exige ≥2 estratégias por combinação. Com uma única
   // estratégia a matriz IS/OOS é degenerada e o PBO não é
   // estimável — devolve null em vez de fabricar 0.

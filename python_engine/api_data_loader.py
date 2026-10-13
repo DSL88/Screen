@@ -97,6 +97,8 @@ def get_cached_data(
             cached_data_str, ts_quotes, ts_fund = row
             if cached_data_str:
                 data = json.loads(cached_data_str)
+                if data.get("is_synthetic"):
+                    return None
                 now = time.time()
                 ts_q = ts_quotes or 0.0
                 ts_f = ts_fund or ts_q
@@ -125,6 +127,8 @@ def get_cached_data(
 
 def save_to_cache(ticker: str, data: dict, db_path: str = DB_FILE) -> None:
     """Guarda os dados obtidos da API no cache local com timestamps individuais."""
+    if not isinstance(data, dict) or data.get("is_synthetic"):
+        return
     try:
         init_db(db_path)
         conn = _get_cache_conn(db_path)
@@ -219,17 +223,13 @@ def fetch_single_asset_api(
         else:
             hist = ticker.history(period="1y")
             if hist is None or hist.empty or len(hist) < 20 or 'Close' not in hist.columns:
-                fallback = _build_synthetic_asset(ticker_clean)
-                save_to_cache(ticker_clean, fallback, db_path=db_path)
-                return fallback
+                return _build_synthetic_asset(ticker_clean)
 
             prices = [round(float(p), 4) for p in hist['Close'].dropna().tolist()]
             volumes = [int(v) for v in hist['Volume'].fillna(0).tolist()] if 'Volume' in hist.columns else [1000000] * len(prices)
 
             if len(prices) < 20:
-                fallback = _build_synthetic_asset(ticker_clean)
-                save_to_cache(ticker_clean, fallback, db_path=db_path)
-                return fallback
+                return _build_synthetic_asset(ticker_clean)
 
             current_price = info.get('currentPrice') or info.get('previousClose') or info.get('regularMarketPrice') or prices[-1]
 
@@ -318,9 +318,7 @@ def fetch_single_asset_api(
         return asset_data
 
     except Exception:
-        fallback = _build_synthetic_asset(ticker_clean)
-        save_to_cache(ticker_clean, fallback, db_path=db_path)
-        return fallback
+        return _build_synthetic_asset(ticker_clean)
 
 
 def fetch_all_assets_parallel(

@@ -76,25 +76,18 @@ def compute_vif_dataframe(df_features: pd.DataFrame) -> pd.DataFrame:
     values = clean_df.values
     for i in range(clean_df.shape[1]):
         val = np.nan
-        if variance_inflation_factor is not None:
-            try:
-                val = variance_inflation_factor(values, i)
-            except Exception:
-                val = np.nan
-        if np.isnan(val):
-            # Fallback robust calculation using linear regression R^2
-            try:
-                y = values[:, i]
-                X = np.delete(values, i, axis=1)
-                lr = LinearRegression(fit_intercept=True)
-                lr.fit(X, y)
-                r_sq = lr.score(X, y)
-                if r_sq >= 0.999999:
-                    val = 1000.0
-                else:
-                    val = float(1.0 / (1.0 - r_sq))
-            except Exception:
-                val = np.nan
+        try:
+            y = values[:, i]
+            X = np.delete(values, i, axis=1)
+            lr = LinearRegression(fit_intercept=True)
+            lr.fit(X, y)
+            r_sq = lr.score(X, y)
+            if r_sq >= 0.999999:
+                val = 1000.0
+            else:
+                val = float(1.0 / max(1e-12, 1.0 - r_sq))
+        except Exception:
+            val = np.nan
         vif_values.append(val)
 
     vif_data["VIF"] = vif_values

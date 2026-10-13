@@ -328,23 +328,46 @@ function bollingerBands(closes, period = 30, mult = 2.0) {
 //  Rolling VWAP – Volume Weighted Average Price
 // ═══════════════════════════════════════════════════════════
 function calculateRollingVWAP(candles, period = 20) {
-  const n = candles.length;
+  const n = candles ? candles.length : 0;
   const out = new Array(n).fill(null);
   if (n < period || period <= 0) return out;
 
-  for (let i = period - 1; i < n; i++) {
-    let sumTPV = 0;
-    let sumVol = 0;
-    for (let j = i - period + 1; j <= i; j++) {
-      const high = Number(candles[j].high);
-      const low = Number(candles[j].low);
-      const close = Number(candles[j].close);
-      const volume = Number(candles[j].volume);
-      if (!Number.isFinite(volume) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) continue;
-      const tp = (high + low + close) / 3;
-      sumTPV += tp * volume;
-      sumVol += volume;
+  let sumTPV = 0;
+  let sumVol = 0;
+
+  for (let i = 0; i < period; i++) {
+    const c = candles[i];
+    const high = Number(c && c.high);
+    const low = Number(c && c.low);
+    const close = Number(c && c.close);
+    const volume = Number(c && c.volume);
+    if (!Number.isFinite(volume) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) continue;
+    sumTPV += ((high + low + close) / 3) * volume;
+    sumVol += volume;
+  }
+  if (sumVol > 0) out[period - 1] = sumTPV / sumVol;
+
+  for (let i = period; i < n; i++) {
+    const cIn = candles[i];
+    const hIn = Number(cIn && cIn.high);
+    const lIn = Number(cIn && cIn.low);
+    const clIn = Number(cIn && cIn.close);
+    const vIn = Number(cIn && cIn.volume);
+    if (Number.isFinite(vIn) && Number.isFinite(hIn) && Number.isFinite(lIn) && Number.isFinite(clIn)) {
+      sumTPV += ((hIn + lIn + clIn) / 3) * vIn;
+      sumVol += vIn;
     }
+
+    const cOut = candles[i - period];
+    const hOut = Number(cOut && cOut.high);
+    const lOut = Number(cOut && cOut.low);
+    const clOut = Number(cOut && cOut.close);
+    const vOut = Number(cOut && cOut.volume);
+    if (Number.isFinite(vOut) && Number.isFinite(hOut) && Number.isFinite(lOut) && Number.isFinite(clOut)) {
+      sumTPV -= ((hOut + lOut + clOut) / 3) * vOut;
+      sumVol -= vOut;
+    }
+
     if (sumVol > 0) {
       out[i] = sumTPV / sumVol;
     }

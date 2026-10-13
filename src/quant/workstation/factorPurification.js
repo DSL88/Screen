@@ -76,8 +76,9 @@ function computeVIF(columns) {
     const valid = X.every(row => row.every(Number.isFinite)) && y.every(Number.isFinite);
     if (!valid) { out.push({ feature: names[idx], vif: NaN }); continue; }
     const res = ols(X, y);
-    let vif = NaN;
-    if (res) vif = res.r2 >= 0.999999 ? 1000 : 1 / (1 - res.r2);
+    // Se a regressão falhar por matriz singular (colinearidade estrita) ou R2 ~ 1, atribui VIF máximo (1000)
+    let vif = 1000;
+    if (res) vif = res.r2 >= 0.999999 ? 1000 : 1 / Math.max(1e-12, 1 - res.r2);
     out.push({ feature: names[idx], vif: round2(vif) });
   }
   return out;
@@ -89,9 +90,13 @@ function selectPurifiedFeatures(columns, threshold = 5.0) {
   let current = { ...columns };
   const removed = [];
   while (Object.keys(current).length >= 2) {
-    const vifs = computeVIF(current).filter(v => Number.isFinite(v.vif));
-    if (vifs.length === 0) break;
-    const worst = vifs.reduce((a, b) => (b.vif > a.vif ? b : a));
+    const vifs = computeVIF(current);
+    const validVifs = vifs.map(v => ({
+      feature: v.feature,
+      vif: Number.isFinite(v.vif) ? v.vif : 1000.0
+    }));
+    if (validVifs.length === 0) break;
+    const worst = validVifs.reduce((a, b) => (b.vif > a.vif ? b : a));
     if (worst.vif < threshold) break;
     removed.push({ feature: worst.feature, vif: worst.vif });
     const next = { ...current };

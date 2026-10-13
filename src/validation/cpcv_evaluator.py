@@ -43,12 +43,13 @@ def compute_deflated_sharpe_ratio(
     if T < 2:
         return 0.0
 
-    sr_hat = compute_sharpe_ratio(arr, annualization=annualization)
+    # Per-period (non-annualized) Sharpe ratio to match observation frequency of T and sr_std
+    sr_hat = compute_sharpe_ratio(arr, annualization=1.0)
     s_ret = pd.Series(arr)
     sk = float(s_ret.skew()) if len(s_ret) > 2 else 0.0
     kurt = float(s_ret.kurtosis() + 3) if len(s_ret) > 3 else 3.0  # Curtose total (não excedente)
 
-    # Erro padrão do Rácio de Sharpe ajustado à não-normalidade
+    # Erro padrão do Rácio de Sharpe ajustado à não-normalidade (López de Prado & Bailey 2014)
     denom_var = 1.0 - sk * sr_hat + ((kurt - 1.0) / 4.0) * (sr_hat ** 2)
     if denom_var <= 0:
         denom_var = 1e-8

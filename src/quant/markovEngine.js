@@ -260,6 +260,41 @@ function forecast(M, currentState, h = HORIZON) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Forecast de 2ª ordem: propaga distribuição condicional ao
+//  par de estados recente (prevState, currentState) h passos
+// ═══════════════════════════════════════════════════════════
+function forecastOrder2(M2, prevState, currentState, h = HORIZON) {
+  if (prevState < 0 || currentState < 0 || !M2 || M2.length === 0) return null;
+  const N = M2.length;
+  let pairDist = Array.from({ length: N }, () => new Array(N).fill(0));
+  pairDist[prevState][currentState] = 1;
+
+  for (let step = 0; step < h; step++) {
+    const nextPairDist = Array.from({ length: N }, () => new Array(N).fill(0));
+    for (let p = 0; p < N; p++) {
+      for (let c = 0; c < N; c++) {
+        const prob = pairDist[p][c];
+        if (prob <= 0) continue;
+        const row = M2[p] && M2[p][c];
+        if (!row) continue;
+        for (let next = 0; next < N; next++) {
+          nextPairDist[c][next] += prob * row[next];
+        }
+      }
+    }
+    pairDist = nextPairDist;
+  }
+
+  const out = new Array(N).fill(0);
+  for (let p = 0; p < N; p++) {
+    for (let c = 0; c < N; c++) {
+      out[c] += pairDist[p][c];
+    }
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Mapa de retornos por estado (ida para o Monte Carlo)
 //  Tamanho dimensionado pelo espaço de estado escolhido.
 // ═══════════════════════════════════════════════════════════
@@ -389,7 +424,15 @@ function analyzeSeries(candles, params = {}) {
 
   const lastState = states[lastIdx];
   const prevState = states[lastIdx - 1];
-  const dist = forecast(M1, lastState, horizon);
+
+  let transitionMatrix = M1;
+  let dist = null;
+  if (markovOrder === 2 && prevState >= 0 && lastState >= 0) {
+    transitionMatrix = buildTransitionMatrixOrder2(states, window, stateSpace);
+    dist = forecastOrder2(transitionMatrix, prevState, lastState, horizon);
+  } else {
+    dist = forecast(M1, lastState, horizon);
+  }
 
   // ── Probabilidades: pBull, pBear ──────────────────────────
   let pBull = 0;
@@ -464,9 +507,9 @@ function analyzeSeries(candles, params = {}) {
   }
 
   // Matriz exposta ao Monte Carlo: 2D (1ª ordem) ou 3D (2ª ordem)
-  const transitionMatrix = (markovOrder === 2)
-    ? buildTransitionMatrixOrder2(states, window, stateSpace)
-    : M1;
+  if (markovOrder === 2 && transitionMatrix === M1) {
+    transitionMatrix = buildTransitionMatrixOrder2(states, window, stateSpace);
+  }
 
   return {
     ticker: candles[lastIdx]?.ticker,
@@ -610,5 +653,7 @@ module.exports = {
   isBullishState,
   isBearishState,
   isBullishStateInSpace,
-  isBearishStateInSpace
+  isBearishStateInSpace,
+  forecast,
+  forecastOrder2
 };
